@@ -2,132 +2,131 @@
 
 > Centralized visibility, troubleshooting, and fleet operations for DASH-compliant devices.
 
-DashCenter is an operations platform for environments that run one or many DASH-capable DPUs or appliances. It uses the same DASH object model and API vocabulary as the programming plane, then adds fleet-wide visibility, object inspection, packet/flow reasoning, state reconciliation, ENI mobility diagnostics, health analysis, and evidence collection in one place.[cite:36][cite:43][cite:45][cite:50]
+DashCenter is an operations platform for environments that run one or many DASH-capable DPUs or appliances. It uses the same DASH object model and API vocabulary as the programming plane, then adds fleet-wide visibility, object inspection, packet/flow reasoning, state reconciliation, ENI mobility diagnostics, health analysis, and evidence collection in one place.
 
 ## Why DashCenter
 
-DASH already defines a structured model spanning northbound APIs, DASH APP_DB, orchestration, SAI realization, and STATE_DB programmed status, which makes it possible to build a true cross-layer diagnostics and operations plane instead of relying on disconnected logs, counters, and vendor-specific debug tools.[cite:36][cite:45]
+**DASHCenter** is a distributed, multi-tenant state orchestrator and telemetry accumulator designed specifically for SmartNIC and Data Processing Unit (DPU) clusters running the **Disaggregated API for SONiC Hosts (DASH)**.
 
-DashCenter is built for production operators who need to answer questions like:
+Think of it as the control room and diagnostic hub for your infrastructure edge. Instead of managing, debugging, and tracing stateful cloud network parameters on a per-card basis using disjointed commands, DASHCenter aggregates the operational states of your entire DPU fleet into a single unified dashboard.
 
-- What objects exist for this ENI, VNET, tenant, or workload?[cite:45]
-- Why did this packet match, redirect, or drop?[cite:36]
-- What path did this flow take through the DPU?[cite:36]
-- Is the configured state fully realized on the device?[cite:45]
-- Is an ENI ready to migrate to another DPU, and what flows are still active?[cite:127][cite:130]
-- Which DASH devices in the fleet are degraded right now?[cite:50]
+---
 
-## What it provides
+### The Paradigm Shift: Why DASHCenter?
 
-### Central service
+Traditional network tools are built for standard Layer 3 stateless routing. DPUs operating on the DASH pipeline handle massive, highly scaled stateful operations directly in hardware—managing millions of concurrent connections, massive Access Control List (ACL) tag matrices, and nested Elastic Network Interface (ENI) virtual routing topologies.
 
-DashCenter is designed as a central service that manages one or many DASH-compliant devices from a single control point. Operators connect to DashCenter instead of logging into each device independently, which makes it suitable for both single-node operations and fleet-scale environments.[cite:50][cite:141]
+When a packet mysteriously vanishes or a hardware configuration drifts out of sync in production, traditional tools leave operators blind. DASHCenter addresses this challenge by providing a central engine to aggregate, validate, and analyze real-time packet transformations across all nodes simultaneously.
 
-### `dashctl` CLI
+---
 
-The companion CLI, `dashctl`, provides a kubectl-style operator experience for querying and debugging objects, flows, and fleet state from a terminal. Commands are object-aware, scriptable, and work consistently across one device or many devices.[cite:136][cite:149]
+---
 
-### Cross-layer diagnostics
+Good catch. The previous view compressed the appliance tier into a single block, which obscured how **DASHCenter** manages a scaled-out fleet of DPUs simultaneously.
 
-DashCenter correlates DASH northbound objects, APP_DB, STATE_DB, SAI or vendor realization, packet/flow evidence, and platform health into one normalized view. This enables explain-match, trace-flow, reconcile-state, blast-radius analysis, and ENI mobility diagnostics using the same object model as the production programming plane.[cite:36][cite:43][cite:45][cite:50]
+To fix this, here is the diagram that explicitly shows the **1-to-Many distributed architecture**. It capture block diagram on how the system can manage multiple DASH appliances (DPU 01 through DPU 10).
 
-## Core capabilities
-
-| Capability | What it does |
-|---|---|
-| Get object | Inspect ENIs, VNETs, ACLs, routes, mappings, services, and runtime state in one normalized view.[cite:45] |
-| Explain match | Show why a packet or flow matched a given DASH policy/path, including winning rule and failure point.[cite:36] |
-| Trace flow | Show the expected and observed path of traffic through the DPU and related DASH objects.[cite:36] |
-| Reconcile state | Compare intended/configured state against APP_DB, STATE_DB, and runtime realization.[cite:45] |
-| ENI mobility | Build ENI migration bundles, show flow ownership, check readiness, and monitor drain state.[cite:127][cite:130] |
-| Fleet visibility | View health, findings, and degradation across many DASH-compliant devices from one place.[cite:50][cite:141] |
-| Evidence collection | Generate support bundles with snapshots, findings, logs, and flow/path context for RCA.[cite:50][cite:151] |
-
-## Architecture at a glance
-
-DashCenter is built around a central analysis service with pluggable collectors and adapters. The service reads DASH-facing APIs and runtime data sources, normalizes them into a canonical object graph, then serves diagnostics workflows to CLI, API, and UI consumers.[cite:36][cite:43][cite:45][cite:50]
-
-```text
-+------------------------------+
-|          dashctl CLI         |
-+--------------+---------------+
-               |
-               v
-+------------------------------+
-|         DashCenter API       |
-|   gRPC / REST / streaming    |
-+--------------+---------------+
-               |
-               v
-+------------------------------+
-|  Correlation + Analysis Core |
-|  - object graph              |
-|  - explain match             |
-|  - trace flow                |
-|  - reconcile state           |
-|  - ENI mobility checks       |
-+--------------+---------------+
-               |
-      +--------+---------+-------------------+
-      |                  |                   |
-      v                  v                   v
-+-----------+     +-------------+     +-------------+
-| DASH API  |     | APP/STATEDB |     | Vendor / HW |
-+-----------+     +-------------+     +-------------+
+```
+==================================================================================================
+                                      USER INTERACTION LAYER
+==================================================================================================
+                                    +---------------------------+
+                                    |    dashctl CLI Client     |
+                                    | (Configured Context Layer)|
+                                    +-------------+-------------+
+                                                  |
+                                                  | Aggregated Multi-Node Queries
+                                                  v (REST / gRPC API Calls)
+==================================================================================================
+                                    DASHCenter MANAGEMENT SUITE
+==================================================================================================
++------------------------------------------------------------------------------------------------+
+|                                      clidemon API Daemon                                       |
+|                                                                                                |
+|     +-------------------------------------+      +---------------------------------------+     |
+|     |         API Request Engine          |      |        State Aggregator Core          |     |
+|     |  - Resolves multi-device filters    |      |  - Thread Pool Manager                |     |
+|     |  - Executes cross-plane traces      |      |  - Schema Normalizer                  |     |
+|     +------------------+------------------+      +-------------------+-------------------+     |
+|                        |                                             ^                         |
+|                        | Fast Cache Reads                            | Standardized Writes     |
+|                        v                                             |                         |
+|     +--------------------------------------------------------------------------------------+   |
+|     |           Centralized Persistence & TimeSeries Cache (Redis Stack)                   |   |
+|     |   [Indexes by Appliance ID: dpu-01, dpu-02, ... dpu-10 to separate state tables]     |   |
+|     +--------------------------------------------------------------------------------------+   |
+|                                                  ^                                             |
+|          +---------------------------------------+---------------------------------------+     |
+|          |  Concurrent Ingestion Workers (Async Polling & Push Notification Streams)     |     |
+|          |                                                                               |     |
+|          v Channel 01                            v Channel 02                            v Channel 10
++----------+---------------------------------------+---------------------------------------+-----+
+           | (gNMI / GRPC)                   | (gNMI / GRPC)                   | (gNMI / GRPC)
+           |                                       |                                       |
+==================================================================================================
+                                  DISTRIBUTED DASH APPLIANCE FLEET
+==================================================================================================
++-----------------------+              +-----------------------+              +-----------------------+
+|  DASH Appliance 01    |              |  DASH Appliance 02    |              |  DASH Appliance 10    |
+|                       |              |                       |              |                       |
+| +-------------------+ |              | +-------------------+ |              | +-------------------+ |
+| | Local Probe Agent | |              | | Local Probe Agent | |              | | Local Probe Agent | |
+| +---------+---------+ |              | +---------+---------+ |              | +---------+---------+ |
+|           |           |              |           |           |              |           |           |
+|           v           |              |           v           |              |           v           |
+| +-------------------+ |              | +-------------------+ |              | +-------------------+ |
+| |  SONiC Databases  | |              | |  SONiC Databases  | |              | |  SONiC Databases  | |
+| | (APP_/ASIC_/STATE)| |              | | (APP_/ASIC_/STATE)| |              | | (APP_/ASIC_/STATE)| |
+| +---------+---------+ |              | +---------+---------+ |              | +---------+---------+ |
+|           |           |              |           |           |              |           |           |
+|           v           |              |           v           |              |           v           |
+| +-------------------+ |              | +-------------------+ |              | +-------------------+ |
+| | DASH SAI Hardware | |              | | DASH SAI Hardware | |              | | DASH SAI Hardware | |
+| | P4 Packet Pipeline| |              | | P4 Packet Pipeline| |              | | P4 Packet Pipeline| |
+| +-------------------+ |              | +-------------------+ |              | +-------------------+ |
++-----------------------+              +-----------------------+              +-----------------------+
 ```
 
-## CLI examples
+---
 
-### Inspect an object
+### Key Multi-Node Management Mechanics
 
-```bash
-dashctl get eni eni-100
-```
+1. **Partitioned Storage:** Inside the central database, data is partitioned by append keys mapping to individual appliances (e.g., dpu-01:DASH_ENI_TABLE vs. dpu-10:DASH_ENI_TABLE). This prevents collision when different appliances use matching internal layout parameters.
+2. **Decoupled Concurrency:** The Aggregator Core handles a dedicated pool of network channels. If DASH Appliance 02 encounters a slow control plane or drops offline, its corresponding worker thread handles timeouts independently, protecting the data collection flow from the remaining healthy nodes.
 
-Returns the ENI, its VNET, attached ACLs, route dependencies, meter/service bindings, realization status, and current health findings.[cite:45]
 
-### Explain a packet match
+3. **Scatter-Gather API Logic:** When you run a cross-fabric query like dashctl get enis --all-devices, the API engine gathers data locally from the unified persistence cache instead of executing 10 individual live SSH or gNMI calls down to the hardware. This satisfies our 500ms responsiveness constraint.
 
-```bash
-dashctl explain match --src 10.1.1.10 --dst 10.2.2.20 --proto tcp --dport 443 --device dpu-a
-```
+---
 
-Shows inferred ENI, matched ACL stage/rule, selected route or mapping, meter decision, and final forwarding or drop action.[cite:36]
+### Core Structural Features
 
-### Trace a flow
+* **Kubernetes-Like Operations (dashctl):** Built to mimic the seamless declarative style of cloud-native systems. Operators log into the central suite and execute simple, unified commands like dashctl get enis --all-devices or dashctl monitor drops -w rather than jumping across fragmented individual devices.
 
-```bash
-dashctl trace flow --src 10.1.1.10 --dst 10.2.2.20 --proto tcp --dport 443
-```
 
-Shows the packet journey across classification, ENI selection, policy, routing, mapping, service path, and egress realization.[cite:36]
+* **Dual Deployment Versatility:** Designed to conform to your topology constraints. It can deploy as a **Dedicated Controller Appliance** on a standalone x86 server or as a **Symmetric Converged Cluster** running locally on the management cores of the DPUs themselves, utilizing an embedded consensus protocol to self-elect an active leader.
 
-### Reconcile runtime state
 
-```bash
-dashctl reconcile eni eni-100
-```
+* **Asynchronous, Deep Diagnostics:** Leverages non-intrusive data extraction mechanisms—such as gNMI streams, local Redis database taps, and hardware event queues—to extract diagnostic telemetry with **zero performance impact** on the live network packet-forwarding plane.
 
-Compares intended/configured state to APP_DB, STATE_DB, and runtime realization and highlights drift, missing dependencies, or partial programming.[cite:45]
 
-### Check ENI migration readiness
 
-```bash
-dashctl eni readiness eni-100 --target-dpu dpu-b
-```
+---
 
-Shows whether the target DPU is ready to host the ENI, what rules and dependencies must move, and whether active flows or ownership state make cutover risky.[cite:127][cite:130]
+### Signature Superpowers
 
-## Command groups
+#### 1. The Virtual Packet Tracer
 
-| Command group | Purpose |
-|---|---|
-| `get`, `list`, `show` | Object visibility and topology inspection |
-| `explain`, `trace` | Packet and flow reasoning |
-| `reconcile`, `verify`, `diff` | State validation and drift detection |
-| `eni bundle`, `eni flows`, `eni readiness`, `eni drain` | ENI mobility and HA workflows |
-| `health`, `top`, `watch` | Fleet visibility and live operations |
-| `bundle`, `logs`, `events`, `export` | Supportability and evidence collection |
+Allows you to simulate complex packet journeys. You provide a mock network 5-tuple payload to the engine via a REST call or CLI, and DASHCenter steps it analytically through every single phase of the DASH pipeline (ENI, Flow-Table, Route, and ACL matrices), pinpointing exactly where a packet will be forwarded or dropped before sending real traffic.
+
+#### 2. Cross-Plane State Auditing (Merkle-Trees)
+
+Defends against silent state corruption. By organizing control-plane configuration layers and underlying ASIC hardware tables into local cryptographic Merkle trees, DASHCenter can continuously verify state consistency without heavy processing loops. If a root hash mismatches, it traces down the tree to isolate un-synchronized entries in milliseconds.
+
+#### 3. Zero-Copy Drop Attribution
+
+Monitors physical hardware error hooks dynamically. When an appliance drops an unexpected frame, DASHCenter’s local daemon catches the packet’s metadata from shared memory registers and streams back an automated explanation defining the precise failure context (e.g., *Dropped at Outbound ACL Stage due to rule violation*).
+
 
 ## Who it is for
 
