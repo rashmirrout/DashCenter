@@ -26,6 +26,8 @@ Good catch. The previous view compressed the appliance tier into a single block,
 
 To fix this, here is the diagram that explicitly shows the **1-to-Many distributed architecture**. It capture block diagram on how the system can manage multiple DASH appliances (DPU 01 through DPU 10).
 
+> For the full architectural breakdown of the management plane, caching plane, and Protobuf-exclusive network fabric, see the [High-Level System Design](specs/high_level_system_design.md).
+
 ```
 ==================================================================================================
                                       USER INTERACTION LAYER
@@ -101,7 +103,7 @@ To fix this, here is the diagram that explicitly shows the **1-to-Many distribut
 
 ### Core Structural Features
 
-* **Kubernetes-Like Operations (dashctl):** Built to mimic the seamless declarative style of cloud-native systems. Operators log into the central suite and execute simple, unified commands like dashctl get enis --all-devices or dashctl monitor drops -w rather than jumping across fragmented individual devices.
+* **Kubernetes-Like Operations (dashctl):** Built to mimic the seamless declarative style of cloud-native systems. Operators log into the central suite and execute simple, unified commands like dashctl get enis --all-devices or dashctl monitor drops -w rather than jumping across fragmented individual devices. See the [Multi-Node `dashctl` CLI Brief](specs/mult_node_cli_brief.md) for the full command reference.
 
 
 * **Dual Deployment Versatility:** Designed to conform to your topology constraints. It can deploy as a **Dedicated Controller Appliance** on a standalone x86 server or as a **Symmetric Converged Cluster** running locally on the management cores of the DPUs themselves, utilizing an embedded consensus protocol to self-elect an active leader.
@@ -142,6 +144,8 @@ DashCenter is aimed at platform teams, network engineers, SREs, NOC operators, a
 ## Status
 
 DashCenter is currently in design and architecture phase. The initial target is a gRPC-first service with a `dashctl` CLI, followed by fleet APIs, streaming health, historical snapshots, and a web console.[cite:43][cite:45]
+
+For the complete engineering specification, including functional/non-functional requirements and deployment topologies, see the [DASH Diagnostic System Specification](specs/dash_diagnostic_system_spec.md).
 
 ## Repository structure
 
