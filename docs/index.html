@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DashCenter — Centralized visibility and operations for DASH-compliant devices</title>
+  <meta name="description" content="DashCenter is a centralized visibility, troubleshooting, and fleet operations platform for DASH-compliant devices." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b1220;
+      --bg-2: #10192b;
+      --surface: #111c31;
+      --surface-2: #16233b;
+      --text: #e8eefc;
+      --muted: #a6b3cf;
+      --line: rgba(255,255,255,0.12);
+      --primary: #54b6c6;
+      --primary-2: #7ad9d1;
+      --warning: #ffcc7a;
+      --good: #7ddf9d;
+      --shadow: 0 16px 48px rgba(0,0,0,.28);
+      --radius: 18px;
+      --max: 1180px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      background: radial-gradient(circle at top right, rgba(84,182,198,.12), transparent 28%), linear-gradient(180deg, #0a1120, #0d1424 40%, #0a1220 100%);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    a { color: inherit; text-decoration: none; }
+    .container { width: min(calc(100% - 32px), var(--max)); margin: 0 auto; }
+    .nav {
+      position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(12px);
+      background: rgba(11,18,32,.72);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 0;
+    }
+    .brand { display: flex; gap: 12px; align-items: center; font-weight: 700; }
+    .logo {
+      width: 38px; height: 38px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      display: grid; place-items: center; color: #08212a; font-weight: 900;
+      box-shadow: 0 12px 32px rgba(84,182,198,.35);
+    }
+    .nav-links { display: flex; gap: 18px; color: var(--muted); font-size: 14px; }
+    .hero { padding: 72px 0 52px; }
+    .eyebrow {
+      display: inline-flex; gap: 8px; align-items: center;
+      padding: 8px 12px; border-radius: 999px; background: rgba(84,182,198,.12);
+      color: var(--primary-2); font-size: 13px; font-weight: 600; border: 1px solid rgba(84,182,198,.2);
+    }
+    h1 {
+      font-size: clamp(2.6rem, 6vw, 5rem);
+      line-height: 1.03; letter-spacing: -0.04em; margin: 18px 0 18px;
+      max-width: 12ch;
+    }
+    .hero p {
+      max-width: 70ch; color: var(--muted); font-size: 1.1rem; margin: 0 0 28px;
+    }
+    .actions { display: flex; gap: 14px; flex-wrap: wrap; }
+    .btn {
+      padding: 14px 18px; border-radius: 14px; border: 1px solid var(--line);
+      font-weight: 600; transition: .2s ease; display: inline-flex; gap: 10px; align-items: center;
+    }
+    .btn.primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #062028; border: none; }
+    .btn.secondary { background: rgba(255,255,255,.03); }
+    .btn:hover { transform: translateY(-1px); }
+    .hero-grid {
+      display: grid; grid-template-columns: 1.2fr .9fr; gap: 28px; align-items: start; margin-top: 42px;
+    }
+    .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.02));
+      border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .terminal { padding: 18px; }
+    .terminal-head {
+      display: flex; gap: 8px; margin-bottom: 14px;
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff5f57; }
+    .dot:nth-child(2) { background: #febc2e; }
+    .dot:nth-child(3) { background: #28c840; }
+    pre {
+      margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word;
+      color: #d8e6ff; font-size: 13px; line-height: 1.5;
+    }
+    .grid-3 {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+    }
+    section { padding: 28px 0 12px; }
+    h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); letter-spacing: -0.03em; margin: 0 0 12px; }
+    .section-intro { color: var(--muted); max-width: 72ch; margin-bottom: 18px; }
+    .card { padding: 22px; }
+    .card h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    .card p { margin: 0; color: var(--muted); font-size: .97rem; }
+    .feature-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .feature {
+      padding: 18px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255,255,255,.025);
+    }
+    .feature small { color: var(--primary-2); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .feature h4 { margin: 8px 0; font-size: 1.04rem; }
+    .feature p { margin: 0; color: var(--muted); }
+    .steps { display: grid; gap: 14px; }
+    .step { display: grid; grid-template-columns: 42px 1fr; gap: 14px; align-items: start; }
+    .step-num {
+      width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+      background: rgba(84,182,198,.12); color: var(--primary-2); font-weight: 700; border: 1px solid rgba(84,182,198,.22);
+    }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .kpi { padding: 20px; }
+    .kpi strong { display: block; font-size: 1.8rem; margin-bottom: 4px; }
+    .kpi span { color: var(--muted); font-size: .94rem; }
+    .footer { padding: 44px 0 70px; color: var(--muted); }
+    .code-inline {
+      display: inline-block; padding: 3px 8px; border-radius: 8px; background: rgba(255,255,255,.06); border: 1px solid var(--line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .92em; color: #dbe9ff;
+    }
+    @media (max-width: 980px) {
+      .hero-grid, .grid-3, .feature-list, .kpis { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="container nav-inner">
+      <div class="brand">
+        <div class="logo">D</div>
+        <div>DashCenter</div>
+      </div>
+      <nav class="nav-links">
+        <a href="#capabilities">Capabilities</a>
+        <a href="#cli">CLI</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#opensource">Open source</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="eyebrow">DASH operations platform · central service · fleet visibility</div>
+        <h1>Operate one or many DASH devices from one place.</h1>
+        <p>DashCenter is a centralized visibility, troubleshooting, and fleet operations platform for DASH-compliant devices. It uses the same DASH object model as the programming plane, then adds cross-layer debugging, packet and flow reasoning, ENI mobility diagnostics, health analysis, and evidence collection through a unified service and a kubectl-style CLI: <span class="code-inline">dashctl</span>.</p>
+        <div class="actions">
+          <a class="btn primary" href="#opensource">View project structure</a>
+          <a class="btn secondary" href="#cli">See CLI model</a>
+        </div>
+
+        <div class="hero-grid">
+          <div class="panel terminal">
+            <div class="terminal-head"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+<pre>$ dashctl get eni eni-100 --wide
+ENI: eni-100
+VNET: blue-prod
+Compute: vm-42
+ACL Groups: acl-prod-in, acl-prod-out
+Route Group: rg-west
+Meter Policy: meter-gold
+Runtime State: PARTIAL
+Primary Finding: missing route-group binding on target DPU
+
+$ dashctl explain match --src 10.1.1.10 --dst 10.2.2.20 --proto tcp --dport 443
+Stage 1  ENI classify     PASS   eni-100
+Stage 2  ACL outbound     PASS   allow-https
+Stage 3  Route lookup     PASS   rg-west / 10.2.2.0/24
+Stage 4  Mapping          PASS   vnet-blue-to-west
+Stage 5  Encap decision   PASS   vxlan vni 5001</pre>
+          </div>
+          <div class="grid-3">
+            <div class="panel card"><h3>Object visibility</h3><p>Inspect ENIs, VNETs, ACLs, routes, mappings, services, and runtime realization in one normalized model.</p></div>
+            <div class="panel card"><h3>Flow reasoning</h3><p>Explain packet matches, show the selected path, and identify the first failed stage when traffic breaks.</p></div>
+            <div class="panel card"><h3>Fleet operations</h3><p>Operate one node or many nodes through the same central service and CLI workflow.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="capabilities">
+      <div class="container">
+        <h2>What DashCenter does</h2>
+        <p class="section-intro">DashCenter is designed for production DPUs and appliances that already support DASH programming. It does not replace the programming plane; it gives operators the missing visibility and troubleshooting layer on top of it.</p>
+        <div class="feature-list">
+          <div class="feature"><small>Inspect</small><h4>Get object</h4><p>Read ENIs, VNETs, ACLs, routes, mappings, service objects, and realized runtime state in one response.</p></div>
+          <div class="feature"><small>Explain</small><h4>Explain match</h4><p>Tell operators why a packet matched, redirected, or dropped, including the winning object and first failure point.</p></div>
+          <div class="feature"><small>Trace</small><h4>Trace flow</h4><p>Show the packet journey across classification, policy, route selection, service chaining, mapping, and egress realization.</p></div>
+          <div class="feature"><small>Validate</small><h4>Reconcile state</h4><p>Compare intended state with APP_DB, STATE_DB, and vendor or runtime realization to detect drift and partial programming.</p></div>
+          <div class="feature"><small>Move safely</small><h4>ENI mobility</h4><p>Build migration bundles, enumerate active flows, check destination readiness, and monitor cutover drain state.</p></div>
+          <div class="feature"><small>Operate at scale</small><h4>Fleet visibility</h4><p>Track health, findings, blast radius, and support evidence across one device or many devices from one service.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cli">
+      <div class="container">
+        <h2><span class="code-inline">dashctl</span> command model</h2>
+        <p class="section-intro">The CLI is designed like kubectl for DASH operations: one command surface for a single device, a peer pair, or an entire fleet.</p>
+        <div class="grid-3">
+          <div class="panel card"><h3>Visibility</h3><p><span class="code-inline">dashctl get</span>, <span class="code-inline">list</span>, <span class="code-inline">show graph</span>, and <span class="code-inline">show lineage</span> visualize object relationships and runtime realization.</p></div>
+          <div class="panel card"><h3>Troubleshooting</h3><p><span class="code-inline">dashctl explain match</span>, <span class="code-inline">trace flow</span>, and <span class="code-inline">reconcile</span> answer packet and state questions directly.</p></div>
+          <div class="panel card"><h3>Operations</h3><p><span class="code-inline">dashctl eni bundle</span>, <span class="code-inline">eni readiness</span>, <span class="code-inline">health</span>, and <span class="code-inline">watch</span> support day-2 production workflows.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="container">
+        <h2>Architecture model</h2>
+        <p class="section-intro">DashCenter acts as a central analysis and correlation layer. It reads the same DASH-facing control-plane semantics that program the appliance, then augments them with runtime evidence and fleet operations logic.</p>
+        <div class="steps panel card">
+          <div class="step"><div class="step-num">1</div><div><strong>Acquire</strong><br>Collect DASH API objects, APP_DB, STATE_DB, vendor runtime state, and platform telemetry.</div></div>
+          <div class="step"><div class="step-num">2</div><div><strong>Normalize</strong><br>Turn all sources into canonical DASH-native objects with lineage and timestamps.</div></div>
+          <div class="step"><div class="step-num">3</div><div><strong>Correlate</strong><br>Build an object graph linking ENIs, VNETs, ACLs, routes, mappings, services, and runtime realization.</div></div>
+          <div class="step"><div class="step-num">4</div><div><strong>Explain</strong><br>Run explain-match, trace-flow, reconcile-state, and ENI-readiness analysis on top of that graph.</div></div>
+          <div class="step"><div class="step-num">5</div><div><strong>Operate</strong><br>Serve operators through <span class="code-inline">dashctl</span>, APIs, and a future web console.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <h2>Designed for production</h2>
+        <div class="kpis">
+          <div class="panel kpi"><strong>Single node</strong><span>Works for one DPU or appliance during initial bring-up and debug.</span></div>
+          <div class="panel kpi"><strong>Fleet scale</strong><span>Supports centralized operations across many DASH-compliant devices.</span></div>
+          <div class="panel kpi"><strong>CLI first</strong><span>Optimized for operators and automation with structured outputs.</span></div>
+          <div class="panel kpi"><strong>Open source path</strong><span>Clean core, adapters, APIs, docs, and contribution model.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="opensource">
+      <div class="container">
+        <h2>Open source project shape</h2>
+        <p class="section-intro">DashCenter is positioned as an open source, vendor-neutral operations layer for DASH ecosystems. The public project page should make the value clear quickly, show the command model, and explain how the repository is organized.</p>
+        <div class="grid-3">
+          <div class="panel card"><h3>Repository</h3><p>Root README with quick pitch, capabilities, architecture, command examples, roadmap, contributing, and license.</p></div>
+          <div class="panel card"><h3>Docs</h3><p>Design specs, API contracts, operator guides, architecture decisions, and worked troubleshooting examples.</p></div>
+          <div class="panel card"><h3>Future site</h3><p>GitHub Pages landing page with product positioning, architecture, CLI examples, and community entry points.</p></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      DashCenter · centralized visibility, troubleshooting, and fleet operations for DASH-compliant devices.
+    </div>
+  </footer>
+</body>
+</html>
