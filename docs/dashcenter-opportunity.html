@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #FFFFFF;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    width: 960px; height: 700px;
+    position: relative;
+    background: linear-gradient(180deg, #F8FAFF 0%, #F0F4FA 100%);
+    overflow: hidden;
+  }
+
+  /* ─── Blue glow accents ─── */
+  .glow-blue {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(circle, rgba(59,130,246,0.06) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+  .glow-blue.g1 { width: 500px; height: 500px; top: -150px; left: 50%; transform: translateX(-50%); }
+  .glow-blue.g2 { width: 400px; height: 400px; bottom: -100px; right: -100px; background: radial-gradient(circle, rgba(16,185,129,0.05) 0%, transparent 70%); }
+
+  /* ─── Header ─── */
+  .header {
+    position: absolute; top: 28px; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    z-index: 2;
+  }
+  .header-badge {
+    background: rgba(59,130,246,0.1);
+    border: 1px solid rgba(59,130,246,0.2);
+    border-radius: 6px;
+    padding: 4px 14px;
+    font-size: 10px; font-weight: 700;
+    color: #3B82F6;
+    text-transform: uppercase; letter-spacing: 1.5px;
+  }
+  .header h1 {
+    font-size: 26px; font-weight: 800; color: #111827;
+    letter-spacing: -0.5px;
+  }
+  .header h1 span { color: #3B82F6; }
+
+  /* ─── Subtitle ─── */
+  .subtitle {
+    position: absolute; top: 82px; left: 0; right: 0;
+    text-align: center; z-index: 2;
+    font-size: 13px; color: #6B7280; line-height: 1.5;
+    max-width: 640px; margin: 0 auto;
+  }
+  .subtitle strong { color: #3B82F6; }
+
+  /* ─── Main layout ─── */
+  .layout {
+    position: absolute; top: 130px; left: 48px; right: 48px; bottom: 108px;
+    display: flex; gap: 24px; z-index: 1;
+  }
+
+  /* ─── Left: Operator with CLI ─── */
+  .col-operator {
+    width: 230px; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 16px;
+  }
+  .op-avatar {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: linear-gradient(135deg, #EFF6FF, #DBEAFE);
+    border: 2px solid #93C5FD;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .op-avatar svg { width: 32px; height: 32px; stroke: #3B82F6; fill: none; stroke-width: 2; stroke-linecap: round; }
+  .op-label { font-size: 15px; font-weight: 700; color: #111827; }
+  .op-sub { font-size: 11px; color: #6B7280; text-align: center; line-height: 1.5; }
+
+  /* ─── CLI terminal ─── */
+  .cli-box {
+    width: 100%;
+    background: #1E293B;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  }
+  .cli-header {
+    background: #0F172A;
+    padding: 8px 14px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .cli-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .cli-dot.r { background: #EF4444; }
+  .cli-dot.y { background: #F59E0B; }
+  .cli-dot.g { background: #10B981; }
+  .cli-title { font-size: 10px; color: #94A3B8; margin-left: 8px; font-weight: 600; }
+  .cli-body {
+    padding: 12px 14px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px; line-height: 1.8;
+    color: #CBD5E1;
+  }
+  .cli-body .prompt { color: #3B82F6; }
+  .cli-body .cmd { color: #F1F5F9; }
+  .cli-body .output { color: #10B981; }
+  .cli-body .comment { color: #64748B; }
+
+  /* ─── Center: DashCenter Hub ─── */
+  .col-hub {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px;
+  }
+
+  .hub-box {
+    background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+    border: 2px solid #3B82F6;
+    border-radius: 20px;
+    padding: 24px 32px;
+    text-align: center;
+    position: relative;
+    box-shadow: 0 0 40px rgba(59,130,246,0.1), 0 8px 24px rgba(0,0,0,0.15);
+    width: 100%;
+    max-width: 320px;
+  }
+  .hub-box::before {
+    content: '';
+    position: absolute; inset: -1px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(59,130,246,0.3), rgba(16,185,129,0.15));
+    z-index: -1;
+    filter: blur(1px);
+  }
+  .hub-name {
+    font-size: 24px; font-weight: 800; color: #F1F5F9;
+    letter-spacing: -0.5px;
+  }
+  .hub-name span { color: #60A5FA; }
+  .hub-tagline {
+    font-size: 11px; color: #94A3B8; margin-top: 4px;
+  }
+  .hub-tagline em { color: #60A5FA; font-style: normal; font-weight: 600; }
+  .hub-pillars {
+    display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; justify-content: center;
+  }
+  .hub-pillar {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 8px 14px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    flex: 1; min-width: 80px;
+  }
+  .pillar-icon {
+    font-size: 16px;
+  }
+  .pillar-label {
+    font-size: 10px; font-weight: 600; color: #CBD5E1;
+  }
+
+  /* ─── Protocols bar ─── */
+  .proto-bar {
+    display: flex; gap: 10px; justify-content: center;
+  }
+  .proto-tag {
+    background: #F0F9FF;
+    border: 1px solid #BAE6FD;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 11px; font-weight: 700; color: #0369A1;
+  }
+
+  /* ─── Right: DPU Fleet (clean cards) ─── */
+  .col-fleet {
+    width: 220px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    justify-content: center; gap: 12px;
+  }
+  .fleet-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: #3B82F6; margin-bottom: 4px;
+    text-align: center;
+  }
+  .fleet-card {
+    background: #FFFFFF;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    transition: border-color 0.2s;
+  }
+  .fleet-dot {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800; flex-shrink: 0;
+  }
+  .fleet-dot.nvidia  { background: #F0FFF0; color: #76B900; border: 1px solid #C6EF61; }
+  .fleet-dot.amd     { background: #FFF5F5; color: #ED1C24; border: 1px solid #FECACA; }
+  .fleet-dot.octeon  { background: #F0F7FF; color: #005BAC; border: 1px solid #BFDBFE; }
+  .fleet-dot.fungible { background: #FFF8F0; color: #D97706; border: 1px solid #FED7AA; }
+  .fleet-info h4 { font-size: 13px; font-weight: 700; color: #111827; }
+  .fleet-info p { font-size: 10px; color: #6B7280; margin-top: 1px; }
+  .fleet-status {
+    margin-left: auto;
+    font-size: 9px; font-weight: 700; color: #10B981;
+    background: #F0FDF4; border: 1px solid #BBF7D0;
+    padding: 2px 8px; border-radius: 4px;
+  }
+
+  /* ─── Right: Value propositions ─── */
+  .col-values {
+    width: 210px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    justify-content: center; gap: 12px;
+  }
+  .value-section-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: #10B981; margin-bottom: 4px;
+  }
+  .value-card {
+    background: #F0FDF4;
+    border: 1px solid #BBF7D0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .value-icon {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(16,185,129,0.12);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: #10B981; flex-shrink: 0;
+  }
+  .value-text {
+    font-size: 12px; color: #475569; line-height: 1.5;
+  }
+  .value-text strong { color: #111827; font-weight: 600; }
+
+  /* ─── Bottom success bar ─── */
+  .success-bar {
+    position: absolute; bottom: 24px; left: 48px; right: 48px;
+    background: rgba(16,185,129,0.04);
+    border: 1px solid rgba(16,185,129,0.15);
+    border-radius: 12px;
+    padding: 16px 24px;
+    display: flex; align-items: center; gap: 14px;
+    z-index: 2;
+  }
+  .success-icon {
+    font-size: 22px; color: #10B981;
+  }
+  .success-text {
+    font-size: 13px; color: #374151; line-height: 1.5;
+  }
+  .success-text em { color: #10B981; font-style: normal; font-weight: 700; }
+
+  /* ─── Connector SVG ─── */
+  .connectors {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0;
+  }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <div class="glow-blue g1"></div>
+  <div class="glow-blue g2"></div>
+
+  <!-- SVG Connectors -->
+  <svg class="connectors" viewBox="0 0 960 640" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <marker id="ab" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#93C5FD"/>
+      </marker>
+    </defs>
+    <!-- Operator → Hub -->
+    <line x1="280" y1="310" x2="340" y2="310" stroke="#93C5FD" stroke-width="2" marker-end="url(#ab)"/>
+    <!-- Hub → Fleet -->
+    <line x1="620" y1="260" x2="670" y2="260" stroke="#93C5FD" stroke-width="2" marker-end="url(#ab)"/>
+    <line x1="620" y1="310" x2="670" y2="310" stroke="#93C5FD" stroke-width="2" marker-end="url(#ab)"/>
+    <line x1="620" y1="360" x2="670" y2="360" stroke="#93C5FD" stroke-width="2" marker-end="url(#ab)"/>
+    <line x1="620" y1="410" x2="670" y2="410" stroke="#93C5FD" stroke-width="2" marker-end="url(#ab)"/>
+  </svg>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-badge">The Opportunity</div>
+    <h1><span>Dash</span>Center View</h1>
+  </div>
+
+  <div class="subtitle">
+    A <strong>single, object-first CLI</strong> for unified fleet-wide visibility and control<br>
+    across heterogeneous DASH DPU vendors.
+  </div>
+
+  <!-- Main Layout -->
+  <div class="layout">
+
+    <!-- Operator + CLI -->
+    <div class="col-operator">
+      <div class="op-avatar">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>
+      </div>
+      <div class="op-label">Operator</div>
+      <div class="op-sub">Single pane of glass</div>
+
+      <div class="cli-box">
+        <div class="cli-header">
+          <div class="cli-dot r"></div>
+          <div class="cli-dot y"></div>
+          <div class="cli-dot g"></div>
+          <div class="cli-title">dashcenter-cli</div>
+        </div>
+        <div class="cli-body">
+          <div><span class="prompt">$</span> <span class="cmd">dc get dpus</span></div>
+          <div class="output">  NVIDIA/BlueField .... Ready</div>
+          <div class="output">  AMD/Pensando ....... Ready</div>
+          <div class="output">  Marvell/Octeon ..... Ready</div>
+          <div class="output">  Fungible/DPU ....... Ready</div>
+          <div>&nbsp;</div>
+          <div><span class="prompt">$</span> <span class="cmd">dc get drops --fleet</span></div>
+          <div class="output">  Total: 12 | Critical: 0</div>
+          <div>&nbsp;</div>
+          <div><span class="comment"># One command. Entire fleet.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DashCenter Hub -->
+    <div class="col-hub">
+      <div class="hub-box">
+        <div class="hub-name"><span>Dash</span>Center</div>
+        <div class="hub-tagline">The <em>kubectl</em> moment for DASH DPUs</div>
+        <div class="hub-pillars">
+          <div class="hub-pillar">
+            <div class="pillar-icon">&#x2B07;</div>
+            <div class="pillar-label">Ingest</div>
+          </div>
+          <div class="hub-pillar">
+            <div class="pillar-icon">&#x21C4;</div>
+            <div class="pillar-label">Normalize</div>
+          </div>
+          <div class="hub-pillar">
+            <div class="pillar-icon">&#x2699;</div>
+            <div class="pillar-label">Object Model</div>
+          </div>
+          <div class="hub-pillar">
+            <div class="pillar-icon">&#x1F441;</div>
+            <div class="pillar-label">Visibility</div>
+          </div>
+        </div>
+      </div>
+      <div class="proto-bar">
+        <div class="proto-tag">gRPC</div>
+        <div class="proto-tag">gNMI</div>
+        <div class="proto-tag">Protobuf</div>
+      </div>
+    </div>
+
+    <!-- DPU Fleet -->
+    <div class="col-fleet">
+      <div class="fleet-title">DPU Fleet</div>
+      <div class="fleet-card">
+        <div class="fleet-dot nvidia">N</div>
+        <div class="fleet-info">
+          <h4>NVIDIA</h4>
+          <p>BlueField</p>
+        </div>
+        <div class="fleet-status">OK</div>
+      </div>
+      <div class="fleet-card">
+        <div class="fleet-dot amd">A</div>
+        <div class="fleet-info">
+          <h4>AMD</h4>
+          <p>Pensando</p>
+        </div>
+        <div class="fleet-status">OK</div>
+      </div>
+      <div class="fleet-card">
+        <div class="fleet-dot octeon">M</div>
+        <div class="fleet-info">
+          <h4>Marvell</h4>
+          <p>Octeon</p>
+        </div>
+        <div class="fleet-status">OK</div>
+      </div>
+      <div class="fleet-card">
+        <div class="fleet-dot fungible">F</div>
+        <div class="fleet-info">
+          <h4>Fungible</h4>
+          <p>Fungible DPU</p>
+        </div>
+        <div class="fleet-status">OK</div>
+      </div>
+    </div>
+
+    <!-- Value Props -->
+    <div class="col-values">
+      <div class="value-section-title">Transformation</div>
+
+      <div class="value-card">
+        <div class="value-icon">&#x26A1;</div>
+        <div class="value-text"><strong>Instant</strong> — Fleet-wide queries in seconds</div>
+      </div>
+      <div class="value-card">
+        <div class="value-icon">&#x1F4CB;</div>
+        <div class="value-text"><strong>Declarative</strong> — Object-first K8s-style API</div>
+      </div>
+      <div class="value-card">
+        <div class="value-icon">&#x1F310;</div>
+        <div class="value-text"><strong>Unified</strong> — One model, all vendors</div>
+      </div>
+      <div class="value-card">
+        <div class="value-icon">&#x1F680;</div>
+        <div class="value-text"><strong>Powerful</strong> — Scales with your fleet</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Success bar -->
+  <div class="success-bar">
+    <div class="success-icon">&#x2714;</div>
+    <div class="success-text">
+      <em>Result:</em> What was once painful, manual, and vendor-specific becomes instant, declarative, and powerful.
+      Operate your entire DPU fleet as <em>one coherent system</em>.
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

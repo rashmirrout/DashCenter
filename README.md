@@ -20,11 +20,36 @@ When a packet mysteriously vanishes or a hardware configuration drifts out of sy
 
 ---
 
+## Deployment Models
+
+DashCenter ships with **two interchangeable deployment models**. Both expose the **identical REST + gRPC API contract**, so the `dashctl` CLI, the Web Console, and any 3rd-party SDK work unchanged across either topology. Operators choose the model that matches their site footprint and availability requirements.
+
+| Model | When to use | Footprint | HLD |
+|---|---|---|---|
+| **Centralized Controller** | Brownfield deployments with existing controller hardware; large fleets (>50 DPUs) where a dedicated `clidemon` host is operationally desirable. | One controller VM/host + N DPUs | [High-Level System Design — Centralized](specs/high_level_system_design.md) |
+| **Controllerless (Self-Clustered DPUs)** | Greenfield edge / branch / pod deployments where shipping an extra controller box is undesirable. Every DPU runs the management stack and the fleet self-elects a Master via gossip + Raft. | N DPUs only (zero extra hardware) | [High-Level System Design — Controllerless](specs/high_level_system_design_controllerless.md) |
+
+### Model 1 — Centralized Controller
+
+A dedicated `clidemon` appliance owns aggregation, caching, and the API surface. DPUs stream state up via gRPC / gNMI.
+
+![DashCenter Centralized Controller Architecture](docs/dashcenter-opportunity.png)
+
+> Full breakdown: [High-Level System Design — Centralized](specs/high_level_system_design.md)
+
+### Model 2 — Controllerless (Symmetric Cluster)
+
+Every DPU runs the identical `dashd` binary. The fleet uses **SWIM-style gossip** for liveness and **Raft consensus** to elect a `Master`, a `Secondary` (hot, sync replica), and `Backup` followers. Operators may log in to **any node** — the local API Front Door transparently redirects writes and strong reads to the current Master, while Secondary and Backup replicas keep their Redis caches warm for sub-second failover.
+
+![DashCenter Controllerless Architecture](docs/dashcenter-controllerless.png)
+
+> Full breakdown: [High-Level System Design — Controllerless](specs/high_level_system_design_controllerless.md)
+
 ---
 
-Good catch. The previous view compressed the appliance tier into a single block, which obscured how **DASHCenter** manages a scaled-out fleet of DPUs simultaneously.
+## Fleet Architecture at a Glance
 
-To fix this, here is the diagram that explicitly shows the **1-to-Many distributed architecture**. It capture block diagram on how the system can manage multiple DASH appliances (DPU 01 through DPU 10).
+The diagram below expands the **1-to-Many distributed architecture** and shows how DASHCenter manages a scaled-out fleet of DASH appliances (DPU 01 through DPU 10) under the centralized model. It calls out the user interaction layer, the management suite, and the appliance fleet as three distinct tiers.
 
 > For the full architectural breakdown of the management plane, caching plane, and Protobuf-exclusive network fabric, see the [High-Level System Design](specs/high_level_system_design.md).
 
@@ -32,13 +57,17 @@ To fix this, here is the diagram that explicitly shows the **1-to-Many distribut
 ==================================================================================================
                                       USER INTERACTION LAYER
 ==================================================================================================
-                                    +---------------------------+
-                                    |    dashctl CLI Client     |
-                                    | (Configured Context Layer)|
-                                    +-------------+-------------+
-                                                  |
-                                                  | Aggregated Multi-Node Queries
-                                                  v (REST / gRPC API Calls)
+   +---------------------------+   +---------------------------+   +-------------------------------+
+   |    dashctl CLI Client     |   |   DashCenter Web Console  |   |  3rd-Party / Automation       |
+   | (Configured Context Layer)|   |  (Browser SPA / Dashboard)|   |  (SDKs, Scripts, CI, IaC)     |
+   +-------------+-------------+   +-------------+-------------+   +---------------+---------------+
+                 |                               |                                 |
+                 |  CLI commands over REST       |  REST / WebSocket (live)        |  REST / gRPC
+                 |  (kubectl-style UX)           |  for dashboards & watch streams |  programmatic
+                 +---------------+---------------+---------------+-----------------+
+                                                 |
+                                                 | Aggregated Multi-Node Queries
+                                                 v (Unified REST / gRPC API Surface)
 ==================================================================================================
                                     DASHCenter MANAGEMENT SUITE
 ==================================================================================================

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #FFFFFF;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    width: 960px; height: 700px;
+    position: relative;
+    background: linear-gradient(180deg, #F8FAFF 0%, #F0F4FA 100%);
+    overflow: hidden;
+  }
+
+  /* ─── Glow accents ─── */
+  .glow {
+    position: absolute; border-radius: 50%;
+    pointer-events: none; z-index: 0;
+  }
+  .glow.g1 { width: 500px; height: 500px; top: 50px; left: 50%; transform: translateX(-50%); background: radial-gradient(circle, rgba(59,130,246,0.04) 0%, transparent 70%); }
+  .glow.g2 { width: 300px; height: 300px; bottom: -50px; right: -60px; background: radial-gradient(circle, rgba(16,185,129,0.04) 0%, transparent 70%); }
+
+  /* ─── Header ─── */
+  .header {
+    position: absolute; top: 24px; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    z-index: 2;
+  }
+  .header-badge {
+    background: #F0F9FF;
+    border: 1px solid #BAE6FD;
+    border-radius: 6px;
+    padding: 4px 14px;
+    font-size: 10px; font-weight: 700;
+    color: #0369A1;
+    text-transform: uppercase; letter-spacing: 1.5px;
+  }
+  .header h1 {
+    font-size: 24px; font-weight: 800; color: #111827;
+    letter-spacing: -0.5px;
+  }
+  .header h1 span { color: #3B82F6; }
+
+  /* ─── Subtitle ─── */
+  .subtitle {
+    position: absolute; top: 70px; left: 0; right: 0;
+    text-align: center; z-index: 2;
+    font-size: 13px; color: #6B7280; line-height: 1.5;
+    max-width: 680px; margin: 0 auto;
+  }
+  .subtitle strong { color: #3B82F6; }
+
+  /* ─── SVG connectors ─── */
+  .connectors {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ─── Main content area ─── */
+  .content {
+    position: absolute; top: 105px; left: 0; right: 0; bottom: 16px;
+    display: flex; z-index: 1;
+  }
+
+  /* ─── Left: User + flow explanation ─── */
+  .col-left {
+    width: 200px; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center;
+    padding-top: 80px; gap: 14px;
+  }
+  .user-avatar {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: linear-gradient(135deg, #EFF6FF, #DBEAFE);
+    border: 2px solid #93C5FD;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .user-avatar svg { width: 28px; height: 28px; stroke: #3B82F6; fill: none; stroke-width: 2; stroke-linecap: round; }
+  .user-label { font-size: 14px; font-weight: 700; color: #111827; }
+  .user-sub { font-size: 11px; color: #6B7280; text-align: center; line-height: 1.5; }
+
+  .flow-steps {
+    margin-top: 12px;
+    display: flex; flex-direction: column; gap: 8px; width: 100%;
+    padding: 0 10px;
+  }
+  .flow-step {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .step-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #EFF6FF; color: #3B82F6;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; flex-shrink: 0;
+    border: 1px solid #BFDBFE;
+  }
+  .step-text { font-size: 11px; color: #374151; line-height: 1.4; }
+  .step-text em { color: #3B82F6; font-style: normal; font-weight: 600; }
+
+  /* ─── Right: Cluster diagram ─── */
+  .col-right {
+    flex: 1;
+    position: relative;
+    min-height: 100%;
+  }
+
+  /* ─── Cluster ring container ─── */
+  .cluster {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px; height: 540px;
+  }
+
+  /* ─── Gossip ring (dashed circle) ─── */
+  .gossip-ring {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 460px; height: 380px;
+    border: 2px dashed #BFDBFE;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .gossip-label {
+    position: absolute;
+    bottom: 12px; left: 50%;
+    transform: translateX(-50%);
+    background: #F0F9FF; border: 1px solid #BAE6FD;
+    border-radius: 6px; padding: 2px 12px;
+    font-size: 10px; font-weight: 700; color: #0369A1;
+    text-transform: uppercase; letter-spacing: 1px;
+    z-index: 1; white-space: nowrap;
+  }
+
+  /* ─── DPU Nodes positioned in ring ─── */
+  .node {
+    position: absolute;
+    z-index: 2;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  .node-box {
+    width: 120px;
+    background: #FFFFFF;
+    border: 2px solid #E2E8F0;
+    border-radius: 14px;
+    padding: 14px 12px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    position: relative;
+  }
+  .node-box .role-badge {
+    position: absolute; top: -10px; left: 50%;
+    transform: translateX(-50%);
+    padding: 2px 12px; border-radius: 6px;
+    font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px;
+    white-space: nowrap;
+    z-index: 3;
+  }
+  .role-master { background: #3B82F6; color: #FFFFFF; border: 1.5px solid #2563EB; }
+  .role-secondary { background: #10B981; color: #FFFFFF; border: 1.5px solid #059669; }
+  .role-backup { background: #F59E0B; color: #FFFFFF; border: 1.5px solid #D97706; }
+  .role-worker { background: #F1F5F9; color: #64748B; border: 1.5px solid #CBD5E1; }
+
+  .node-box.master { border-color: #3B82F6; box-shadow: 0 0 20px rgba(59,130,246,0.15), 0 2px 8px rgba(0,0,0,0.06); }
+  .node-box.secondary { border-color: #10B981; box-shadow: 0 0 16px rgba(16,185,129,0.12), 0 2px 8px rgba(0,0,0,0.04); }
+  .node-box.backup { border-color: #F59E0B; box-shadow: 0 0 16px rgba(245,158,11,0.12), 0 2px 8px rgba(0,0,0,0.04); }
+
+  .node-vendor {
+    font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.8px;
+  }
+  .node-name { font-size: 13px; font-weight: 700; color: #111827; }
+  .node-db {
+    margin-top: 6px; padding: 4px 8px;
+    background: #F8FAFC; border: 1px solid #E2E8F0;
+    border-radius: 5px;
+    font-size: 9px; font-weight: 600; color: #64748B;
+  }
+  .node-db .db-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; margin-right: 3px; vertical-align: middle;
+  }
+  .db-sync { background: #10B981; }
+  .db-idle { background: #CBD5E1; }
+
+  /* ─── Node positions (ring layout) ─── */
+  /* 6 nodes: positions around an ellipse */
+  .node-1 { left: 240px; top: 10px; }    /* Top center = Master */
+  .node-2 { left: 440px; top: 120px; }   /* Top right = Secondary */
+  .node-3 { left: 440px; top: 310px; }   /* Bottom right = Backup */
+  .node-4 { left: 240px; top: 400px; }   /* Bottom center = Worker */
+  .node-5 { left: 40px; top: 310px; }    /* Bottom left = Worker */
+  .node-6 { left: 40px; top: 120px; }    /* Top left = Worker */
+
+  /* ─── Redirect arrows SVG ─── */
+  .redirect-svg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 600px; height: 540px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* ─── Legend ─── */
+  .legend {
+    position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 20px; z-index: 3;
+    background: #FFFFFF; border: 1px solid #E5E7EB;
+    border-radius: 10px; padding: 10px 20px;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: #4B5563; font-weight: 500;
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 3px;
+  }
+  .legend-dot.m { background: #3B82F6; }
+  .legend-dot.s { background: #10B981; }
+  .legend-dot.b { background: #F59E0B; }
+  .legend-dot.w { background: #E2E8F0; border: 1px solid #CBD5E1; }
+
+  /* ─── Gossip particle animation ─── */
+  @keyframes gossipPulse {
+    0% { opacity: 0.3; }
+    50% { opacity: 1; }
+    100% { opacity: 0.3; }
+  }
+  .gossip-ring {
+    animation: gossipPulse 3s ease-in-out infinite;
+  }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <div class="glow g1"></div>
+  <div class="glow g2"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-badge">Architecture</div>
+    <h1><span>Dash</span>Center — Controllerless Model</h1>
+  </div>
+
+  <div class="subtitle">
+    <strong>No central controller.</strong> DPUs form a self-organizing cluster via gossip protocol,
+    electing Master, Secondary, and Backup roles dynamically.
+  </div>
+
+  <!-- Main content -->
+  <div class="content">
+
+    <!-- Left: User + Flow -->
+    <div class="col-left">
+      <div class="user-avatar">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>
+      </div>
+      <div class="user-label">Operator</div>
+      <div class="user-sub">CLI / Web UI</div>
+
+      <div class="flow-steps">
+        <div class="flow-step">
+          <span class="step-num">1</span>
+          <span class="step-text">Login to <em>any node</em> in fleet</span>
+        </div>
+        <div class="flow-step">
+          <span class="step-num">2</span>
+          <span class="step-text">Request <em>redirected</em> to Master</span>
+        </div>
+        <div class="flow-step">
+          <span class="step-num">3</span>
+          <span class="step-text"><em>Master</em> processes &amp; responds</span>
+        </div>
+        <div class="flow-step">
+          <span class="step-num">4</span>
+          <span class="step-text"><em>Secondary + Backup</em> sync state</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Cluster -->
+    <div class="col-right">
+      <div class="cluster">
+
+        <!-- Gossip ring -->
+        <div class="gossip-ring">
+          <div class="gossip-label">Gossip Protocol Mesh</div>
+        </div>
+
+        <!-- SVG: Redirect arrows from workers to master, sync arrows between master/secondary/backup -->
+        <svg class="redirect-svg" viewBox="0 0 600 540" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="arrBlue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#3B82F6"/>
+            </marker>
+            <marker id="arrGreen" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#10B981"/>
+            </marker>
+            <marker id="arrGray" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#94A3B8"/>
+            </marker>
+          </defs>
+
+          <!-- Worker nodes → Master redirect (dashed blue) -->
+          <!-- Node-4 (bottom, x=300, y=440) → Master (top, x=300, y=70) -->
+          <path d="M 300 395 L 300 100" stroke="#93C5FD" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrBlue)"/>
+          <!-- Node-5 (bottom-left, x=100, y=345) → Master -->
+          <path d="M 130 305 Q 200 180 270 90" stroke="#93C5FD" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrBlue)"/>
+          <!-- Node-6 (top-left, x=100, y=155) → Master -->
+          <path d="M 140 140 Q 210 80 265 60" stroke="#93C5FD" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrBlue)"/>
+
+          <!-- Master → Secondary sync (solid green, bidirectional) -->
+          <line x1="365" y1="60" x2="460" y2="160" stroke="#6EE7B7" stroke-width="2" marker-end="url(#arrGreen)"/>
+          <line x1="448" y1="175" x2="370" y2="72" stroke="#6EE7B7" stroke-width="2" stroke-dasharray="4 3"/>
+
+          <!-- Master → Backup sync (solid green, bidirectional) -->
+          <line x1="350" y1="80" x2="470" y2="325" stroke="#6EE7B7" stroke-width="2" marker-end="url(#arrGreen)"/>
+          <line x1="458" y1="315" x2="345" y2="90" stroke="#6EE7B7" stroke-width="2" stroke-dasharray="4 3"/>
+
+          <!-- Secondary ↔ Backup sync -->
+          <line x1="505" y1="195" x2="505" y2="325" stroke="#6EE7B7" stroke-width="1.5" stroke-dasharray="5 3"/>
+
+          <!-- Gossip lines (light gray, connecting all nodes) -->
+          <!-- Node-3 (backup) to Node-4 (worker bottom) -->
+          <line x1="465" y1="370" x2="370" y2="420" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="3 4"/>
+          <!-- Node-5 (worker bottom-left) to Node-6 (worker top-left) -->
+          <line x1="105" y1="310" x2="105" y2="175" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="3 4"/>
+          <!-- Node-4 to Node-5 -->
+          <line x1="245" y1="430" x2="165" y2="355" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="3 4"/>
+          <!-- Node-6 to Node-2 (secondary) -->
+          <line x1="165" y1="148" x2="450" y2="155" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="3 4"/>
+
+          <!-- Label: redirect -->
+          <text x="198" y="250" font-size="10" fill="#3B82F6" font-family="-apple-system, system-ui, sans-serif" font-weight="600" transform="rotate(-72, 198, 250)">redirect</text>
+          <text x="205" y="440" font-size="10" fill="#3B82F6" font-family="-apple-system, system-ui, sans-serif" font-weight="600">redirect</text>
+
+          <!-- Label: sync -->
+          <text x="510" y="265" font-size="9" fill="#10B981" font-family="-apple-system, system-ui, sans-serif" font-weight="600">sync</text>
+          <text x="395" y="120" font-size="9" fill="#10B981" font-family="-apple-system, system-ui, sans-serif" font-weight="600">sync</text>
+          <text x="410" y="210" font-size="9" fill="#10B981" font-family="-apple-system, system-ui, sans-serif" font-weight="600">sync</text>
+        </svg>
+
+        <!-- Node 1: MASTER (top center) -->
+        <div class="node node-1">
+          <div class="node-box master">
+            <span class="role-badge role-master">Master</span>
+            <div class="node-vendor" style="color:#76B900;">NVIDIA</div>
+            <div class="node-name">BlueField-1</div>
+            <div class="node-db"><span class="db-dot db-sync"></span>DB (Leader)</div>
+          </div>
+        </div>
+
+        <!-- Node 2: SECONDARY (top right) -->
+        <div class="node node-2">
+          <div class="node-box secondary">
+            <span class="role-badge role-secondary">Secondary</span>
+            <div class="node-vendor" style="color:#ED1C24;">AMD</div>
+            <div class="node-name">Pensando-1</div>
+            <div class="node-db"><span class="db-dot db-sync"></span>DB (Synced)</div>
+          </div>
+        </div>
+
+        <!-- Node 3: BACKUP (bottom right) -->
+        <div class="node node-3">
+          <div class="node-box backup">
+            <span class="role-badge role-backup">Backup</span>
+            <div class="node-vendor" style="color:#005BAC;">Marvell</div>
+            <div class="node-name">Octeon-1</div>
+            <div class="node-db"><span class="db-dot db-sync"></span>DB (Synced)</div>
+          </div>
+        </div>
+
+        <!-- Node 4: WORKER (bottom center) -->
+        <div class="node node-4">
+          <div class="node-box">
+            <span class="role-badge role-worker">Worker</span>
+            <div class="node-vendor" style="color:#D97706;">Fungible</div>
+            <div class="node-name">Fungible-1</div>
+            <div class="node-db"><span class="db-dot db-idle"></span>DB (Idle)</div>
+          </div>
+        </div>
+
+        <!-- Node 5: WORKER (bottom left) -->
+        <div class="node node-5">
+          <div class="node-box">
+            <span class="role-badge role-worker">Worker</span>
+            <div class="node-vendor" style="color:#76B900;">NVIDIA</div>
+            <div class="node-name">BlueField-2</div>
+            <div class="node-db"><span class="db-dot db-idle"></span>DB (Idle)</div>
+          </div>
+        </div>
+
+        <!-- Node 6: WORKER (top left) -->
+        <div class="node node-6">
+          <div class="node-box">
+            <span class="role-badge role-worker">Worker</span>
+            <div class="node-vendor" style="color:#ED1C24;">AMD</div>
+            <div class="node-name">Pensando-2</div>
+            <div class="node-db"><span class="db-dot db-idle"></span>DB (Idle)</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot m"></div> Master</div>
+    <div class="legend-item"><div class="legend-dot s"></div> Secondary</div>
+    <div class="legend-item"><div class="legend-dot b"></div> Backup</div>
+    <div class="legend-item"><div class="legend-dot w"></div> Worker</div>
+  </div>
+
+</div>
+</body>
+</html>

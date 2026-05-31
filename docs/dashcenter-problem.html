@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #FFFFFF;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    width: 960px; height: 680px;
+    position: relative;
+    background: linear-gradient(180deg, #FFFBFB 0%, #FFF7F7 100%);
+    overflow: hidden;
+  }
+
+  /* ─── Red glow accents ─── */
+  .glow-red {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(circle, rgba(239,68,68,0.05) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+  .glow-red.g1 { width: 400px; height: 400px; top: -120px; right: -80px; }
+  .glow-red.g2 { width: 300px; height: 300px; bottom: -80px; left: -40px; }
+
+  /* ─── Header ─── */
+  .header {
+    position: absolute; top: 28px; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    z-index: 2;
+  }
+  .header-badge {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 6px;
+    padding: 4px 14px;
+    font-size: 10px; font-weight: 700;
+    color: #DC2626;
+    text-transform: uppercase; letter-spacing: 1.5px;
+  }
+  .header h1 {
+    font-size: 24px; font-weight: 800; color: #111827;
+    letter-spacing: -0.5px;
+  }
+
+  /* ─── Subtitle ─── */
+  .subtitle {
+    position: absolute; top: 78px; left: 0; right: 0;
+    text-align: center; z-index: 2;
+    font-size: 13px; color: #6B7280; line-height: 1.5;
+    max-width: 660px; margin: 0 auto;
+  }
+  .subtitle strong { color: #DC2626; }
+
+  /* ─── Main layout ─── */
+  .layout {
+    position: absolute; top: 125px; left: 40px; right: 40px; bottom: 96px;
+    display: flex; gap: 18px; z-index: 1;
+  }
+
+  /* ─── Column: Operator (Left) ─── */
+  .col-operator {
+    width: 190px; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px;
+  }
+  .op-avatar {
+    width: 68px; height: 68px; border-radius: 50%;
+    background: linear-gradient(135deg, #FEE2E2, #FECACA);
+    border: 2px solid #FCA5A5;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .op-avatar svg { width: 30px; height: 30px; stroke: #B91C1C; fill: none; stroke-width: 2; stroke-linecap: round; }
+  .op-avatar::after {
+    content: '×4'; position: absolute; top: -6px; right: -6px;
+    background: #DC2626; color: white; font-size: 10px; font-weight: 700;
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid #FFFBFB;
+  }
+  .op-label { font-size: 15px; font-weight: 700; color: #111827; }
+  .op-sub { font-size: 11px; color: #6B7280; text-align: center; line-height: 1.5; }
+
+  /* ─── Access methods tags ─── */
+  .access-tags {
+    display: flex; gap: 6px; margin-top: 4px;
+  }
+  .access-tag {
+    background: #FEF2F2; border: 1px solid #FECACA;
+    border-radius: 5px; padding: 3px 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px; font-weight: 700; color: #DC2626;
+  }
+
+  /* ─── Column: DPUs (Center) ─── */
+  .col-dpus {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px;
+  }
+  .dpu-row {
+    display: flex; gap: 12px;
+  }
+  .dpu-card {
+    background: #FFFFFF;
+    border: 1.5px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 14px 16px;
+    width: 175px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .dpu-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  }
+  .dpu-card.c1::before { background: #76B900; }
+  .dpu-card.c2::before { background: #ED1C24; }
+  .dpu-card.c3::before { background: #005BAC; }
+  .dpu-card.c4::before { background: #D97706; }
+  .dpu-card .ssh-tag {
+    position: absolute; top: 10px; right: 10px;
+    background: #FEF2F2; border: 1px solid #FECACA;
+    border-radius: 4px; padding: 1px 6px;
+    font-size: 9px; font-weight: 700; color: #DC2626;
+    font-family: 'Courier New', monospace;
+  }
+  .dpu-vendor {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.8px; margin-bottom: 4px;
+  }
+  .dpu-card.c1 .dpu-vendor { color: #76B900; }
+  .dpu-card.c2 .dpu-vendor { color: #ED1C24; }
+  .dpu-card.c3 .dpu-vendor { color: #005BAC; }
+  .dpu-card.c4 .dpu-vendor { color: #D97706; }
+  .dpu-name {
+    font-size: 13px; font-weight: 700; color: #111827;
+  }
+  .dpu-cli {
+    margin-top: 8px; padding: 6px 10px;
+    background: #F9FAFB; border: 1px solid #E5E7EB;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 9px; color: #6B7280;
+    line-height: 1.6;
+  }
+  .dpu-cli span { color: #DC2626; font-weight: 600; }
+
+  /* ─── Pain Points (Right) ─── */
+  .col-pains {
+    width: 200px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    justify-content: center; gap: 10px;
+  }
+  .pain-section-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: #DC2626; margin-bottom: 2px;
+  }
+  .pain-card {
+    background: #FFFFFF;
+    border: 1px solid #FECACA;
+    border-radius: 10px;
+    padding: 11px 13px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .pain-icon {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: #FEF2F2;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: #DC2626; flex-shrink: 0;
+  }
+  .pain-text {
+    font-size: 11px; color: #4B5563; line-height: 1.5;
+  }
+  .pain-text strong { color: #111827; font-weight: 600; }
+
+  /* ─── Bottom warning bar ─── */
+  .warning-bar {
+    position: absolute; bottom: 20px; left: 40px; right: 40px;
+    background: #FFFFFF;
+    border: 1px solid #FECACA;
+    border-radius: 12px;
+    padding: 14px 22px;
+    display: flex; align-items: center; gap: 12px;
+    z-index: 2;
+  }
+  .warning-icon {
+    font-size: 20px; color: #DC2626;
+    flex-shrink: 0;
+  }
+  .warning-text {
+    font-size: 12px; color: #374151; line-height: 1.5;
+  }
+  .warning-text em { color: #DC2626; font-style: normal; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <div class="glow-red g1"></div>
+  <div class="glow-red g2"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-badge">The Problem</div>
+    <h1>Fragmented Multi-Vendor DPU Operations</h1>
+  </div>
+
+  <div class="subtitle">
+    Multi-vendor DASH DPU fleets lack a <strong>unified control plane</strong>.<br>
+    Operators are forced into manual, per-device access workflows.
+  </div>
+
+  <!-- Main Layout -->
+  <div class="layout">
+
+    <!-- Operator -->
+    <div class="col-operator">
+      <div class="op-avatar">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>
+      </div>
+      <div class="op-label">Operators</div>
+      <div class="op-sub">Per-card access<br>Manual correlation<br>No fleet-wide view</div>
+      <div class="access-tags">
+        <span class="access-tag">SSH</span>
+        <span class="access-tag">RDP</span>
+      </div>
+    </div>
+
+    <!-- DPUs -->
+    <div class="col-dpus">
+      <div class="dpu-row">
+        <div class="dpu-card c1">
+          <span class="ssh-tag">ssh</span>
+          <div class="dpu-vendor">NVIDIA</div>
+          <div class="dpu-name">BlueField</div>
+          <div class="dpu-cli">$ <span>mellanox</span>-cli show<br>$ <span>nv</span>-fw ctrl</div>
+        </div>
+        <div class="dpu-card c2">
+          <span class="ssh-tag">ssh</span>
+          <div class="dpu-vendor">AMD</div>
+          <div class="dpu-name">Pensando</div>
+          <div class="dpu-cli">$ <span>pensando</span>-cli run<br>$ <span>psm</span> --show-acl</div>
+        </div>
+      </div>
+      <div class="dpu-row">
+        <div class="dpu-card c3">
+          <span class="ssh-tag">rdp</span>
+          <div class="dpu-vendor">Marvell</div>
+          <div class="dpu-name">Octeon</div>
+          <div class="dpu-cli">$ <span>octeon</span>-tool query<br>$ <span>nitrox</span>-cfg</div>
+        </div>
+        <div class="dpu-card c4">
+          <span class="ssh-tag">ssh</span>
+          <div class="dpu-vendor">Fungible</div>
+          <div class="dpu-name">Fungible DPU</div>
+          <div class="dpu-cli">$ <span>fun</span>-cli get-stats<br>$ <span>fdpu</span>-en config</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pain Points -->
+    <div class="col-pains">
+      <div class="pain-section-title">Operational Challenges</div>
+
+      <div class="pain-card">
+        <div class="pain-icon">&#x23F1;</div>
+        <div class="pain-text"><strong>Slow</strong> — SSH/RDP per-card, no bulk ops</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon">&#x26A0;</div>
+        <div class="pain-text"><strong>Error-prone</strong> — Inconsistent vendor CLIs</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon">&#x1F50C;</div>
+        <div class="pain-text"><strong>Fragmented</strong> — Packet drops, ENI, ACLs, routes per-card</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon">&#x1F4C8;</div>
+        <div class="pain-text"><strong>Unscalable</strong> — Breaks as fleet grows</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon">&#x1F510;</div>
+        <div class="pain-text"><strong>Siloed</strong> — No cross-vendor correlation</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Warning bar -->
+  <div class="warning-bar">
+    <div class="warning-icon">&#x26A0;</div>
+    <div class="warning-text">
+      <em>Impact:</em> Operators spend hours manually correlating data across isolated devices. Critical events — packet drops, ACL hits, ENI mobility — go undetected until outages occur.
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
