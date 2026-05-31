@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #FFFFFF;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    width: 1000px; height: 750px;
+    position: relative;
+    background: linear-gradient(180deg, #F8FAFF 0%, #F5F7FA 40%, #F0F4F8 100%);
+    overflow: hidden;
+  }
+
+  /* ─── Ambient glows ─── */
+  .glow { position: absolute; border-radius: 50%; pointer-events: none; z-index: 0; filter: blur(100px); }
+  .glow.g1 { width: 500px; height: 350px; top: -80px; left: 50%; transform: translateX(-50%); background: rgba(59,130,246,0.06); }
+  .glow.g2 { width: 350px; height: 250px; top: 200px; left: 15%; background: rgba(16,185,129,0.04); }
+  .glow.g3 { width: 300px; height: 250px; top: 380px; right: 5%; background: rgba(220,38,38,0.04); }
+
+  /* ─── Grid pattern ─── */
+  #root::before {
+    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* ─── Title Bar ─── */
+  .title-bar {
+    position: absolute; top: 0; left: 0; right: 0; height: 52px;
+    background: linear-gradient(90deg, rgba(59,130,246,0.05) 0%, transparent 50%);
+    border-bottom: 1px solid #E2E8F0;
+    display: flex; align-items: center; padding: 0 32px; gap: 16px;
+    z-index: 3;
+  }
+  .title-logo {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #3B82F6, #2563EB);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(59,130,246,0.25);
+  }
+  .title-logo svg { width: 16px; height: 16px; }
+  .title-bar h1 {
+    font-size: 14px; font-weight: 700; color: #111827;
+    letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  .title-bar h1 span { color: #3B82F6; }
+  .title-bar .subtitle {
+    font-size: 11px; color: #6B7280; margin-left: auto;
+    letter-spacing: 0.5px;
+  }
+  .title-bar .version-tag {
+    background: #EFF6FF; border: 1px solid #BFDBFE;
+    border-radius: 4px; padding: 2px 8px;
+    font-size: 9px; font-weight: 700; color: #2563EB;
+    letter-spacing: 0.5px;
+  }
+
+  /* ─── ZONE LABELS (left side) ─── */
+  .zone-labels {
+    position: absolute; left: 0; top: 52px; bottom: 0; width: 28px;
+    z-index: 2;
+  }
+  .zone-label {
+    position: absolute; left: 0; top: 0;
+    writing-mode: vertical-rl; text-orientation: mixed;
+    transform: rotate(180deg);
+    font-size: 9px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; padding: 12px 4px;
+    border-radius: 0 6px 6px 0;
+  }
+  .zone-label.z1 { top: 62px; color: #6366F1; background: #EEF2FF; border-right: 2px solid #C7D2FE; }
+  .zone-label.z2 { top: 328px; color: #DC2626; background: #FEF2F2; border-right: 2px solid #FECACA; }
+  .zone-label.z3 { top: 492px; color: #0891B2; background: #ECFEFF; border-right: 2px solid #A5F3FC; }
+
+  /* ─── MAIN CONTENT AREA ─── */
+  .main {
+    position: absolute; top: 52px; left: 28px; right: 0; bottom: 0;
+    z-index: 1;
+  }
+
+  /* ═══════════════════════════════════════════════
+     ZONE 1: CLIDEMON DAEMON
+     ═══════════════════════════════════════════════ */
+  .zone-1 {
+    position: absolute; top: 16px; left: 16px; right: 16px; height: 278px;
+    background: #FFFFFF;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 14px;
+    padding: 14px 18px;
+    display: flex; flex-direction: column;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  }
+
+  /* Daemon header */
+  .daemon-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px solid #F1F5F9;
+  }
+  .daemon-icon {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg, #EEF2FF, #E0E7FF);
+    border: 1px solid #C7D2FE;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(99,102,241,0.1);
+  }
+  .daemon-icon svg { width: 18px; height: 18px; stroke: #6366F1; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .daemon-name { font-size: 13px; font-weight: 700; color: #111827; letter-spacing: 0.5px; }
+  .daemon-tag {
+    margin-left: auto;
+    font-size: 9px; font-weight: 600; color: #4F46E5;
+    background: #EEF2FF; border: 1px solid #C7D2FE;
+    border-radius: 4px; padding: 2px 8px; letter-spacing: 0.5px;
+  }
+
+  /* Two engine boxes side by side */
+  .engines {
+    display: flex; gap: 12px; flex: 1;
+  }
+  .engine {
+    flex: 1;
+    background: #F9FAFB;
+    border: 1px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+  .engine::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  }
+  .engine.api::before { background: linear-gradient(90deg, #3B82F6, #6366F1); }
+  .engine.state::before { background: linear-gradient(90deg, #10B981, #06B6D4); }
+
+  .engine-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+  }
+  .engine-icon {
+    width: 30px; height: 30px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .engine-icon.api-icon { background: #EFF6FF; border: 1px solid #BFDBFE; }
+  .engine-icon.api-icon svg { width: 15px; height: 15px; stroke: #2563EB; fill: none; stroke-width: 2; stroke-linecap: round; }
+  .engine-icon.state-icon { background: #ECFDF5; border: 1px solid #A7F3D0; }
+  .engine-icon.state-icon svg { width: 15px; height: 15px; stroke: #059669; fill: none; stroke-width: 2; }
+  .engine-title { font-size: 12px; font-weight: 700; color: #111827; }
+  .engine-subtitle {
+    margin-left: auto; font-size: 9px; font-weight: 600;
+    color: #64748B; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+
+  .features { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .feat {
+    display: flex; align-items: center; gap: 8px;
+    background: #FFFFFF;
+    border: 1px solid #F1F5F9;
+    border-radius: 7px; padding: 8px 10px;
+  }
+  .feat-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .feat-dot.blue { background: #3B82F6; box-shadow: 0 0 4px rgba(59,130,246,0.4); }
+  .feat-dot.purple { background: #8B5CF6; box-shadow: 0 0 4px rgba(139,92,246,0.4); }
+  .feat-dot.green { background: #10B981; box-shadow: 0 0 4px rgba(16,185,129,0.4); }
+  .feat-dot.cyan { background: #06B6D4; box-shadow: 0 0 4px rgba(6,182,212,0.4); }
+  .feat-dot.amber { background: #F59E0B; box-shadow: 0 0 4px rgba(245,158,11,0.4); }
+  .feat-text { font-size: 11px; color: #374151; font-weight: 500; }
+
+  /* ═══════════════════════════════════════════════
+     CONNECTOR: ZONE 1 → ZONE 2
+     ═══════════════════════════════════════════════ */
+  .connector-1 {
+    position: absolute; top: 308px; left: 44px; right: 32px; height: 36px;
+    z-index: 2;
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+  }
+  .conn-arrow {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .conn-label {
+    font-size: 8px; font-weight: 700; color: #475569;
+    letter-spacing: 0.8px; text-transform: uppercase;
+    padding: 1px 8px; border-radius: 3px;
+    border: 1px solid #E2E8F0;
+    background: #F8FAFC;
+  }
+  .conn-line {
+    width: 2px; height: 12px; position: relative;
+  }
+  .conn-line::after {
+    content: ''; position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%);
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+  }
+  .conn-line.blue { background: #3B82F6; }
+  .conn-line.blue::after { border-top: 5px solid #3B82F6; }
+  .conn-line.green { background: #10B981; }
+  .conn-line.green::after { border-top: 5px solid #10B981; }
+  .conn-line.red { background: #F87171; }
+  .conn-line.red::after { border-top: 5px solid #F87171; }
+
+  /* ═══════════════════════════════════════════════
+     ZONE 2: REDIS STACK
+     ═══════════════════════════════════════════════ */
+  .zone-2 {
+    position: absolute; top: 344px; left: 16px; right: 16px; height: 140px;
+    z-index: 1;
+  }
+  .redis-box {
+    width: 100%; height: 100%;
+    background: linear-gradient(135deg, #FFF5F5 0%, #FEF2F2 100%);
+    border: 1.5px solid #FECACA;
+    border-radius: 14px;
+    padding: 18px 22px;
+    display: flex; align-items: center; gap: 20px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(220,38,38,0.06);
+  }
+  .redis-box::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, #DC2626, #EF4444, #DC2626);
+  }
+
+  /* Redis Logo */
+  .redis-logo {
+    width: 64px; height: 64px; flex-shrink: 0; position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .redis-diamonds {
+    position: relative; width: 36px; height: 36px;
+  }
+  .redis-diamonds .diamond {
+    position: absolute; width: 20px; height: 12px;
+    background: #DC2626; border-radius: 2px;
+    transform: rotate(-45deg);
+    box-shadow: 0 1px 4px rgba(220,38,38,0.3);
+  }
+  .redis-diamonds .diamond:nth-child(1) { top: 2px; left: 2px; opacity: 1; }
+  .redis-diamonds .diamond:nth-child(2) { top: 10px; left: 2px; opacity: 0.75; }
+  .redis-diamonds .diamond:nth-child(3) { top: 18px; left: 2px; opacity: 0.5; }
+  .redis-diamonds .diamond:nth-child(4) { top: 26px; left: 2px; opacity: 0.35; }
+  .redis-diamonds .star {
+    position: absolute; top: 1px; left: 9px; width: 6px; height: 6px;
+    background: #FFFFFF; border-radius: 50%;
+    box-shadow: 0 0 6px rgba(255,255,255,0.5);
+  }
+  .redis-brand {
+    position: absolute; bottom: 2px;
+    font-size: 7px; font-weight: 800; color: #636466;
+    letter-spacing: 0.5px;
+  }
+
+  .redis-info { flex: 1; }
+  .redis-title-row {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+  }
+  .redis-title {
+    font-size: 15px; font-weight: 800; color: #991B1B;
+    letter-spacing: 0.3px;
+  }
+  .redis-stack-badge {
+    background: #FFFFFF; border: 1px solid #FECACA;
+    border-radius: 5px; padding: 2px 10px;
+    font-size: 9px; font-weight: 700; color: #DC2626;
+    letter-spacing: 0.5px;
+  }
+  .redis-modules {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;
+  }
+  .redis-mod {
+    font-size: 9px; font-weight: 600; color: #64748B;
+    background: #FFFFFF; border: 1px solid #E5E7EB;
+    border-radius: 4px; padding: 2px 8px;
+  }
+  .redis-desc {
+    font-size: 11px; color: #475569; line-height: 1.6;
+  }
+  .redis-desc code {
+    background: #FFFFFF; border: 1px solid #FECACA;
+    border-radius: 3px; padding: 0 5px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 10px; color: #DC2626;
+  }
+
+  /* ═══════════════════════════════════════════════
+     CONNECTOR: ZONE 2 → ZONE 3
+     ═══════════════════════════════════════════════ */
+  .connector-2 {
+    position: absolute; top: 484px; left: 44px; right: 32px; height: 28px;
+    z-index: 2;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+
+  /* ═══════════════════════════════════════════════
+     ZONE 3: INGESTION WORKERS
+     ═══════════════════════════════════════════════ */
+  .zone-3 {
+    position: absolute; top: 512px; left: 16px; right: 16px; height: 120px;
+    z-index: 1;
+  }
+  .ingestion-box {
+    width: 100%; height: 100%;
+    background: #FFFFFF;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 14px;
+    padding: 12px 16px;
+    display: flex; flex-direction: column;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+  }
+  .ingestion-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px;
+  }
+  .ingestion-icon {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: #ECFEFF; border: 1px solid #A5F3FC;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ingestion-icon svg { width: 14px; height: 14px; stroke: #0891B2; fill: none; stroke-width: 2; stroke-linecap: round; }
+  .ingestion-title { font-size: 11px; font-weight: 700; color: #111827; letter-spacing: 0.5px; }
+  .ingestion-subtitle {
+    font-size: 9px; color: #64748B; margin-left: auto; font-style: italic;
+  }
+  .ingestion-badges {
+    display: flex; gap: 6px; margin-left: auto;
+  }
+  .ing-badge {
+    font-size: 8px; font-weight: 700; padding: 2px 8px;
+    border-radius: 4px; letter-spacing: 0.5px;
+  }
+  .ing-badge.async { background: #F5F3FF; border: 1px solid #DDD6FE; color: #7C3AED; }
+  .ing-badge.push { background: #FFFBEB; border: 1px solid #FDE68A; color: #D97706; }
+
+  .channels {
+    display: flex; gap: 6px; flex: 1; align-items: stretch;
+  }
+  .channel {
+    flex: 1; background: #F9FAFB;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px; padding: 8px 6px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 5px;
+    position: relative;
+  }
+  .channel-num {
+    font-size: 9px; font-weight: 700; color: #374151;
+    letter-spacing: 0.5px;
+  }
+  .channel-protos { display: flex; gap: 3px; }
+
+  /* gRPC chevron icon */
+  .proto-icon {
+    width: 22px; height: 16px; border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .proto-icon.grpc-icon {
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+  }
+  .proto-icon.grpc-icon::before {
+    content: '';
+    width: 8px; height: 8px; border-right: 2px solid #2563EB; border-bottom: 2px solid #2563EB;
+    transform: rotate(-45deg);
+    margin-right: 1px;
+  }
+  .proto-icon.gnmi-icon {
+    background: #ECFEFF;
+    border: 1px solid #A5F3FC;
+  }
+  .proto-icon.gnmi-icon::after {
+    content: 'gN'; font-size: 7px; font-weight: 800; color: #0891B2;
+  }
+
+  /* ═══════════════════════════════════════════════
+     FLEET BAR
+     ═══════════════════════════════════════════════ */
+  .fleet-bar {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 56px;
+    background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+    border-top: 1px solid #E2E8F0;
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    z-index: 3; padding: 0 32px;
+  }
+  .fleet-nodes {
+    display: flex; gap: 8px;
+  }
+  .fleet-node {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800;
+    border: 1px solid;
+  }
+  .fleet-node.nv { background: #F0FFF0; color: #76B900; border-color: #C6EF61; }
+  .fleet-node.am { background: #FFF5F5; color: #ED1C24; border-color: #FECACA; }
+  .fleet-node.mv { background: #F0F7FF; color: #005BAC; border-color: #BFDBFE; }
+  .fleet-node.fn { background: #FFF8F0; color: #D97706; border-color: #FED7AA; }
+  .fleet-sep { width: 1px; height: 24px; background: #E2E8F0; }
+  .fleet-label {
+    font-size: 11px; font-weight: 700; color: #374151;
+    letter-spacing: 3px; text-transform: uppercase;
+  }
+
+  /* ─── Animated data flow indicators ─── */
+  @keyframes flowDown {
+    0% { transform: translateY(-4px); opacity: 0; }
+    50% { opacity: 1; }
+    100% { transform: translateY(4px); opacity: 0; }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+  .pulse-dot {
+    width: 4px; height: 4px; border-radius: 50%;
+    animation: flowDown 1.5s ease-in-out infinite;
+  }
+  .pulse-dot.blue { background: #3B82F6; box-shadow: 0 0 4px rgba(59,130,246,0.4); }
+  .pulse-dot.green { background: #10B981; box-shadow: 0 0 4px rgba(16,185,129,0.4); }
+  .pulse-dot.red { background: #EF4444; box-shadow: 0 0 4px rgba(239,68,68,0.4); }
+  .pulse-dot.cyan { background: #06B6D4; box-shadow: 0 0 4px rgba(6,182,212,0.4); }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <div class="glow g1"></div>
+  <div class="glow g2"></div>
+  <div class="glow g3"></div>
+
+  <!-- ═══ Title Bar ═══ -->
+  <div class="title-bar">
+    <div class="title-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+    </div>
+    <h1><span>Dash</span>Center Management Suite</h1>
+    <span class="subtitle">Architecture Overview</span>
+    <span class="version-tag">v2.0</span>
+  </div>
+
+  <!-- ═══ Zone Labels ═══ -->
+  <div class="zone-labels">
+    <div class="zone-label z1">Management Plane</div>
+    <div class="zone-label z2">State Plane</div>
+    <div class="zone-label z3">Telemetry Plane</div>
+  </div>
+
+  <!-- ═══ Main Content ═══ -->
+  <div class="main">
+
+    <!-- ═══ ZONE 1: clidemon API Daemon ═══ -->
+    <div class="zone-1">
+      <div class="daemon-header">
+        <div class="daemon-icon">
+          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="daemon-name">clidemon API Daemon</div>
+        <div class="daemon-tag">Core Process</div>
+      </div>
+
+      <div class="engines">
+        <!-- API Request Engine -->
+        <div class="engine api">
+          <div class="engine-header">
+            <div class="engine-icon api-icon">
+              <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <div class="engine-title">API Request Engine</div>
+          </div>
+          <div class="features">
+            <div class="feat">
+              <div class="feat-dot blue"></div>
+              <div class="feat-text">Multi-device filter resolution</div>
+            </div>
+            <div class="feat">
+              <div class="feat-dot purple"></div>
+              <div class="feat-text">Cross-plane trace execution</div>
+            </div>
+            <div class="feat">
+              <div class="feat-dot amber"></div>
+              <div class="feat-text">Request routing &amp; fan-out</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- State Aggregator Core -->
+        <div class="engine state">
+          <div class="engine-header">
+            <div class="engine-icon state-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            </div>
+            <div class="engine-title">State Aggregator Core</div>
+          </div>
+          <div class="features">
+            <div class="feat">
+              <div class="feat-dot green"></div>
+              <div class="feat-text">Thread Pool Manager</div>
+            </div>
+            <div class="feat">
+              <div class="feat-dot cyan"></div>
+              <div class="feat-text">Schema Normalizer</div>
+            </div>
+            <div class="feat">
+              <div class="feat-dot amber"></div>
+              <div class="feat-text">Cross-vendor state merge</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Connectors: Zone 1 → Zone 2 ═══ -->
+    <div class="connector-1">
+      <div class="conn-arrow">
+        <div class="conn-label">Fast Cache Reads</div>
+        <div class="conn-line blue"></div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <div class="pulse-dot blue"></div>
+        <div class="pulse-dot blue" style="animation-delay:0.3s"></div>
+        <div class="pulse-dot blue" style="animation-delay:0.6s"></div>
+      </div>
+      <div class="conn-arrow">
+        <div class="conn-label">Standardized Writes</div>
+        <div class="conn-line green"></div>
+      </div>
+    </div>
+
+    <!-- ═══ ZONE 2: Redis Stack ═══ -->
+    <div class="zone-2">
+      <div class="redis-box">
+        <div class="redis-logo">
+          <div class="redis-diamonds">
+            <div class="diamond"></div>
+            <div class="diamond"></div>
+            <div class="diamond"></div>
+            <div class="diamond"></div>
+            <div class="star"></div>
+          </div>
+          <div class="redis-brand">redis</div>
+        </div>
+        <div class="redis-info">
+          <div class="redis-title-row">
+            <div class="redis-title">Centralized Persistence &amp; TimeSeries Cache</div>
+            <div class="redis-stack-badge">Redis Stack</div>
+          </div>
+          <div class="redis-modules">
+            <span class="redis-mod">Search</span>
+            <span class="redis-mod">JSON</span>
+            <span class="redis-mod">TimeSeries</span>
+            <span class="redis-mod">Bloom</span>
+          </div>
+          <div class="redis-desc">
+            Indexed by Appliance ID:
+            <code>dpu-01</code> <code>dpu-02</code> <code>dpu-03</code>
+            <span style="color:#9CA3AF">...</span> <code>dpu-10</code>
+            &rarr; separate state tables per device
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Connector: Zone 2 → Zone 3 ═══ -->
+    <div class="connector-2">
+      <div class="pulse-dot red"></div>
+      <div class="conn-line red"></div>
+      <div class="pulse-dot red" style="animation-delay:0.4s"></div>
+      <div class="conn-label" style="margin-left:8px;">Ingestion Feed</div>
+    </div>
+
+    <!-- ═══ ZONE 3: Ingestion Workers ═══ -->
+    <div class="zone-3">
+      <div class="ingestion-box">
+        <div class="ingestion-header">
+          <div class="ingestion-icon">
+            <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="ingestion-title">Concurrent Ingestion Workers</div>
+          <div class="ingestion-badges">
+            <span class="ing-badge async">Async Polling</span>
+            <span class="ing-badge push">Push Streams</span>
+          </div>
+        </div>
+        <div class="channels">
+          <div class="channel">
+            <div class="channel-num">CH 01</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+          <div class="channel">
+            <div class="channel-num">CH 02</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+          <div class="channel">
+            <div class="channel-num">CH 03</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+          <div class="channel">
+            <div class="channel-num">CH 04</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+          <div class="channel">
+            <div class="channel-num">CH 05</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+          <div class="channel">
+            <div class="channel-num">CH 06</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+          <div class="channel" style="opacity:0.4;">
+            <div class="channel-num">CH 07</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+          <div class="channel" style="opacity:0.2;">
+            <div class="channel-num">CH 10</div>
+            <div class="channel-protos">
+              <div class="proto-icon grpc-icon"></div>
+              <div class="proto-icon gnmi-icon"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ Fleet Bar ═══ -->
+  <div class="fleet-bar">
+    <div class="fleet-nodes">
+      <div class="fleet-node nv">N</div>
+      <div class="fleet-node am">A</div>
+      <div class="fleet-node mv">M</div>
+      <div class="fleet-node fn">F</div>
+    </div>
+    <div class="fleet-sep"></div>
+    <div class="fleet-label">Distributed DASH Appliance Fleet</div>
+    <div class="fleet-sep"></div>
+    <div class="fleet-nodes">
+      <div class="fleet-node nv">N</div>
+      <div class="fleet-node am">A</div>
+      <div class="fleet-node mv">M</div>
+      <div class="fleet-node fn">F</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
