@@ -6,19 +6,20 @@ import (
 	"os"
 	"strings"
 
-	dashsimv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashsim/v1"
+	dashapi "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashapi/v1"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashapi-runtime/kinds"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func newSubscribeCmd() *cobra.Command {
 	var (
-		kinds         []string
+		kindStrs      []string
 		snapshotFirst bool
 	)
 	c := &cobra.Command{
 		Use:   "subscribe",
-		Short: "Stream Events from the simulator (snapshot + live updates)",
+		Short: "Stream Events (snapshot + live updates)",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cl, err := dial()
@@ -27,24 +28,24 @@ func newSubscribeCmd() *cobra.Command {
 			}
 			defer cl.Close()
 
-			parsedKinds := make([]dashsimv1.ObjectKind, 0, len(kinds))
-			for _, k := range kinds {
-				kind, err := parseObjectKind(k)
+			parsed := make([]dashapi.ObjectKind, 0, len(kindStrs))
+			for _, s := range kindStrs {
+				k, err := parseKindArg(s)
 				if err != nil {
 					return err
 				}
-				parsedKinds = append(parsedKinds, kind)
+				parsed = append(parsed, k)
 			}
 
 			ctx, cancel := streamContext()
 			defer cancel()
 
-			evCh, errCh, err := cl.Subscribe(ctx, parsedKinds, snapshotFirst)
+			evCh, errCh, err := cl.Subscribe(ctx, parsed, snapshotFirst)
 			if err != nil {
 				return err
 			}
 
-			marshaler := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: false}
+			marshaler := protojson.MarshalOptions{UseProtoNames: true}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "")
 
@@ -52,7 +53,6 @@ func newSubscribeCmd() *cobra.Command {
 				select {
 				case ev, ok := <-evCh:
 					if !ok {
-						// stream ended; check errCh
 						select {
 						case err := <-errCh:
 							return err
@@ -60,14 +60,24 @@ func newSubscribeCmd() *cobra.Command {
 							return nil
 						}
 					}
-					raw, err := marshaler.Marshal(ev)
-					if err != nil {
-						return err
+					out := map[string]interface{}{
+						"txn_id":       ev.GetTxnId(),
+						"type":         strings.TrimPrefix(ev.GetType().String(), "EVENT_TYPE_"),
+						"server_ts_ns": ev.GetServerTsNs(),
 					}
-					// emit JSON line
-					var v interface{}
-					_ = json.Unmarshal(raw, &v)
-					if err := enc.Encode(v); err != nil {
+					obj := ev.GetObject()
+					if obj != nil {
+						info, _ := kinds.Lookup(obj.GetKind())
+						out["kind"] = info.Name
+						out["key"] = obj.GetKey()
+						if payload, err := kinds.PayloadOf(obj); err == nil && payload != nil {
+							raw, _ := marshaler.Marshal(payload)
+							var v interface{}
+							_ = json.Unmarshal(raw, &v)
+							out["value"] = v
+						}
+					}
+					if err := enc.Encode(out); err != nil {
 						return err
 					}
 				case err := <-errCh:
@@ -79,25 +89,45 @@ func newSubscribeCmd() *cobra.Command {
 			}
 		},
 	}
-	c.Flags().StringSliceVar(&kinds, "kinds", nil, "filter on object kinds: vnet,eni,vnet_mapping,route,acl_group,acl_rule")
-	c.Flags().BoolVar(&snapshotFirst, "snapshot", false, "send a full snapshot of current state before live events")
+	c.Flags().StringSliceVar(&kindStrs, "kinds", nil, "filter on object kinds, e.g. vnet,eni")
+	c.Flags().BoolVar(&snapshotFirst, "snapshot", false, "send a snapshot of current state before live events")
 	return c
 }
 
-func parseObjectKind(s string) (dashsimv1.ObjectKind, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "vnet":
-		return dashsimv1.ObjectKind_OBJECT_KIND_VNET, nil
-	case "eni":
-		return dashsimv1.ObjectKind_OBJECT_KIND_ENI, nil
-	case "vnet_mapping", "mapping":
-		return dashsimv1.ObjectKind_OBJECT_KIND_VNET_MAPPING, nil
-	case "route":
-		return dashsimv1.ObjectKind_OBJECT_KIND_ROUTE, nil
-	case "acl_group", "aclgroup":
-		return dashsimv1.ObjectKind_OBJECT_KIND_ACL_GROUP, nil
-	case "acl_rule", "aclrule":
-		return dashsimv1.ObjectKind_OBJECT_KIND_ACL_RULE, nil
+func newKindsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "kinds",
+		Short: "List supported DASH object kinds and their key field order",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			fmtOut, err := resolveFormat()
+			if err != nil {
+				return err
+			}
+			rows := make([]map[string]interface{}, 0, len(kinds.All))
+			for _, info := range kinds.All {
+				rows = append(rows, map[string]interface{}{
+					"name":      info.Name,
+					"enum":      dashapi.ObjectKind_name[int32(info.Kind)],
+					"key_parts": info.KeyParts,
+				})
+			}
+			switch fmtOut {
+			case "yaml":
+				for _, r := range rows {
+					fmt.Printf("- name: %s\n  enum: %s\n  key_parts: %v\n", r["name"], r["enum"], r["key_parts"])
+				}
+			case "table":
+				fmt.Printf("%-25s %-40s %s\n", "NAME", "ENUM", "KEY_PARTS")
+				for _, r := range rows {
+					kp := strings.Join(r["key_parts"].([]string), ",")
+					fmt.Printf("%-25s %-40s %s\n", r["name"], r["enum"], kp)
+				}
+			default:
+				b, _ := json.MarshalIndent(rows, "", "  ")
+				fmt.Println(string(b))
+			}
+			return nil
+		},
 	}
-	return dashsimv1.ObjectKind_OBJECT_KIND_UNSPECIFIED, fmt.Errorf("unknown kind %q", s)
 }

@@ -3,6 +3,7 @@ module github.com/rashmirrout/DashCenter/src/impl-go/dash-sim
 go 1.22
 
 require (
+	github.com/rashmirrout/DashCenter/src/impl-go/dashapi-runtime v0.0.0-00010101000000-000000000000
 	github.com/rashmirrout/DashCenter/src/impl-go/gen/go v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.65.0
 	google.golang.org/protobuf v1.34.2
@@ -17,3 +18,5 @@ require (
 )
 
 replace github.com/rashmirrout/DashCenter/src/impl-go/gen/go => ../gen/go
+
+replace github.com/rashmirrout/DashCenter/src/impl-go/dashapi-runtime => ../dashapi-runtime

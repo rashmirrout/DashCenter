@@ -1,35 +1,27 @@
-// Package events is the fan-out bus that powers the dashsim.DashSim.Subscribe
-// stream. Every mutation in the model package publishes an *dashsimv1.Event;
-// each Subscribe call receives a fresh bounded channel.
-//
-// The bus is lock-free on the hot path: publishers grab an RLock to snapshot
-// the subscriber set, then send non-blockingly to each subscriber's channel.
-// Slow subscribers that fill their buffer simply lose events — they should
-// reconnect with snapshot_first=true to resync.
+// Package events is the fan-out bus that powers DashApi.Subscribe.
 package events
 
 import (
 	"sync"
 	"sync/atomic"
 
-	dashsimv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashsim/v1"
+	dashapi "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashapi/v1"
 )
 
 // DefaultBuffer is the per-subscriber channel capacity.
 const DefaultBuffer = 256
 
-// Subscription is a handle returned by Subscribe. Read from C; call Close when
-// done.
+// Subscription is a handle returned by Subscribe. Read from C; call Close.
 type Subscription struct {
-	C      <-chan *dashsimv1.Event
+	C      <-chan *dashapi.Event
 	closed atomic.Bool
-	ch     chan *dashsimv1.Event
+	ch     chan *dashapi.Event
 	bus    *Bus
 	id     uint64
-	kinds  map[dashsimv1.ObjectKind]struct{}
+	kinds  map[dashapi.ObjectKind]struct{}
 }
 
-// Close removes the subscription from the bus. Idempotent.
+// Close idempotently removes the subscription.
 func (s *Subscription) Close() {
 	if !s.closed.CompareAndSwap(false, true) {
 		return
@@ -38,9 +30,7 @@ func (s *Subscription) Close() {
 	close(s.ch)
 }
 
-// matches reports whether an event with the given kind should be delivered.
-// Empty filter == match all.
-func (s *Subscription) matches(kind dashsimv1.ObjectKind) bool {
+func (s *Subscription) matches(kind dashapi.ObjectKind) bool {
 	if len(s.kinds) == 0 {
 		return true
 	}
@@ -54,8 +44,6 @@ type Bus struct {
 	nextID uint64
 	subs   map[uint64]*Subscription
 
-	// Dropped counts events that were discarded because a subscriber's
-	// buffer was full. Exposed via the admin /admin/health endpoint.
 	dropped atomic.Uint64
 }
 
@@ -65,9 +53,9 @@ func New() *Bus {
 }
 
 // Subscribe registers a new subscriber. `kinds` is a filter: empty == all.
-func (b *Bus) Subscribe(kinds []dashsimv1.ObjectKind) *Subscription {
-	ch := make(chan *dashsimv1.Event, DefaultBuffer)
-	kindSet := make(map[dashsimv1.ObjectKind]struct{}, len(kinds))
+func (b *Bus) Subscribe(kinds []dashapi.ObjectKind) *Subscription {
+	ch := make(chan *dashapi.Event, DefaultBuffer)
+	kindSet := make(map[dashapi.ObjectKind]struct{}, len(kinds))
 	for _, k := range kinds {
 		kindSet[k] = struct{}{}
 	}
@@ -75,11 +63,7 @@ func (b *Bus) Subscribe(kinds []dashsimv1.ObjectKind) *Subscription {
 	b.nextID++
 	id := b.nextID
 	sub := &Subscription{
-		C:     ch,
-		ch:    ch,
-		bus:   b,
-		id:    id,
-		kinds: kindSet,
+		C: ch, ch: ch, bus: b, id: id, kinds: kindSet,
 	}
 	b.subs[id] = sub
 	b.mu.Unlock()
@@ -92,16 +76,12 @@ func (b *Bus) unsubscribe(id uint64) {
 	b.mu.Unlock()
 }
 
-// Publish delivers an event to every matching subscriber, non-blocking. If a
-// subscriber's buffer is full the event is dropped for that subscriber and the
-// global dropped counter is incremented.
-func (b *Bus) Publish(ev *dashsimv1.Event) {
+// Publish delivers an event non-blocking. Drops on full subscriber buffers.
+func (b *Bus) Publish(ev *dashapi.Event) {
 	b.mu.RLock()
-	// Snapshot to a small local slice so we don't hold the read lock while
-	// sending.
 	subs := make([]*Subscription, 0, len(b.subs))
 	for _, s := range b.subs {
-		if s.matches(ev.GetKind()) {
+		if s.matches(ev.GetObject().GetKind()) {
 			subs = append(subs, s)
 		}
 	}
@@ -123,6 +103,5 @@ func (b *Bus) SubscriberCount() int {
 	return len(b.subs)
 }
 
-// Dropped returns the cumulative count of events dropped due to full
-// subscriber buffers.
+// Dropped returns the cumulative count of dropped events.
 func (b *Bus) Dropped() uint64 { return b.dropped.Load() }

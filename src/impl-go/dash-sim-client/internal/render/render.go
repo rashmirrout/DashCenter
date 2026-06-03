@@ -1,6 +1,4 @@
-// Package render formats proto messages for human consumption. Supports JSON
-// (via protojson, which honors snake_case field names + enum names), YAML
-// (translation of the JSON), and table (a tabwriter line per item).
+// Package render formats Objects + maps for human consumption.
 package render
 
 import (
@@ -10,6 +8,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	dashapi "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashapi/v1"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashapi-runtime/kinds"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -37,70 +37,76 @@ func ParseFormat(s string) (Format, error) {
 	return "", fmt.Errorf("unknown output format %q (want json|yaml|table)", s)
 }
 
-var jsonMarshal = protojson.MarshalOptions{
-	Multiline:     true,
-	Indent:        "  ",
-	UseProtoNames: true,
-	EmitUnpopulated: true,
+var prettyJSON = protojson.MarshalOptions{
+	Multiline: true, Indent: "  ", UseProtoNames: true, EmitUnpopulated: false,
+}
+var tightJSON = protojson.MarshalOptions{
+	UseProtoNames: true, EmitUnpopulated: false,
 }
 
-// One renders a single proto.Message.
-func One[T proto.Message](w io.Writer, format Format, m T, tableCols []string, tableRow func(T) []string) error {
+// Object renders one *dashapi.Object.
+func Object(w io.Writer, format Format, obj *dashapi.Object) error {
+	if obj == nil {
+		_, err := fmt.Fprintln(w, "(nil)")
+		return err
+	}
 	switch format {
 	case FormatJSON:
-		b, err := jsonMarshal.Marshal(m)
+		b, err := json.MarshalIndent(envelope(obj), "", "  ")
 		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintln(w, string(b))
 		return err
 	case FormatYAML:
-		return writeYAML(w, m)
+		b, err := yaml.Marshal(envelope(obj))
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprint(w, string(b))
+		return err
 	case FormatTable:
-		return writeTable(w, tableCols, [][]string{tableRow(m)})
+		return writeTable(w, []string{"KIND", "KEY", "VALUE"}, [][]string{rowFor(obj)})
 	}
 	return fmt.Errorf("unsupported format %q", format)
 }
 
-// Many renders a slice of proto.Message values of the same concrete type.
-func Many[T proto.Message](w io.Writer, format Format, items []T, tableCols []string, tableRow func(T) []string) error {
+// Objects renders many Objects.
+func Objects(w io.Writer, format Format, objs []*dashapi.Object) error {
 	switch format {
 	case FormatJSON:
-		// emit a JSON array
-		_, _ = fmt.Fprintln(w, "[")
-		for i, it := range items {
-			b, err := jsonMarshal.Marshal(it)
+		out := make([]map[string]interface{}, 0, len(objs))
+		for _, obj := range objs {
+			out = append(out, envelope(obj))
+		}
+		b, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(w, string(b))
+		return err
+	case FormatYAML:
+		for _, obj := range objs {
+			_, _ = fmt.Fprintln(w, "---")
+			b, err := yaml.Marshal(envelope(obj))
 			if err != nil {
 				return err
 			}
-			suffix := ","
-			if i == len(items)-1 {
-				suffix = ""
-			}
-			_, _ = fmt.Fprintf(w, "  %s%s\n", string(b), suffix)
-		}
-		_, err := fmt.Fprintln(w, "]")
-		return err
-	case FormatYAML:
-		for _, it := range items {
-			_, _ = fmt.Fprintln(w, "---")
-			if err := writeYAML(w, it); err != nil {
-				return err
-			}
+			_, _ = fmt.Fprint(w, string(b))
 		}
 		return nil
 	case FormatTable:
-		rows := make([][]string, 0, len(items))
-		for _, it := range items {
-			rows = append(rows, tableRow(it))
+		rows := make([][]string, 0, len(objs))
+		for _, obj := range objs {
+			rows = append(rows, rowFor(obj))
 		}
-		return writeTable(w, tableCols, rows)
+		return writeTable(w, []string{"KIND", "KEY", "VALUE"}, rows)
 	}
 	return fmt.Errorf("unsupported format %q", format)
 }
 
-// Map renders an arbitrary map[string]int64 (used for counters).
-func Map(w io.Writer, format Format, m map[string]int64) error {
+// CountersMap renders a counter snapshot.
+func CountersMap(w io.Writer, format Format, m map[string]int64) error {
 	switch format {
 	case FormatJSON:
 		b, err := json.MarshalIndent(m, "", "  ")
@@ -126,21 +132,37 @@ func Map(w io.Writer, format Format, m map[string]int64) error {
 	return fmt.Errorf("unsupported format %q", format)
 }
 
-func writeYAML(w io.Writer, m proto.Message) error {
-	b, err := jsonMarshal.Marshal(m)
+func envelope(obj *dashapi.Object) map[string]interface{} {
+	out := map[string]interface{}{"kind": "", "key": obj.GetKey()}
+	if info, err := kinds.Lookup(obj.GetKind()); err == nil {
+		out["kind"] = info.Name
+	}
+	if payload, err := kinds.PayloadOf(obj); err == nil && payload != nil {
+		out["value"] = jsonValue(payload, prettyJSON)
+	} else {
+		out["value"] = map[string]interface{}{}
+	}
+	return out
+}
+
+func jsonValue(m proto.Message, opts protojson.MarshalOptions) interface{} {
+	raw, err := opts.Marshal(m)
 	if err != nil {
-		return err
+		return fmt.Sprintf("(err: %v)", err)
 	}
 	var v interface{}
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
+	_ = json.Unmarshal(raw, &v)
+	return v
+}
+
+func rowFor(obj *dashapi.Object) []string {
+	info, _ := kinds.Lookup(obj.GetKind())
+	tight := ""
+	if payload, err := kinds.PayloadOf(obj); err == nil && payload != nil {
+		raw, _ := tightJSON.Marshal(payload)
+		tight = string(raw)
 	}
-	out, err := yaml.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprint(w, string(out))
-	return err
+	return []string{info.Name, strings.Join(obj.GetKey(), ":"), tight}
 }
 
 func writeTable(w io.Writer, cols []string, rows [][]string) error {

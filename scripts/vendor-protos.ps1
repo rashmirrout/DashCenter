@@ -35,7 +35,19 @@ New-Item -ItemType Directory -Force -Path $thirdParty  | Out-Null
 
 # Copy .proto files (upstream layout uses proto/ at repo root)
 Copy-Item -Recurse -Force "$tmp/proto/*.proto" $vendorDir
-Copy-Item -Force "$tmp/LICENSE" "$thirdParty/LICENSE"
+
+# Best-effort copy of license — upstream LICENSE location has varied.
+$licenseCandidates = @(
+  (Join-Path $tmp "LICENSE"),
+  (Join-Path $tmp "LICENSE.txt"),
+  (Join-Path $tmp "debian/copyright")
+)
+foreach ($cand in $licenseCandidates) {
+  if (Test-Path $cand) {
+    Copy-Item -Force $cand "$thirdParty/LICENSE"
+    break
+  }
+}
 
 $resolvedCommit = (& git -C $tmp rev-parse HEAD).Trim()
 @"

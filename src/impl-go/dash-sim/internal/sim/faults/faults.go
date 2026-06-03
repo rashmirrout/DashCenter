@@ -1,18 +1,14 @@
-// Package faults applies operator-configured failure modes to the simulator.
-// Configured via the admin HTTP API:
+// Package faults injects configurable failure modes into the simulator.
 //
-//	POST /admin/faults  {"op":"AddAclRule","mode":"error","count":1,"message":"injected"}
-//	POST /admin/faults  {"op":"CreateVnet","mode":"delay","delay_ms":500,"count":3}
+// Configured via the admin API:
+//
+//	POST /admin/faults  {"op":"Apply","mode":"error","count":1,"message":"injected"}
+//	POST /admin/faults  {"op":"Get","mode":"delay","delay_ms":500,"count":3}
 //	POST /admin/faults  {"op":"*","mode":"drop","count":1}            # all ops
 //	DELETE /admin/faults                                              # clear all
 //
-// Supported modes:
-//
-//	error   — return an Ack{accepted:false, error:msg}
-//	delay   — sleep delay_ms before continuing normally
-//	drop    — return Ack{accepted:false, error:"dropped"} (alias of error w/ default msg)
-//
-// `count` defaults to 1 (one-shot). count <= 0 means infinite.
+// op values match DashApi RPC names: Apply, Delete, Get, List, Subscribe,
+// GetCounters. "*" matches any.
 package faults
 
 import (
@@ -33,14 +29,14 @@ const (
 
 // Spec is a single configured fault.
 type Spec struct {
-	Op       string `json:"op"`                  // RPC name, or "*" for any
-	Mode     Mode   `json:"mode"`                // error | delay | drop
-	Count    int    `json:"count,omitempty"`     // remaining triggers; <=0 means infinite
-	DelayMs  int    `json:"delay_ms,omitempty"`  // for mode=delay
-	Message  string `json:"message,omitempty"`   // for mode=error/drop
+	Op      string `json:"op"`
+	Mode    Mode   `json:"mode"`
+	Count   int    `json:"count,omitempty"`
+	DelayMs int    `json:"delay_ms,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
-// Injector holds the active fault specs.
+// Injector holds active fault specs.
 type Injector struct {
 	mu    sync.Mutex
 	specs []*Spec
@@ -49,7 +45,7 @@ type Injector struct {
 // New returns an empty Injector.
 func New() *Injector { return &Injector{} }
 
-// Add registers a fault spec. Returns an error for invalid input.
+// Add registers a fault spec.
 func (i *Injector) Add(s Spec) error {
 	if s.Op == "" {
 		return errors.New("fault: op is required")
@@ -75,7 +71,7 @@ func (i *Injector) Add(s Spec) error {
 	return nil
 }
 
-// List returns a copy of currently configured specs.
+// List returns a snapshot of current specs.
 func (i *Injector) List() []Spec {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -86,23 +82,21 @@ func (i *Injector) List() []Spec {
 	return out
 }
 
-// Clear removes every registered fault.
+// Clear removes every spec.
 func (i *Injector) Clear() {
 	i.mu.Lock()
 	i.specs = nil
 	i.mu.Unlock()
 }
 
-// Apply is called by the gRPC server at the top of every handler. It consumes
-// a matching spec (decrementing or deleting it) and either returns an error,
-// sleeps, or returns nil to continue normally.
+// Apply consumes a matching spec and either returns an error, sleeps, or
+// returns nil to continue normally.
 func (i *Injector) Apply(op string) error {
 	i.mu.Lock()
 	var match *Spec
 	for idx, s := range i.specs {
 		if s.Op == op || s.Op == "*" {
 			match = s
-			// consume
 			if s.Count > 0 {
 				s.Count--
 				if s.Count == 0 {

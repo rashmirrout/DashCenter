@@ -1,4 +1,15 @@
 // Package cmd builds the Cobra command tree for dash-sim-client.
+//
+// Subcommands:
+//
+//	apply       — create or replace an Object (from --file or --kind/--key/--value)
+//	get         — read an Object by --kind --key
+//	delete      — remove an Object by --kind --key
+//	list        — list every Object of --kind [--prefix]
+//	subscribe   — stream Events (snapshot + live)
+//	counters    — read synthetic counters for --kind --key
+//	kinds       — list supported ObjectKind names
+//	ping        — connectivity check
 package cmd
 
 import (
@@ -25,28 +36,30 @@ var (
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "dash-sim-client",
-		Short: "Operator CLI for the DASH simulator gRPC API",
-		Long: `dash-sim-client is the transport-only CLI for dashsim.v1.DashSim.
+		Short: "Operator CLI for the dashapi.v1.DashApi gRPC service",
+		Long: `dash-sim-client is the transport-only CLI for dashapi.v1.DashApi.
 
-It dials a running dash-sim instance and exposes every RPC as a subcommand.
-Use it for smoke tests, scenario tweaking, and to watch events live.`,
+It dials any server that implements that API: the dash-sim behavioural
+simulator, or — in phase 3 — a vendor adapter on real DASH-compliant
+hardware. All payload types come straight from the upstream sonic-dash-api
+schema, so the same command line works against both.`,
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
 
-	root.PersistentFlags().StringVar(&flagTarget, "target", "localhost:50051", "dash-sim gRPC endpoint (host:port)")
-	root.PersistentFlags().BoolVar(&flagInsecure, "insecure", true, "use plaintext gRPC (default true; set false for TLS — not wired yet)")
+	root.PersistentFlags().StringVar(&flagTarget, "target", "localhost:50051", "DashApi gRPC endpoint (host:port)")
+	root.PersistentFlags().BoolVar(&flagInsecure, "insecure", true, "use plaintext gRPC (TLS not wired yet)")
 	root.PersistentFlags().StringVarP(&flagOutput, "output", "o", "json", "output format: json|yaml|table")
 	root.PersistentFlags().DurationVar(&flagTimeout, "timeout", 10*time.Second, "per-RPC timeout")
 
-	root.AddCommand(newVnetCmd())
-	root.AddCommand(newEniCmd())
-	root.AddCommand(newAclCmd())
-	root.AddCommand(newRouteCmd())
-	root.AddCommand(newMappingCmd())
+	root.AddCommand(newApplyCmd())
+	root.AddCommand(newGetCmd())
+	root.AddCommand(newDeleteCmd())
+	root.AddCommand(newListCmd())
 	root.AddCommand(newSubscribeCmd())
 	root.AddCommand(newCountersCmd())
-	root.AddCommand(newHealthCmd())
+	root.AddCommand(newKindsCmd())
+	root.AddCommand(newPingCmd())
 
 	return root
 }
@@ -54,7 +67,6 @@ Use it for smoke tests, scenario tweaking, and to watch events live.`,
 // Execute runs the root command. Used by cmd/dash-sim-client/main.go.
 func Execute() {
 	if err := NewRootCmd().Execute(); err != nil {
-		// Cobra already printed the error.
 		os.Exit(1)
 	}
 }
@@ -76,7 +88,6 @@ func rpcContext() (context.Context, context.CancelFunc) {
 
 func streamContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
-	// Allow ctrl-c to break long-running streams cleanly.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {

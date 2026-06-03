@@ -1,16 +1,16 @@
-// Package counters provides synthetic per-object packet/byte/drop counters so
-// that downstream components (dashd's TimeSeries path) have data to exercise
-// without real traffic. Counters increment deterministically based on object
-// id hash so tests can assert exact values.
+// Package counters provides synthetic per-object packet/byte/drop counters.
+// Counters increment deterministically based on a hash of the joined object
+// key so tests can assert exact values.
 package counters
 
 import (
 	"hash/fnv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
 
-// Registry tracks counters per object id.
+// Registry tracks counters per object key (joined with ":").
 type Registry struct {
 	mu       sync.RWMutex
 	counters map[string]*objectCounters
@@ -29,11 +29,10 @@ func New() *Registry {
 	return &Registry{counters: make(map[string]*objectCounters)}
 }
 
-// Tick advances counters for the given object id by a deterministic amount.
-// Call this periodically from a background goroutine in main.
-func (r *Registry) Tick(id string) {
-	c := r.get(id)
-	h := hash(id)
+// Tick advances counters for the given key by a deterministic amount.
+func (r *Registry) Tick(key string) {
+	c := r.get(key)
+	h := hash(key)
 	c.packetsIn.Add(int64(1 + (h & 0x0f)))
 	c.packetsOut.Add(int64(1 + ((h >> 4) & 0x0f)))
 	c.bytesIn.Add(int64(64 * (1 + (h & 0xff))))
@@ -43,19 +42,15 @@ func (r *Registry) Tick(id string) {
 	}
 }
 
-// Snapshot returns the current counter values for the object id, or zero
-// values if the id is unknown.
-func (r *Registry) Snapshot(id string) map[string]int64 {
+// Snapshot returns counter values for the key, or zeros if unknown.
+func (r *Registry) Snapshot(key string) map[string]int64 {
 	r.mu.RLock()
-	c, ok := r.counters[id]
+	c, ok := r.counters[key]
 	r.mu.RUnlock()
 	if !ok {
 		return map[string]int64{
-			"packets_in":  0,
-			"packets_out": 0,
-			"bytes_in":    0,
-			"bytes_out":   0,
-			"drops":       0,
+			"packets_in": 0, "packets_out": 0,
+			"bytes_in": 0, "bytes_out": 0, "drops": 0,
 		}
 	}
 	return map[string]int64{
@@ -67,38 +62,38 @@ func (r *Registry) Snapshot(id string) map[string]int64 {
 	}
 }
 
-// IDs returns every id that has any counter recorded.
-func (r *Registry) IDs() []string {
+// Keys returns every tracked key.
+func (r *Registry) Keys() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]string, 0, len(r.counters))
-	for id := range r.counters {
-		out = append(out, id)
+	for k := range r.counters {
+		out = append(out, k)
 	}
 	return out
 }
 
-// Forget removes counters for the id (called on object delete).
-func (r *Registry) Forget(id string) {
+// Forget removes counters for a key.
+func (r *Registry) Forget(key string) {
 	r.mu.Lock()
-	delete(r.counters, id)
+	delete(r.counters, key)
 	r.mu.Unlock()
 }
 
-func (r *Registry) get(id string) *objectCounters {
+func (r *Registry) get(key string) *objectCounters {
 	r.mu.RLock()
-	c, ok := r.counters[id]
+	c, ok := r.counters[key]
 	r.mu.RUnlock()
 	if ok {
 		return c
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if c, ok = r.counters[id]; ok {
+	if c, ok = r.counters[key]; ok {
 		return c
 	}
 	c = &objectCounters{}
-	r.counters[id] = c
+	r.counters[key] = c
 	return c
 }
 
@@ -106,4 +101,9 @@ func hash(s string) uint32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(s))
 	return h.Sum32()
+}
+
+// JoinKey turns ordered key parts into the canonical Redis-style joined key.
+func JoinKey(parts []string) string {
+	return strings.Join(parts, ":")
 }

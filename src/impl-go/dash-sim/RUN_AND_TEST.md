@@ -1,36 +1,48 @@
-# dash-sim & dash-sim-client — Run + Test Guide
+# dash-sim & dash-sim-client — Run + Test Guide (Phase 1)
 
-This guide covers running the DASH simulator (`dash-sim`) and driving it with
-the operator CLI (`dash-sim-client`).
+This guide covers the **upstream-schema** build of DashCenter:
 
-> Both binaries live in `src/impl-go/bin/` after a build. They are pure Go and
-> have no runtime dependencies.
+- `dash-sim` is a behavioural simulator implementing the gRPC service
+  `dashapi.v1.DashApi`. Every object type comes verbatim from
+  [sonic-net/sonic-dash-api](https://github.com/sonic-net/sonic-dash-api)
+  (vendored under `proto/vendor/sonic-dash-api/`, pinned commit recorded in
+  `proto/vendor/sonic-dash-api/VERSION`).
+- `dash-sim-client` is the operator CLI for that service. The SAME binary
+  will work, unchanged, against any future server that implements
+  `dashapi.v1.DashApi` (planned phase 3: a Redis APP_DB adapter that drives
+  real SONiC DASH hardware).
+
+Both binaries live in `src/impl-go/bin/` after a build.
 
 ---
 
-## 1. One-time toolchain setup (Windows)
-
-If you are starting a fresh PowerShell session, prepend the toolchain to
-`PATH`:
+## 1. Toolchain (Windows, per shell session)
 
 ```powershell
 $env:PATH="$env:USERPROFILE\go-sdk\go\bin;$env:USERPROFILE\go\bin;$env:USERPROFILE\protoc\bin;$env:PATH"
 $env:GOPATH="$env:USERPROFILE\go"
 $env:GOBIN="$env:USERPROFILE\go\bin"
-```
 
-Verify:
-
-```powershell
-go version       # go1.22.x
-protoc --version # libprotoc 25.x
+go version          # go1.22.x
+protoc --version    # libprotoc 25.x
 ```
 
 ---
 
-## 2. Build
+## 2. Regenerate protos (only when upstream changes)
 
-From the Go workspace root:
+```powershell
+cd C:\WorkSpace\PS\PublicRepo\DashCenter
+pwsh -File .\scripts\vendor-protos.ps1     # snapshot upstream into proto/vendor/
+pwsh -File .\scripts\codegen-go.ps1        # regenerate src/impl-go/gen/go/
+```
+
+The codegen script writes 32 `.pb.go` files: 30 upstream message packages
+under `gen/go/dash/<area>/` plus the `dashapi.v1` service envelope.
+
+---
+
+## 3. Build
 
 ```powershell
 cd C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go
@@ -39,14 +51,9 @@ go build -o bin\dash-sim.exe        .\dash-sim\cmd\dash-sim
 go build -o bin\dash-sim-client.exe .\dash-sim-client\cmd\dash-sim-client
 ```
 
-Outputs:
-
-- `bin\dash-sim.exe`        — the simulator (gRPC + admin HTTP)
-- `bin\dash-sim-client.exe` — the operator CLI
-
 ---
 
-## 3. Run the simulator
+## 4. Run the simulator
 
 ```powershell
 .\bin\dash-sim.exe `
@@ -57,195 +64,215 @@ Outputs:
 
 Flags:
 
-| Flag              | Default       | Description                                |
-| ----------------- | ------------- | ------------------------------------------ |
-| `--grpc-listen`   | `:50051`      | gRPC service bind address                  |
-| `--admin-listen` | `:8080`       | admin HTTP API bind address                |
-| `--device-id`     | `dpu-sim-01`  | synthetic device id                        |
-| `--scenario`      | (none)        | optional path to a YAML scenario to preload |
-| `--tick-interval` | `1s`          | per-object counter tick interval           |
+| Flag             | Default      | Description                                  |
+|------------------|--------------|----------------------------------------------|
+| `--grpc-listen`  | `:50051`     | DashApi gRPC bind address                    |
+| `--admin-listen` | `:8080`      | Admin HTTP bind address                      |
+| `--device-id`    | `dpu-sim-01` | Synthetic device id                          |
+| `--scenario`     | (none)       | Optional YAML scenario to preload            |
+| `--tick-interval`| `1s`         | Per-object counter tick                      |
 
-Press `Ctrl+C` for graceful shutdown.
+`Ctrl+C` for graceful shutdown.
 
-### Preload a scenario at start
+### Preload a scenario
 
 ```powershell
-.\bin\dash-sim.exe `
-  --scenario .\dash-sim\testdata\scenarios\small.yaml
+.\bin\dash-sim.exe --scenario .\dash-sim\testdata\scenarios\small.yaml
 ```
 
 ---
 
-## 4. Drive it with the CLI
+## 5. Drive the CLI
 
-All commands accept `--target host:port` (defaults to `localhost:50051`) and
-`-o json|yaml|table` (defaults to `json`).
+All commands accept `--target host:port` (default `localhost:50051`) and
+`-o json|yaml|table` (default `json`).
 
-### 4.1 Sanity check
-
-```powershell
-.\bin\dash-sim-client.exe ping
-# -> ok: target=localhost:50051 vnets=0
-```
-
-### 4.2 VNETs
+The CLI is **generic** — every DASH object kind goes through the same
+`apply / get / delete / list / subscribe / counters` commands. The complete
+list of supported kinds:
 
 ```powershell
-.\bin\dash-sim-client.exe vnet create vnet-prod --vni 1001
-.\bin\dash-sim-client.exe vnet create vnet-dev  --vni 1002 --label env=dev --label tier=frontend
-.\bin\dash-sim-client.exe vnet list -o table
-.\bin\dash-sim-client.exe vnet get  vnet-prod
-.\bin\dash-sim-client.exe vnet delete vnet-dev
+dash-sim-client kinds -o table
 ```
 
-### 4.3 ENIs
+Will print something like:
+
+```
+NAME                      ENUM                                     KEY_PARTS
+appliance                 OBJECT_KIND_APPLIANCE                    appliance_id
+vnet                      OBJECT_KIND_VNET                         vnet_name
+eni                       OBJECT_KIND_ENI                          eni
+eni_route                 OBJECT_KIND_ENI_ROUTE                    eni
+acl_group                 OBJECT_KIND_ACL_GROUP                    group_id
+acl_rule                  OBJECT_KIND_ACL_RULE                     group_id,rule_num
+acl_in                    OBJECT_KIND_ACL_IN                       eni,stage
+acl_out                   OBJECT_KIND_ACL_OUT                      eni,stage
+route                     OBJECT_KIND_ROUTE                        group_id,prefix
+route_group               OBJECT_KIND_ROUTE_GROUP                  group_id
+route_rule                OBJECT_KIND_ROUTE_RULE                   eni,vni,prefix_or_tag,priority
+route_type                OBJECT_KIND_ROUTE_TYPE                   routing_type
+routing_appliance         OBJECT_KIND_ROUTING_APPLIANCE            appliance_id
+prefix_tag                OBJECT_KIND_PREFIX_TAG                   tag_name
+vnet_mapping              OBJECT_KIND_VNET_MAPPING                 vnet,ip_address
+tunnel                    OBJECT_KIND_TUNNEL                       tunnel_name
+pa_validation             OBJECT_KIND_PA_VALIDATION                vni
+qos                       OBJECT_KIND_QOS                          qos_name
+meter                     OBJECT_KIND_METER                        eni,metering_class_id
+meter_policy              OBJECT_KIND_METER_POLICY                 meter_policy_id
+meter_rule                OBJECT_KIND_METER_RULE                   meter_policy_id,rule_num
+outbound_port_map         OBJECT_KIND_OUTBOUND_PORT_MAP            map_id
+outbound_port_map_range   OBJECT_KIND_OUTBOUND_PORT_MAP_RANGE      map_id,start_port,end_port
+ha_scope                  OBJECT_KIND_HA_SCOPE                     ha_scope_id
+ha_scope_config           OBJECT_KIND_HA_SCOPE_CONFIG              vdpu_id,ha_scope_id
+ha_scope_state            OBJECT_KIND_HA_SCOPE_STATE               ha_scope_id
+ha_set                    OBJECT_KIND_HA_SET                       ha_set_id
+ha_set_config             OBJECT_KIND_HA_SET_CONFIG                ha_set_id
+ha_set_state              OBJECT_KIND_HA_SET_STATE                 ha_set_id
+```
+
+### 5.1 Apply (create or replace)
+
+Composite keys are joined with `:`. Values are JSON using upstream protojson
+field names — base64 for bytes, enum string names for enums, network-byte-order
+int for `fixed32` IP addresses.
 
 ```powershell
-.\bin\dash-sim-client.exe eni create eni-001 `
-  --vnet-id vnet-prod --mac 00:11:22:33:44:55 `
-  --address 10.0.0.10 --address 10.0.0.11
-
-.\bin\dash-sim-client.exe eni list -o table
-.\bin\dash-sim-client.exe eni update eni-001 --vnet-id vnet-prod --admin-state down
-.\bin\dash-sim-client.exe eni delete eni-001
+dash-sim-client apply --kind vnet --key vnet-prod  --value '{"vni":1001}'
+dash-sim-client apply --kind eni  --key eni-001    --value '{
+  "eni_id":      "11111111-1111-1111-1111-111111111111",
+  "mac_address": "ABEiM0RV",
+  "vnet":        "vnet-prod",
+  "admin_state": "STATE_ENABLED"
+}'
+dash-sim-client apply --kind acl_group   --key acl-prod-in      --value '{"ip_version":"IP_VERSION_IPV4"}'
+dash-sim-client apply --kind acl_rule    --key 'acl-prod-in:100' --value '{"priority":100,"action":"ACTION_PERMIT","terminating":true}'
+dash-sim-client apply --kind acl_in      --key 'eni-001:1'       --value '{"v4_acl_group_id":"acl-prod-in"}'
+dash-sim-client apply --kind vnet_mapping --key 'vnet-prod:10.0.0.20' --value '{
+  "underlay_ip":   {"ipv4": 343798372},
+  "routing_type":  "ROUTING_TYPE_VNET"
+}'
 ```
 
-### 4.4 ACL groups + rules
+Or load a YAML file with many entries:
 
 ```powershell
-.\bin\dash-sim-client.exe acl group add acl-prod-in --stage INBOUND
-.\bin\dash-sim-client.exe acl rule  add `
-  --group-id acl-prod-in --num 100 --action ALLOW `
-  --src-prefix 0.0.0.0/0 --dst-prefix 10.0.0.0/24
-.\bin\dash-sim-client.exe acl rule  list -o table
-.\bin\dash-sim-client.exe acl rule  delete acl-prod-in/100
-.\bin\dash-sim-client.exe acl group delete acl-prod-in    # cascades to its rules
+dash-sim-client apply -f .\dash-sim\testdata\scenarios\small.yaml
 ```
 
-### 4.5 Routes
+### 5.2 Get / List / Delete
 
 ```powershell
-.\bin\dash-sim-client.exe route add `
-  --table vnet-prod --dst-prefix 10.1.0.0/16 `
-  --action FORWARD  --next-hop-ip 10.0.0.1
-.\bin\dash-sim-client.exe route list -o table
-.\bin\dash-sim-client.exe route delete vnet-prod/10.1.0.0/16
+dash-sim-client list   --kind vnet -o table
+dash-sim-client list   --kind eni  -o yaml
+dash-sim-client get    --kind eni  --key eni-001
+dash-sim-client delete --kind vnet --key vnet-prod
 ```
 
-### 4.6 VNET mappings
+### 5.3 Subscribe (snapshot + live)
 
 ```powershell
-.\bin\dash-sim-client.exe mapping add `
-  --vnet-id vnet-prod --overlay-ip 10.0.0.20 `
-  --underlay-ip 100.64.0.20 --mac 00:aa:bb:cc:dd:ee --vni 1001
-.\bin\dash-sim-client.exe mapping list -o table
-.\bin\dash-sim-client.exe mapping delete vnet-prod/10.0.0.20
+dash-sim-client subscribe --snapshot                       # all kinds
+dash-sim-client subscribe --snapshot --kinds vnet,eni      # filtered
 ```
 
-### 4.7 Counters
+`Ctrl+C` to stop. Each event prints as a one-line JSON object containing
+`{kind, key, value, type, txn_id, server_ts_ns}`.
+
+### 5.4 Counters
 
 ```powershell
-.\bin\dash-sim-client.exe counters get eni-001 -o table
+dash-sim-client counters --kind eni --key eni-001 -o table
 ```
 
-### 4.8 Subscribe (snapshot + live updates)
+### 5.5 Ping (connectivity)
 
 ```powershell
-# Stream all kinds, current state first:
-.\bin\dash-sim-client.exe subscribe --snapshot
-
-# Filter by kind:
-.\bin\dash-sim-client.exe subscribe --snapshot --kinds vnet,eni
-
-# Then, from another shell, mutate and watch the events arrive live:
-.\bin\dash-sim-client.exe vnet create vnet-live --vni 9999
+dash-sim-client ping
 ```
-
-Press `Ctrl+C` to end the stream.
 
 ---
 
-## 5. Admin HTTP API (`--admin-listen`)
-
-Quick `curl` / `Invoke-RestMethod` examples:
+## 6. Admin HTTP API
 
 ```powershell
-# Health
+# Health (per-kind sizes, subscribers, dropped events)
 Invoke-RestMethod http://localhost:8080/admin/health | ConvertTo-Json -Depth 5
 
-# Full state dump
+# Full dump of every object across every kind
 Invoke-RestMethod http://localhost:8080/admin/dump | ConvertTo-Json -Depth 6
 
-# Reset state
+# Reset model
 Invoke-RestMethod -Method Post http://localhost:8080/admin/reset
 
-# Load a scenario file (path is server-side)
-$body = @{
-  path  = "C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dash-sim\testdata\scenarios\small.yaml"
-  reset = $true
-} | ConvertTo-Json
+# Load a server-side scenario
+$body = @{ path = "...\testdata\scenarios\small.yaml"; reset = $true } | ConvertTo-Json
 Invoke-RestMethod -Method Post http://localhost:8080/admin/scenario -Body $body -ContentType application/json
 
-# Inject a one-shot failure on the next CreateVnet call
-$body = @{op="CreateVnet"; mode="error"; count=1; message="injected"} | ConvertTo-Json
+# Inject a one-shot Apply failure
+$body = @{ op = "Apply"; mode = "error"; count = 1; message = "injected" } | ConvertTo-Json
 Invoke-RestMethod -Method Post http://localhost:8080/admin/faults -Body $body -ContentType application/json
 
 # List / clear faults
 Invoke-RestMethod http://localhost:8080/admin/faults
 Invoke-RestMethod -Method Delete http://localhost:8080/admin/faults
+
+# List supported kinds (also returns key_parts)
+Invoke-RestMethod http://localhost:8080/admin/kinds | ConvertTo-Json -Depth 3
 ```
+
+Fault op names match DashApi RPCs: `Apply`, `Delete`, `Get`, `List`,
+`Subscribe`, `GetCounters`. `*` matches any.
 
 Fault modes:
 
-| `mode`  | Behavior                                            | Required fields           |
-| ------- | --------------------------------------------------- | ------------------------- |
-| `error` | Return `Ack{accepted:false, error:<message>}`       | `op`, `message` optional  |
-| `drop`  | Alias of `error` with default message `"dropped"`   | `op`                      |
-| `delay` | Sleep `delay_ms` then continue normally             | `op`, `delay_ms`          |
+| Mode    | Behavior                                            |
+|---------|-----------------------------------------------------|
+| `error` | Return `Ack{accepted:false, error:<message>}`       |
+| `drop`  | Alias of `error` with default message `"dropped"`   |
+| `delay` | Sleep `delay_ms` then continue normally             |
 
-`op="*"` matches every RPC. `count<=0` means infinite, `count=0` defaults to
-`1` (one-shot).
-
----
-
-## 6. Full smoke test (copy-paste)
-
-Terminal A — start the sim:
-
-```powershell
-C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\bin\dash-sim.exe
-```
-
-Terminal B — exercise it:
-
-```powershell
-$c = "C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\bin\dash-sim-client.exe"
-
-& $c ping
-& $c vnet create vnet-prod --vni 1001
-& $c eni  create eni-001 --vnet-id vnet-prod --mac 00:11:22:33:44:55 --address 10.0.0.10
-& $c acl  group add acl-in --stage INBOUND
-& $c acl  rule  add  --group-id acl-in --num 100 --action ALLOW --src-prefix 0.0.0.0/0 --dst-prefix 10.0.0.0/24
-& $c route add  --table vnet-prod --dst-prefix 10.1.0.0/16 --action FORWARD --next-hop-ip 10.0.0.1
-& $c mapping add --vnet-id vnet-prod --overlay-ip 10.0.0.20 --underlay-ip 100.64.0.20 --mac 00:aa:bb:cc:dd:ee --vni 1001
-& $c vnet list    -o table
-& $c eni  list    -o table
-& $c acl  rule list -o table
-& $c route list   -o table
-& $c mapping list -o table
-& $c counters get eni-001 -o table
-& $c subscribe --snapshot --kinds vnet,eni
-```
-
-Press `Ctrl+C` on the subscribe command, then `Ctrl+C` on the sim.
+`count<=0` = infinite, `count=0` defaults to `1` (one-shot).
 
 ---
 
-## 7. Troubleshooting
+## 7. Scenario YAML reference
 
-| Symptom                                              | Fix                                                                    |
-| ---------------------------------------------------- | ---------------------------------------------------------------------- |
-| `go: ... not recognized`                             | Re-run the `$env:PATH=` block in §1.                                   |
-| `connection refused` on the client                    | sim isn't running on `--target`; check `Get-NetTCPConnection -LocalPort 50051`. |
-| Subscribe shows no live events                        | Subscriber buffer full (256). Check `/admin/health` `dropped_events`.   |
-| Scenario load fails with "vnet \"X\" does not exist" | YAML order matters; ENIs/mappings reference VNETs and must come after. |
+A scenario is a YAML doc with `apiVersion`, `kind: Scenario`, `metadata`,
+and a `spec` list of `{kind, key, value}` entries. Each `value` follows
+upstream protojson rules (enum names, base64 bytes, network-byte-order
+fixed32 ints for IP addresses, nested message dicts).
+
+A reference scenario covering 9 different upstream kinds — appliance, vnet,
+eni, acl_group, acl_rule, acl_in, vnet_mapping, route_group, route, eni_route —
+is at:
+
+```
+src/impl-go/dash-sim/testdata/scenarios/small.yaml
+```
+
+---
+
+## 8. Phase roadmap
+
+| Phase | Scope                                                                     | Status |
+|-------|---------------------------------------------------------------------------|--------|
+| 1     | Schema parity (all 29 upstream object kinds + DashApi service)            | done |
+| 2     | Behavioral parity per DASH HLDs (5-stage ACL pipeline, routing, metering, HA) | next |
+| 3     | Hardware bridge: `dashd-redis-adapter` (writes SONiC APP_DB), `dashd-gnmi-adapter` | follow-up |
+
+When phase 3 lands, **the same `dash-sim-client` binary** will drive real
+DASH-compliant DPUs because the wire contract (`dashapi.v1.DashApi` over
+upstream proto types) is unchanged.
+
+---
+
+## 9. Troubleshooting
+
+| Symptom                                                            | Fix                                                                |
+|--------------------------------------------------------------------|--------------------------------------------------------------------|
+| `go: ... not recognized`                                           | Re-run the `$env:PATH=` block in §1.                               |
+| `protoc: not found` when running codegen                           | Same — protoc lives at `$env:USERPROFILE\protoc\bin`.              |
+| `connection refused` from client                                   | sim isn't running on `--target`; check `Get-NetTCPConnection -LocalPort 50051`. |
+| `decode value: ... unknown field` on apply                         | YAML field name doesn't match upstream protojson; run `dash-sim-client kinds` and inspect the generated `.pb.go` for that kind. |
+| `kind X expects N key parts ...`                                   | Joined `--key` doesn't have the right `:`-separated count for that kind. See `dash-sim-client kinds`. |
+| Subscribe shows no live events                                     | Subscriber buffer full (256). Check `/admin/health` `dropped_events`. |
