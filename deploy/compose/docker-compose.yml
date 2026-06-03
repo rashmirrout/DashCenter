@@ -1,44 +1,59 @@
 # Local fleet for DashCenter development.
 #
-#   docker compose up                           # 1 redis + 1 dashd + 3 dash-sims
-#   docker compose up --scale dash-sim=10       # scale the simulator fleet
-#   docker compose --profile rust up            # use the Rust implementation
+# Default fleet (no profile arg):
+#   docker compose up -d redis dash-sim dash-redis-adapter
 #
-# Bindings (default profile = Go):
-#   localhost:6379   Redis Stack
-#   localhost:8443   dashd REST API
-#   localhost:9443   dashd gRPC
-#   localhost:50051+ dash-sim gRPC (one per replica)
+# Scale the simulator fleet:
+#   docker compose up -d --scale dash-sim=3
+#
+# Drive the running fleet from a one-shot CLI container:
+#   docker compose run --rm cli ping
+#   docker compose run --rm cli --target dash-redis-adapter:52051 ping
+#
+# Service map (when started on the default network):
+#   redis              -> redis:6379
+#   dash-sim           -> dash-sim:50051 (gRPC) + dash-sim:8080 (admin HTTP)
+#   dash-redis-adapter -> dash-redis-adapter:52051 (gRPC, backed by 'redis')
+#
+# Host port bindings (default):
+#   localhost:6379   Redis
+#   localhost:50051  dash-sim gRPC
+#   localhost:8080   dash-sim admin HTTP
+#   localhost:52051  dash-redis-adapter gRPC
 
 services:
   redis:
-    image: redis/redis-stack:latest
+    image: redis:7-alpine
     container_name: dc-redis
-    ports: ["6379:6379", "8001:8001"]
-    profiles: [go, rust, default]
-
-  dashd:
-    build:
-      context: ../..
-      dockerfile: src/impl-go/dashd/Dockerfile
-    container_name: dc-dashd
-    depends_on: [redis]
-    environment:
-      DASHD_REDIS_ADDR: redis:6379
-      DASHD_LOG_LEVEL: info
-    ports: ["8443:8443", "9443:9443"]
-    profiles: [go, default]
+    ports: ["6379:6379"]
 
   dash-sim:
     build:
       context: ../..
       dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-dash-sim
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-01"]
+    ports: ["50051:50051", "8080:8080"]
+
+  dash-redis-adapter:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-redis-adapter/Dockerfile
+    image: dashcenter/dash-redis-adapter:dev
+    container_name: dc-dash-redis-adapter
     depends_on: [redis]
-    environment:
-      DASHSIM_GRPC_ADDR: ":50051"
-      DASHSIM_ADMIN_ADDR: ":8080"
-      DASHSIM_SCENARIO: /scenarios/single-dpu.yaml
-    volumes:
-      - ./scenarios:/scenarios:ro
-    ports: ["50051"]   # docker assigns a host port per replica
-    profiles: [go, default]
+    command: ["--grpc-listen", ":52051", "--redis", "redis:6379"]
+    ports: ["52051:52051"]
+
+  # One-shot CLI container.
+  #   docker compose run --rm cli ping
+  #   docker compose run --rm cli --target dash-sim:50051 apply --kind vnet --key v --value '{"vni":1}'
+  cli:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim-client/Dockerfile
+    image: dashcenter/dash-sim-client:dev
+    profiles: [cli]
+    # Default target points at the dash-sim service over the docker network.
+    entrypoint: ["/usr/local/bin/dash-sim-client", "--target", "dash-sim:50051"]
