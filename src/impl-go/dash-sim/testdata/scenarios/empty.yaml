@@ -1,0 +1,6 @@
+apiVersion: dashsim.dashcenter.io/v1
+kind: Scenario
+metadata:
+  name: empty
+  device_id: dpu-sim-01
+spec: {}

@@ -1,0 +1,21 @@
+# Use with `docker compose up --scale dash-sim=10` and set
+# DASHSIM_SCENARIO=/scenarios/10-dpu-fleet.yaml per replica.
+# (Each replica reads the same file but uses its hostname suffix as device_id.)
+apiVersion: dashsim.dashcenter.io/v1
+kind: Scenario
+metadata:
+  name: 10-dpu-fleet
+  device_id_template: "dpu-sim-{{.Replica}}"
+spec:
+  vnets:
+    - id: vnet-prod
+      vni: 1001
+    - id: vnet-stage
+      vni: 1002
+  enis_per_vnet: 5
+  acl_groups:
+    - id: acl-default
+      stage: inbound
+      rules:
+        - num: 10
+          action: allow

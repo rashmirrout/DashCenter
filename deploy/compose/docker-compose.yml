@@ -1,0 +1,44 @@
+# Local fleet for DashCenter development.
+#
+#   docker compose up                           # 1 redis + 1 dashd + 3 dash-sims
+#   docker compose up --scale dash-sim=10       # scale the simulator fleet
+#   docker compose --profile rust up            # use the Rust implementation
+#
+# Bindings (default profile = Go):
+#   localhost:6379   Redis Stack
+#   localhost:8443   dashd REST API
+#   localhost:9443   dashd gRPC
+#   localhost:50051+ dash-sim gRPC (one per replica)
+
+services:
+  redis:
+    image: redis/redis-stack:latest
+    container_name: dc-redis
+    ports: ["6379:6379", "8001:8001"]
+    profiles: [go, rust, default]
+
+  dashd:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dashd/Dockerfile
+    container_name: dc-dashd
+    depends_on: [redis]
+    environment:
+      DASHD_REDIS_ADDR: redis:6379
+      DASHD_LOG_LEVEL: info
+    ports: ["8443:8443", "9443:9443"]
+    profiles: [go, default]
+
+  dash-sim:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    depends_on: [redis]
+    environment:
+      DASHSIM_GRPC_ADDR: ":50051"
+      DASHSIM_ADMIN_ADDR: ":8080"
+      DASHSIM_SCENARIO: /scenarios/single-dpu.yaml
+    volumes:
+      - ./scenarios:/scenarios:ro
+    ports: ["50051"]   # docker assigns a host port per replica
+    profiles: [go, default]

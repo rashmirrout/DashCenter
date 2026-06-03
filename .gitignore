@@ -216,3 +216,25 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- Go ----
+bin/
+*.exe
+*.test
+*.out
+coverage.txt
+vendor/
+go.work.sum
+src/impl-go/gen/go/dash/         # uncomment to ignore generated stubs once regenerated locally; default is to commit
+# (Keep gen/go/ checked in for reproducible builds; comment line above out to ignore.)
+
+# ---- Rust ----
+target/
+**/*.rs.bk
+Cargo.lock                       # libraries: ignore; binaries: commit. Re-evaluate per crate.
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

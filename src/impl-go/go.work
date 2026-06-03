@@ -1,0 +1,9 @@
+go 1.22
+
+use (
+	./gen/go
+	./dashd
+	./dashctl
+	./dash-sim
+	./dash-sim-client
+)

@@ -1,0 +1,12 @@
+version: v2
+name: buf.build/rashmirrout/dashcenter
+modules:
+  - path: ../../../proto
+    excludes:
+      - ../../../proto/vendor/sonic-dash-api/VERSION
+lint:
+  use:
+    - DEFAULT
+breaking:
+  use:
+    - FILE

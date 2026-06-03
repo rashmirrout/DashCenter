@@ -1,0 +1,32 @@
+# Cargo workspace for the Rust implementation.
+# Each member crate is a stub; `cargo build --workspace` currently does nothing
+# because no crates exist yet. Add them via `cargo new --bin crates/<name>` or
+# `cargo new --lib crates/<name>` as work begins.
+[workspace]
+resolver = "2"
+members = [
+    # "crates/dashd",
+    # "crates/dashctl",
+    # "crates/dash-sim",
+    # "crates/dash-sim-client",
+    # "crates/dashsim-client-sdk",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.78"
+license = "Apache-2.0"
+repository = "https://github.com/rashmirrout/DashCenter"
+
+[workspace.dependencies]
+tokio       = { version = "1", features = ["full"] }
+tonic       = "0.12"
+tonic-build = "0.12"
+prost       = "0.13"
+axum        = "0.7"
+clap        = { version = "4", features = ["derive"] }
+serde       = { version = "1", features = ["derive"] }
+serde_yaml  = "0.9"
+anyhow      = "1"
+tracing     = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

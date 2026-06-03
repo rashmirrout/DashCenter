@@ -1,0 +1,22 @@
+# Static appliance inventory (see specs/high_level_system_design.md §2.1).
+apiVersion: dash.enterprise.io/v1
+kind: ApplianceInventory
+metadata:
+  cluster_context: dev-local
+items:
+  - id: dpu-sim-01
+    management_ip: 127.0.0.1
+    grpc_port: 50051
+    gnmi_port: 50052
+    namespace: tenant-dev
+    labels:
+      asic: simulated
+      role: edge-dpu
+  - id: dpu-sim-02
+    management_ip: 127.0.0.1
+    grpc_port: 50053
+    gnmi_port: 50054
+    namespace: tenant-dev
+    labels:
+      asic: simulated
+      role: edge-dpu

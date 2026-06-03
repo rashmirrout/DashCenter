@@ -1,0 +1,51 @@
+apiVersion: dashsim/v1
+kind: Scenario
+metadata:
+  name: small
+  device_id: dpu-sim-01
+spec:
+  vnets:
+    - id: vnet-prod
+      vni: 1001
+    - id: vnet-stage
+      vni: 1002
+  enis:
+    - id: eni-100
+      vnet_id: vnet-prod
+      mac: "00:aa:bb:00:01:00"
+      addresses: ["10.0.0.4/24"]
+    - id: eni-101
+      vnet_id: vnet-prod
+      mac: "00:aa:bb:00:01:01"
+      addresses: ["10.0.0.5/24"]
+    - id: eni-200
+      vnet_id: vnet-stage
+      mac: "00:aa:bb:00:02:00"
+      addresses: ["10.1.0.4/24"]
+  acl_groups:
+    - id: acl-default
+      stage: INBOUND
+  acl_rules:
+    - group_id: acl-default
+      num: 10
+      action: ALLOW
+      src_prefix: "10.0.0.0/24"
+      dst_prefix: "0.0.0.0/0"
+      protocol: any
+    - group_id: acl-default
+      num: 20
+      action: DENY
+      src_prefix: "10.99.0.0/16"
+      dst_prefix: "0.0.0.0/0"
+      protocol: any
+  routes:
+    - table: vnet-prod
+      dst_prefix: "10.1.0.0/24"
+      action: ENCAP
+      vnet_id: vnet-stage
+  vnet_mappings:
+    - vnet_id: vnet-prod
+      overlay_ip: "10.0.0.10"
+      underlay_ip: "192.168.1.10"
+      mac: "00:cc:dd:00:00:0a"
+      vni: 1001

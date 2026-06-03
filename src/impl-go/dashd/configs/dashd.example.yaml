@@ -1,0 +1,30 @@
+# dashd example configuration (referenced as DASHD_CONFIG=...).
+server:
+  rest_listen: ":8443"
+  grpc_listen: ":9443"
+  ws_listen:   ":8443"   # shares the REST port
+
+redis:
+  addr: "localhost:6379"
+  db:   0
+
+inventory:
+  file: "configs/appliances.example.yaml"
+  register_listen: ":7443"  # phone-home gRPC service
+
+ingest:
+  poll_interval_ms: 1000
+  reconcile_interval_s: 60
+
+cluster:
+  enabled: false           # set true for Model 2
+  bind_addr: ":7946"
+  raft_dir: "/var/lib/dashd/raft"
+
+telemetry:
+  prometheus_listen: ":2112"
+  otlp_endpoint: ""
+
+log:
+  level: "info"
+  format: "json"

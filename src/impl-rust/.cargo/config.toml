@@ -1,0 +1,9 @@
+# Cargo configuration for the Rust workspace.
+[build]
+# Speed up incremental builds across the workspace.
+incremental = true
+
+[target.'cfg(all())']
+rustflags = [
+    "-Dwarnings",
+]
