@@ -1,0 +1,293 @@
+// dashapi.proto — DashCenter operator API.
+//
+// This file defines a gRPC service ENVELOPE around the upstream
+// sonic-net/sonic-dash-api proto schemas (vendored verbatim under
+// proto/vendor/sonic-dash-api/, pinned at the commit recorded in
+// proto/vendor/sonic-dash-api/VERSION).
+//
+// Design principle: the SERVICE is ours, but the object SCHEMAS are upstream.
+// Every payload field below references a message from the official
+// `dash.<area>` packages. This guarantees that the same client speaking this
+// API works against:
+//
+//   1. dash-sim          (behavioural simulator written in Go — this repo),
+//   2. dash-redis-adapter (translates Apply -> SONiC APP_DB writes — phase 3),
+//   3. real DASH-compliant DPU agents that ship a thin DashApi server stub.
+//
+// Object addressing
+// -----------------
+// Upstream keys are typed messages (VnetKey, EniKey, VnetMappingKey, ...).
+// For wire compactness and 1:1 mapping with SONiC Redis APP_DB keys we encode
+// every key as an ordered list of strings (`repeated string key`). The order
+// matches the field order of the upstream `<Kind>Key` message, e.g.:
+//
+//   Vnet           -> [vnet_name]
+//   Eni            -> [eni]
+//   VnetMapping    -> [vnet, ip_address]
+//   Route          -> [group_id, prefix]
+//   RouteRule      -> [eni, vni, prefix_or_tag, priority]
+//   AclRule        -> [group_id, rule_num]
+//   AclIn/AclOut   -> [eni, stage]
+//   Meter          -> [eni, metering_class_id]
+//   MeterRule      -> [meter_policy_id, rule_num]
+//   HaScopeConfig  -> [vdpu_id, ha_scope_id]
+//   OutboundPortMapRange -> [map_id, start_port, end_port]
+//
+// This produces Redis APP_DB keys directly: e.g. for VnetMapping
+//   DASH_VNET_MAPPING_TABLE:vnet-prod:10.0.0.10
+// is the join "DASH_VNET_MAPPING_TABLE:" + strings.Join(key, ":").
+
+syntax = "proto3";
+
+package dashapi.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashapi/v1;dashapi";
+
+// Upstream schemas — vendored verbatim.
+import "appliance.proto";
+import "vnet.proto";
+import "eni.proto";
+import "eni_route.proto";
+import "acl_group.proto";
+import "acl_rule.proto";
+import "acl_in.proto";
+import "acl_out.proto";
+import "route.proto";
+import "route_group.proto";
+import "route_rule.proto";
+import "route_type.proto";
+import "routing_appliance.proto";
+import "prefix_tag.proto";
+import "vnet_mapping.proto";
+import "tunnel.proto";
+import "pa_validation.proto";
+import "qos.proto";
+import "meter.proto";
+import "meter_policy.proto";
+import "meter_rule.proto";
+import "outbound_port_map.proto";
+import "outbound_port_map_range.proto";
+import "ha_scope.proto";
+import "ha_scope_config.proto";
+import "ha_scope_state.proto";
+import "ha_set.proto";
+import "ha_set_config.proto";
+import "ha_set_state.proto";
+
+// -----------------------------------------------------------------------------
+// ObjectKind
+// -----------------------------------------------------------------------------
+
+// Enumerates every DASH object kind exposed by the service. Values are stable;
+// new kinds are appended.
+enum ObjectKind {
+  OBJECT_KIND_UNSPECIFIED               = 0;
+  OBJECT_KIND_APPLIANCE                 = 1;
+  OBJECT_KIND_VNET                      = 2;
+  OBJECT_KIND_ENI                       = 3;
+  OBJECT_KIND_ENI_ROUTE                 = 4;
+  OBJECT_KIND_ACL_GROUP                 = 5;
+  OBJECT_KIND_ACL_RULE                  = 6;
+  OBJECT_KIND_ACL_IN                    = 7;
+  OBJECT_KIND_ACL_OUT                   = 8;
+  OBJECT_KIND_ROUTE                     = 9;
+  OBJECT_KIND_ROUTE_GROUP               = 10;
+  OBJECT_KIND_ROUTE_RULE                = 11;
+  OBJECT_KIND_ROUTE_TYPE                = 12;
+  OBJECT_KIND_ROUTING_APPLIANCE         = 13;
+  OBJECT_KIND_PREFIX_TAG                = 14;
+  OBJECT_KIND_VNET_MAPPING              = 15;
+  OBJECT_KIND_TUNNEL                    = 16;
+  OBJECT_KIND_PA_VALIDATION             = 17;
+  OBJECT_KIND_QOS                       = 18;
+  OBJECT_KIND_METER                     = 19;
+  OBJECT_KIND_METER_POLICY              = 20;
+  OBJECT_KIND_METER_RULE                = 21;
+  OBJECT_KIND_OUTBOUND_PORT_MAP         = 22;
+  OBJECT_KIND_OUTBOUND_PORT_MAP_RANGE   = 23;
+  OBJECT_KIND_HA_SCOPE                  = 24;
+  OBJECT_KIND_HA_SCOPE_CONFIG           = 25;
+  OBJECT_KIND_HA_SCOPE_STATE            = 26;
+  OBJECT_KIND_HA_SET                    = 27;
+  OBJECT_KIND_HA_SET_CONFIG             = 28;
+  OBJECT_KIND_HA_SET_STATE              = 29;
+}
+
+// Object carries the typed payload + kind + ordered key parts.
+message Object {
+  ObjectKind kind = 1;
+  repeated string key = 2; // ordered, matches upstream <Kind>Key field order
+  oneof payload {
+    dash.appliance.Appliance                       appliance               = 100;
+    dash.vnet.Vnet                                 vnet                    = 101;
+    dash.eni.Eni                                   eni                     = 102;
+    dash.eni_route.EniRoute                        eni_route               = 103;
+    dash.acl_group.AclGroup                        acl_group               = 104;
+    dash.acl_rule.AclRule                          acl_rule                = 105;
+    dash.acl_in.AclIn                              acl_in                  = 106;
+    dash.acl_out.AclOut                            acl_out                 = 107;
+    dash.route.Route                               route                   = 108;
+    dash.route_group.RouteGroup                    route_group             = 109;
+    dash.route_rule.RouteRule                      route_rule              = 110;
+    dash.route_type.RouteType                      route_type              = 111;
+    dash.routing_appliance.RoutingAppliance        routing_appliance       = 112;
+    dash.tag.PrefixTag                             prefix_tag              = 113;
+    dash.vnet_mapping.VnetMapping                  vnet_mapping            = 114;
+    dash.tunnel.Tunnel                             tunnel                  = 115;
+    dash.pa_validation.PaValidation                pa_validation           = 116;
+    dash.qos.Qos                                   qos                     = 117;
+    dash.meter_rule.Meter                          meter                   = 118;
+    dash.meter_policy.MeterPolicy                  meter_policy            = 119;
+    dash.meter_rule.MeterRule                      meter_rule              = 120;
+    dash.outbound_port_map.OutboundPortMap         outbound_port_map       = 121;
+    dash.outbound_port_map_range.OutboundPortMapRange outbound_port_map_range = 122;
+    dash.ha_scope.HaScope                          ha_scope                = 123;
+    dash.ha_scope_config.HaScopeConfig             ha_scope_config         = 124;
+    dash.ha_scope_state.HaScopeState               ha_scope_state          = 125;
+    dash.ha_set.HaSet                              ha_set                  = 126;
+    dash.ha_set_config.HaSetConfig                 ha_set_config           = 127;
+    dash.ha_set_state.HaSetState                   ha_set_state            = 128;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Envelopes
+// -----------------------------------------------------------------------------
+
+message Ack {
+  string txn_id = 1;
+  bool   accepted = 2;
+  string error = 3;
+  int64  server_ts_ns = 4;
+}
+
+message ApplyRequest  { Object object = 1; }
+message DeleteRequest { ObjectKind kind = 1; repeated string key = 2; }
+message GetRequest    { ObjectKind kind = 1; repeated string key = 2; }
+message GetResponse   { Object object = 1; int64 server_ts_ns = 2; }
+message ListRequest   { ObjectKind kind = 1; string key_prefix = 2; int32 limit = 3; }
+message ListItem      { Object object = 1; }
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_CREATED     = 1;
+  EVENT_TYPE_UPDATED     = 2;
+  EVENT_TYPE_DELETED     = 3;
+  EVENT_TYPE_SNAPSHOT    = 4;
+}
+
+message SubscribeRequest {
+  // If empty, subscribe to every kind.
+  repeated ObjectKind kinds = 1;
+  // If true, send a snapshot of current state before live events.
+  bool snapshot_first = 2;
+}
+
+message Event {
+  string    txn_id       = 1;
+  EventType type         = 2;
+  Object    object       = 3;
+  int64     server_ts_ns = 4;
+}
+
+message CountersRequest  { ObjectKind kind = 1; repeated string key = 2; }
+message CountersResponse { map<string, int64> counters = 1; int64 server_ts_ns = 2; }
+
+// -----------------------------------------------------------------------------
+// SimulatePacket — exercise the behavioural DASH pipeline.
+// -----------------------------------------------------------------------------
+
+// Packet is a minimal L2/L3/L4 descriptor for piping through the model.
+message Packet {
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DIRECTION_OUTBOUND    = 1; // from VM -> DPU -> network
+    DIRECTION_INBOUND     = 2; // from network -> DPU -> VM
+  }
+  Direction direction = 1;
+  // ENI key the packet is associated with. For outbound this is the source
+  // ENI; for inbound it is the destination ENI selected by the inbound
+  // direction lookup (caller can supply or leave empty to have the pipeline
+  // resolve via MAC lookup).
+  string eni = 2;
+  // VNI carried in the outer header (inbound) or implied by the source VNET
+  // (outbound). Used by route_rule matching on inbound and ignored on
+  // outbound.
+  uint32 vni = 3;
+
+  string src_mac    = 4; // formatted "aa:bb:cc:dd:ee:ff"
+  string dst_mac    = 5;
+  string src_ip     = 6; // string, IPv4 or IPv6
+  string dst_ip     = 7;
+  uint32 protocol   = 8; // 6=TCP, 17=UDP, 1=ICMP, ...
+  uint32 src_port   = 9;
+  uint32 dst_port   = 10;
+  uint32 length_bytes = 11;
+}
+
+message Decision {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_FORWARD     = 1;
+    ACTION_DROP        = 2;
+    ACTION_ENCAP       = 3;
+  }
+  Action action  = 1;
+  string reason  = 2;
+  string out_eni = 3;
+  string out_underlay_ip = 4;
+  uint32 out_vni         = 5;
+  string out_routing_type = 6;
+  uint32 matched_acl_stage    = 7;
+  uint32 matched_acl_priority = 8;
+  string matched_route_prefix = 9;
+  // Per-step trace lines (only populated when SimulatePacketRequest.trace=true).
+  repeated string trace = 10;
+}
+
+message SimulatePacketRequest {
+  Packet packet = 1;
+  bool   trace  = 2;
+}
+
+message SimulatePacketResponse {
+  Decision decision = 1;
+  int64    server_ts_ns = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Service
+// -----------------------------------------------------------------------------
+
+service DashApi {
+  // Apply creates or replaces an object. The request payload's kind+key
+  // determine the target row.
+  rpc Apply (ApplyRequest) returns (Ack);
+
+  // Delete removes an object by kind+key. Returns NotFound (in Ack.error) if
+  // absent.
+  rpc Delete (DeleteRequest) returns (Ack);
+
+  // Get reads a single object.
+  rpc Get (GetRequest) returns (GetResponse);
+
+  // List streams every object of the given kind (optionally filtered by
+  // key_prefix on the joined key).
+  rpc List (ListRequest) returns (stream ListItem);
+
+  // Subscribe streams Events. If snapshot_first is true the server first
+  // sends one EVENT_TYPE_SNAPSHOT per existing object (filtered by kinds),
+  // then enters live mode.
+  rpc Subscribe (SubscribeRequest) returns (stream Event);
+
+  // GetCounters returns synthetic per-object counters (sim) or hardware
+  // counters (real DPU). Ack uses an empty key for unknown objects.
+  rpc GetCounters (CountersRequest) returns (CountersResponse);
+
+  // SimulatePacket runs one synthetic packet through the behavioural DASH
+  // pipeline (direction lookup -> ACL 1..5 -> route lookup -> vnet_mapping
+  // encap) and returns the resulting Decision. Pipeline state mutations
+  // (counter increments on matched ENIs / meters) are applied as side
+  // effects.
+  rpc SimulatePacket (SimulatePacketRequest) returns (SimulatePacketResponse);
+}
