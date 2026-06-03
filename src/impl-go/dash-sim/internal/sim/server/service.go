@@ -13,6 +13,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dash-sim/internal/sim/events"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dash-sim/internal/sim/faults"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dash-sim/internal/sim/model"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dash-sim/internal/sim/pipeline"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -25,11 +26,15 @@ type Server struct {
 	bus      *events.Bus
 	faults   *faults.Injector
 	counters *counters.Registry
+	engine   *pipeline.Engine
 }
 
 // New constructs a Server. All deps must be non-nil.
 func New(store *model.Store, bus *events.Bus, faultInj *faults.Injector, ctrs *counters.Registry) *Server {
-	return &Server{store: store, bus: bus, faults: faultInj, counters: ctrs}
+	return &Server{
+		store: store, bus: bus, faults: faultInj, counters: ctrs,
+		engine: pipeline.New(store, ctrs),
+	}
 }
 
 func nowNs() int64 { return time.Now().UnixNano() }
@@ -148,4 +153,13 @@ func (s *Server) GetCounters(_ context.Context, req *dashapi.CountersRequest) (*
 		Counters:   s.counters.Snapshot(key),
 		ServerTsNs: nowNs(),
 	}, nil
+}
+
+// SimulatePacket implements DashApi.SimulatePacket.
+func (s *Server) SimulatePacket(_ context.Context, req *dashapi.SimulatePacketRequest) (*dashapi.SimulatePacketResponse, error) {
+	if err := s.faults.Apply("SimulatePacket"); err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	d := s.engine.Evaluate(req.GetPacket(), req.GetTrace())
+	return &dashapi.SimulatePacketResponse{Decision: d, ServerTsNs: nowNs()}, nil
 }

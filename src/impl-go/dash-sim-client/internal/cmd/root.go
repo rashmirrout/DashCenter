@@ -59,6 +59,7 @@ schema, so the same command line works against both.`,
 	root.AddCommand(newSubscribeCmd())
 	root.AddCommand(newCountersCmd())
 	root.AddCommand(newKindsCmd())
+	root.AddCommand(newSimulateCmd())
 	root.AddCommand(newPingCmd())
 
 	return root

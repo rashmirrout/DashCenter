@@ -7,4 +7,5 @@ use (
 	./dashctl
 	./dash-sim
 	./dash-sim-client
+	./dash-redis-adapter
 )
