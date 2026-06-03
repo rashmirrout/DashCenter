@@ -26,8 +26,8 @@ DashCenter ships with **two interchangeable deployment models**. Both expose the
 
 | Model | When to use | Footprint | HLD |
 |---|---|---|---|
-| **Centralized Controller** | Brownfield deployments with existing controller hardware; large fleets (>50 DPUs) where a dedicated `clidemon` host is operationally desirable. | One controller VM/host + N DPUs | [High-Level System Design — Centralized](specs/high_level_system_design.md) |
-| **Controllerless (Self-Clustered DPUs)** | Greenfield edge / branch / pod deployments where shipping an extra controller box is undesirable. Every DPU runs the management stack and the fleet self-elects a Master via gossip + Raft. | N DPUs only (zero extra hardware) | [High-Level System Design — Controllerless](specs/high_level_system_design_controllerless.md) |
+| **Centralized Controller** | Brownfield deployments with existing controller hardware; large fleets (>50 DPUs) where a dedicated `clidemon` host is operationally desirable. | One controller VM/host + N DPUs | [High-Level System Design — Centralized](specs/HLD/high_level_system_design.md) |
+| **Controllerless (Self-Clustered DPUs)** | Greenfield edge / branch / pod deployments where shipping an extra controller box is undesirable. Every DPU runs the management stack and the fleet self-elects a Master via gossip + Raft. | N DPUs only (zero extra hardware) | [High-Level System Design — Controllerless](specs/HLD/high_level_system_design_controllerless.md) |
 
 ### Model 1 — Centralized Controller
 
@@ -35,7 +35,7 @@ A dedicated `clidemon` appliance owns aggregation, caching, and the API surface.
 
 ![DashCenter Centralized Controller Architecture](docs/dashcenter-opportunity.png)
 
-> Full breakdown: [High-Level System Design — Centralized](specs/high_level_system_design.md)
+> Full breakdown: [High-Level System Design — Centralized](specs/HLD/high_level_system_design.md)
 
 ### Model 2 — Controllerless (Symmetric Cluster)
 
@@ -43,7 +43,7 @@ Every DPU runs the identical `dashd` binary. The fleet uses **SWIM-style gossip*
 
 ![DashCenter Controllerless Architecture](docs/dashcenter-controllerless.png)
 
-> Full breakdown: [High-Level System Design — Controllerless](specs/high_level_system_design_controllerless.md)
+> Full breakdown: [High-Level System Design — Controllerless](specs/HLD/high_level_system_design_controllerless.md)
 
 ---
 
@@ -51,7 +51,7 @@ Every DPU runs the identical `dashd` binary. The fleet uses **SWIM-style gossip*
 
 The diagram below expands the **1-to-Many distributed architecture** and shows how DASHCenter manages a scaled-out fleet of DASH appliances (DPU 01 through DPU 10) under the centralized model. It calls out the user interaction layer, the management suite, and the appliance fleet as three distinct tiers.
 
-> For the full architectural breakdown of the management plane, caching plane, and Protobuf-exclusive network fabric, see the [High-Level System Design](specs/high_level_system_design.md).
+> For the full architectural breakdown of the management plane, caching plane, and Protobuf-exclusive network fabric, see the [High-Level System Design](specs/HLD/high_level_system_design.md).
 
 ```
 ==================================================================================================
@@ -132,7 +132,7 @@ The diagram below expands the **1-to-Many distributed architecture** and shows h
 
 ### Core Structural Features
 
-* **Kubernetes-Like Operations (dashctl):** Built to mimic the seamless declarative style of cloud-native systems. Operators log into the central suite and execute simple, unified commands like dashctl get enis --all-devices or dashctl monitor drops -w rather than jumping across fragmented individual devices. See the [Multi-Node `dashctl` CLI Brief](specs/mult_node_cli_brief.md) for the full command reference.
+* **Kubernetes-Like Operations (dashctl):** Built to mimic the seamless declarative style of cloud-native systems. Operators log into the central suite and execute simple, unified commands like dashctl get enis --all-devices or dashctl monitor drops -w rather than jumping across fragmented individual devices. See the [Multi-Node `dashctl` CLI Brief](specs/CLI-INTERFACE/mult_node_cli_brief.md) for the full command reference.
 
 
 * **Dual Deployment Versatility:** Designed to conform to your topology constraints. It can deploy as a **Dedicated Controller Appliance** on a standalone x86 server or as a **Symmetric Converged Cluster** running locally on the management cores of the DPUs themselves, utilizing an embedded consensus protocol to self-elect an active leader.
@@ -191,7 +191,7 @@ DashCenter is **shipping** today as a hardware-free reference implementation; th
 | 7 | Behavioural parity uplift (HA, metering, ECMP, PA validation, prefix tags, port maps, flow tables, ...) | 🟡 Partial |
 | 8 | gNMI alternative front-end | ⏳ Planned |
 
-For the engineering specification, including functional/non-functional requirements and deployment topologies, see the [DASH Diagnostic System Specification](specs/dash_diagnostic_system_spec.md). For an item-by-item breakdown of what is implemented, partial, or pending — including every upstream HLD gap and dozens of contributor-pickable issues — see **[docs/roadmap.md](docs/roadmap.md)**.
+For the engineering specification, including functional/non-functional requirements and deployment topologies, see the [DASH Diagnostic System Specification](specs/HLD/dash_diagnostic_system_spec.md). For an item-by-item breakdown of what is implemented, partial, or pending — including every upstream HLD gap and dozens of contributor-pickable issues — see **[docs/roadmap.md](docs/roadmap.md)**.
 
 ## What ships today
 

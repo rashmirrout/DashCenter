@@ -2,7 +2,7 @@
 
 > Operating-model artifact covering the five program gates: **Onboarding One-Pager → Takeoff (Wk 2) → Orbit (Wk 4) → Landing (Wk 6) → Post-Experiment Analysis**.
 >
-> Scope basis: [specs/high_level_system_design.md](high_level_system_design.md), [specs/dash_diagnostic_system_spec.md](dash_diagnostic_system_spec.md), [specs/mult_node_cli_brief.md](mult_node_cli_brief.md).
+> Scope basis: [specs/HLD/high_level_system_design.md](../specs/HLD/high_level_system_design.md), [specs/HLD/dash_diagnostic_system_spec.md](../specs/HLD/dash_diagnostic_system_spec.md), [specs/CLI-INTERFACE/mult_node_cli_brief.md](../specs/CLI-INTERFACE/mult_node_cli_brief.md).
 >
 > All person/role fields are intentionally left as `_TBD_`.
 

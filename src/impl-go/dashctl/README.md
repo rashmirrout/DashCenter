@@ -21,7 +21,7 @@ make all                # builds bin/dashctl
 | Observe    | `health`, `top`, `watch`, `events`    |
 | Collect    | `bundle`, `logs`, `export`            |
 
-See [specs/dashcenter_diagnostics_cli_guide.md](../../../specs/dashcenter_diagnostics_cli_guide.md)
+See [specs/CLI-INTERFACE/dashcenter_diagnostics_cli_guide.md](../../../specs/CLI-INTERFACE/dashcenter_diagnostics_cli_guide.md)
 for the full operator-facing manual.
 
 ## Layout
