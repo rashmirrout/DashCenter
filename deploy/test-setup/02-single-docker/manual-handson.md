@@ -27,10 +27,10 @@ flowchart LR
     end
 
     SIM --- VOL
-    CLI_H -. host:50051 → 50051 .-> SIM
-    CLI_H -. host:52051 → 52051 .-> ADA
-    CLI_C -. dc-single-dash-sim:50051 .-> SIM
-    CLI_C -. dc-single-dash-redis-adapter:52051 .-> ADA
+    CLI_H -. "host:50051 to 50051" .-> SIM
+    CLI_H -. "host:52051 to 52051" .-> ADA
+    CLI_C -. "dc-single-dash-sim:50051" .-> SIM
+    CLI_C -. "dc-single-dash-redis-adapter:52051" .-> ADA
 ```
 
 | Container                       | Image                                | Host port | Container port |

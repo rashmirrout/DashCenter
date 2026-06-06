@@ -26,15 +26,15 @@ flowchart TB
         VOL[("../scenarios → /scenarios:ro<br/>(bind-mounted into every dash-sim)")]
     end
 
-    COMP -. brings up .-> S1 & S2 & S3 & A & R
+    COMP -. "brings up" .-> S1 & S2 & S3 & A & R
     S1 --- VOL
     S2 --- VOL
     S3 --- VOL
     A -- "--redis redis:6379" --> R
 
-    CLI_H -. host:5005x .-> S1 & S2 & S3
-    CLI_H -. host:52051 .-> A
-    CLI_C -. svc-name:port .-> S1 & S2 & S3 & A
+    CLI_H -. "host:5005x" .-> S1 & S2 & S3
+    CLI_H -. "host:52051" .-> A
+    CLI_C -. "svc-name:port" .-> S1 & S2 & S3 & A
 ```
 
 > **New here?** Follow the [hands-on, step-by-step walkthrough](manual-handson.md) —

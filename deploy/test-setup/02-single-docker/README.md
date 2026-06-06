@@ -22,10 +22,10 @@ flowchart TB
     end
 
     SIM --- VOL
-    CLI_H -. host:50051 .-> SIM
-    CLI_H -. host:52051 .-> ADA
-    CLI_C -. dc-single-dash-sim:50051 .-> SIM
-    CLI_C -. dc-single-dash-redis-adapter:52051 .-> ADA
+    CLI_H -. "host:50051" .-> SIM
+    CLI_H -. "host:52051" .-> ADA
+    CLI_C -. "dc-single-dash-sim:50051" .-> SIM
+    CLI_C -. "dc-single-dash-redis-adapter:52051" .-> ADA
 ```
 
 > **New here?** Follow the [hands-on, step-by-step walkthrough](manual-handson.md) —

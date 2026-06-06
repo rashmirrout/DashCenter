@@ -20,10 +20,10 @@ flowchart TB
     end
 
     A --- R
-    CLI -. --target 127.0.0.1:50051 .-> S1
-    CLI -. --target 127.0.0.1:50052 .-> S2
-    CLI -. --target 127.0.0.1:50053 .-> S3
-    CLI -. --target 127.0.0.1:52051 .-> A
+    CLI -. "--target 127.0.0.1:50051" .-> S1
+    CLI -. "--target 127.0.0.1:50052" .-> S2
+    CLI -. "--target 127.0.0.1:50053" .-> S3
+    CLI -. "--target 127.0.0.1:52051" .-> A
 ```
 
 > **New here?** Follow the [hands-on, step-by-step walkthrough](manual-handson.md) —

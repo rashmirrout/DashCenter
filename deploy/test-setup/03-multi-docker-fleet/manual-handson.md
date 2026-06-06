@@ -30,8 +30,8 @@ flowchart TB
     end
 
     A -- "--redis redis:6379" --> R
-    CLI_H -. host ports .-> S1 & S2 & S3 & A
-    CLI_C -. svc-name:port .-> S1 & S2 & S3 & A
+    CLI_H -. "host ports" .-> S1 & S2 & S3 & A
+    CLI_C -. "svc-name:port" .-> S1 & S2 & S3 & A
 ```
 
 | Service                       | Container name              | Host port      | Notes                              |
