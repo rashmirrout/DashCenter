@@ -229,13 +229,18 @@ Full operator drill: [cli-walkthrough.md](cli-walkthrough.md).
 
 The `defaults.scenario` field in your fleet config selects which YAML
 gets preloaded into every `dash-sim` at boot. Three ship in
-[scenarios/](scenarios/):
+[scenarios/](scenarios/README.md) — see that page for full per-scenario
+docs, including **7 worked `simulate` examples** for the medium scenario
+that walk every meaningful packet-pipeline outcome.
 
 | Scenario | Size | Use it when… |
 |---|---:|---|
 | [`scenarios/dpu-base.yaml`](scenarios/dpu-base.yaml) | ~10 objects | You want a minimal, working snapshot — 1 appliance, 2 vnets, 2 ENIs, 1 ACL/route/mapping. **This is the default.** |
 | [`scenarios/dpu-all-kinds.yaml`](scenarios/dpu-all-kinds.yaml) | 30 objects, one of every kind | You want every supported DASH kind populated for **exploration** — `kinds`/`list`/`get` return at least one row for all 29 types. Values are syntactically valid but not packet-pipeline meaningful. |
-| [`scenarios/dpu-medium.yaml`](scenarios/dpu-medium.yaml) | ~50 objects | You want a **realistic mid-scale** fleet: 3 vnets, 5 ENIs (one admin-disabled), 3 ACL groups (permit + protocol-filtered + port-range deny), 2 route groups with multi-prefix LPM including a surgical /24 hole, 3 vnet_mappings, inbound `route_rule`, and QoS/meter scaffolding. Comes with copy-pasteable simulate commands at the bottom of the YAML showing every meaningful pipeline outcome. |
+| [`scenarios/dpu-medium.yaml`](scenarios/dpu-medium.yaml) | ~50 objects | You want a **realistic mid-scale** fleet: 3 vnets, 5 ENIs (one admin-disabled), 3 ACL groups, 2 route groups with multi-prefix LPM (including a surgical /24 hole), 3 vnet_mappings, inbound `route_rule`, QoS/meter scaffolding. See [scenarios/README.md](scenarios/README.md#what-the-medium-scenario-teaches-via-simulate) for the 7 worked simulate examples. |
+
+Full per-scenario walkthroughs, when to use which, and how to write your
+own → [**scenarios/README.md**](scenarios/README.md).
 
 Swap by editing `fleet.yaml` / `fleet.json` once — every topology picks
 it up. To preload **a different scenario per DPU**, use `dpus[i].scenario`:
@@ -255,6 +260,7 @@ deploy/test-setup/
 ├── fleet.schema.json            ← JSON Schema (for editor linting)
 ├── fleet.yaml / fleet.json      ← YOUR config (gitignored)
 ├── scenarios/                   ← shared DPU preloads (pick via defaults.scenario)
+│   ├── README.md                — per-scenario walkthroughs + worked simulate examples
 │   ├── dpu-base.yaml            — minimal working snapshot (default)
 │   ├── dpu-all-kinds.yaml       — one example of EVERY 29 kinds (explorer)
 │   └── dpu-medium.yaml          — realistic mid-scale fleet (multi-vnet, multi-ACL, LPM)
