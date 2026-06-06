@@ -1,0 +1,9 @@
+# User-editable fleet configs — keep out of VCS by default.
+# Commit a renamed file (e.g. fleet.ci.yaml) if you need to share one.
+fleet.yaml
+fleet.yml
+fleet.json
+
+# Generated artefacts from topology 01.
+01-host-multi-port/.fleet-state.json
+01-host-multi-port/logs/

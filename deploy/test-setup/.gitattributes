@@ -1,0 +1,15 @@
+# Cross-platform line-ending hygiene for the test-setup tooling.
+# Bash scripts MUST be LF, even when checked out on Windows, otherwise
+# WSL / Git-Bash will fail with "bad interpreter: /usr/bin/env\r".
+# PowerShell scripts stay CRLF on Windows.
+#
+# This file is repo-scoped; merge with an existing .gitattributes at
+# the repo root if you prefer a single file.
+
+deploy/test-setup/**/*.sh    text eol=lf
+deploy/test-setup/**/*.ps1   text eol=crlf
+deploy/test-setup/**/*.psm1  text eol=crlf
+deploy/test-setup/**/*.yaml  text eol=lf
+deploy/test-setup/**/*.yml   text eol=lf
+deploy/test-setup/**/*.json  text eol=lf
+deploy/test-setup/**/*.md    text eol=lf

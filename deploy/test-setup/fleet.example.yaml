@@ -1,0 +1,45 @@
+# DashCenter test-setup — fleet configuration.
+#
+# THIS file (fleet.example.yaml) is the committed reference. Copy it to
+# fleet.yaml (or fleet.json) at the same directory level and edit ports,
+# DPU counts, redis mode, etc.
+#
+# Resolution order (highest precedence first):
+#   1. -Config <path>          (script parameter)
+#   2. $env:DASHCENTER_FLEET_CONFIG
+#   3. <test-setup>/fleet.yaml
+#   4. <test-setup>/fleet.json
+#   5. <test-setup>/fleet.example.yaml   (this file — fallback default)
+#
+# Schema: see fleet.schema.json. Validated by both the PowerShell
+# (lib/Fleet.psm1) and bash (lib/fleet_config.sh) loaders.
+apiVersion: dashcenter.io/test-setup/v1
+kind: FleetConfig
+metadata:
+  name: dev-fleet
+
+defaults:
+  # Paths are POSIX-style and resolved RELATIVE TO THIS FILE.
+  scenario:     scenarios/dpu-base.yaml
+  imageTag:     dev
+  bindHost:     127.0.0.1                  # use 0.0.0.0 to expose on LAN (loopback-only by default)
+  network:      dashcenter-fleet
+  tickInterval: 1s
+
+dpus:
+  - { deviceId: dpu-sim-01, grpcPort: 50051, adminPort: 8081 }
+  - { deviceId: dpu-sim-02, grpcPort: 50052, adminPort: 8082 }
+  - { deviceId: dpu-sim-03, grpcPort: 50053, adminPort: 8083 }
+  # Per-DPU overrides allowed: scenario, imageTag, extraArgs (list of CLI args appended verbatim).
+
+adapter:
+  enabled:  true
+  grpcPort: 52051
+  redis:
+    # mode: embedded | external | container
+    #   embedded  - in-process miniredis (default; zero external deps).
+    #   external  - dial an already-running Redis at `address`.
+    #   container - run a redis container exposed at `hostPort` (topology 03 only).
+    mode:     embedded
+    hostPort: 6379
+    address:  localhost:6379

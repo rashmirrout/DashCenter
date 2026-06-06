@@ -1,0 +1,82 @@
+# Shared base scenario, preloaded into every dash-sim across all three
+# test-setup topologies. Override per-DPU via `dpus[*].scenario` in
+# fleet.{yaml,json}.
+#
+# Format = src/impl-go/dash-sim/internal/sim/scenarios (apiVersion
+# dashapi.dashcenter.io/v1) — list of {kind, key, value} triples with
+# upstream sonic-dash-api protojson values (enums by full name,
+# bytes as base64, fixed32 IPs as network-byte-order ints).
+apiVersion: dashapi.dashcenter.io/v1
+kind: Scenario
+metadata:
+  name: dpu-base
+spec:
+  - kind: appliance
+    key: ["appliance-01"]
+    value:
+      sip:
+        ipv4: 16777226            # 10.0.0.1 in network-byte-order fixed32
+      vm_vni: 1000
+      local_region_id: 1
+
+  - kind: vnet
+    key: ["vnet-prod"]
+    value:
+      vni: 1001
+  - kind: vnet
+    key: ["vnet-stage"]
+    value:
+      vni: 1002
+
+  - kind: eni
+    key: ["eni-001"]
+    value:
+      eni_id: "11111111-1111-1111-1111-111111111111"
+      mac_address: "ABEiM0RV"
+      vnet: "vnet-prod"
+      admin_state: STATE_ENABLED
+  - kind: eni
+    key: ["eni-002"]
+    value:
+      eni_id: "22222222-2222-2222-2222-222222222222"
+      mac_address: "ABEiM0RW"
+      vnet: "vnet-prod"
+      admin_state: STATE_ENABLED
+
+  - kind: acl_group
+    key: ["acl-prod-in"]
+    value:
+      ip_version: IP_VERSION_IPV4
+  - kind: acl_rule
+    key: ["acl-prod-in", "100"]
+    value:
+      priority: 100
+      action: ACTION_PERMIT
+      terminating: true
+  - kind: acl_in
+    key: ["eni-001", "1"]
+    value:
+      v4_acl_group_id: "acl-prod-in"
+
+  - kind: vnet_mapping
+    key: ["vnet-prod", "10.0.0.20"]
+    value:
+      underlay_ip:
+        ipv4: 343798372           # 100.64.0.20 in network-byte-order fixed32
+      mac_address: "AKqrzN3u"
+      routing_type: ROUTING_TYPE_VNET
+
+  - kind: route_group
+    key: ["rg-prod"]
+    value:
+      version: "v1"
+  - kind: route
+    key: ["rg-prod", "10.1.0.0/16"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      vnet: "vnet-stage"
+
+  - kind: eni_route
+    key: ["eni-001"]
+    value:
+      group_id: "rg-prod"

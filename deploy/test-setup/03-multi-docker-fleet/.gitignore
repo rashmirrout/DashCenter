@@ -1,0 +1,3 @@
+# Generated artefacts — re-run ../lib/render-compose.{ps1,sh} to recreate.
+docker-compose.fleet.yaml
+.env

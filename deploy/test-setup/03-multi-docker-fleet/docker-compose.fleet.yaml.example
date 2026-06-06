@@ -1,0 +1,112 @@
+# HAND-WRITTEN reference compose for topology 03.
+#
+# This file is NOT generated. Copy it to docker-compose.fleet.yaml and
+# edit by hand if you want to bypass the renderer and customise things
+# (e.g. add extra volumes, replace the redis image, attach to an
+# external network, etc.).
+#
+# For the standard config-driven flow, instead run:
+#   pwsh -File ../lib/render-compose.ps1     # Windows / PowerShell
+#   ../lib/render-compose.sh                  # Linux / WSL / macOS
+# which regenerates docker-compose.fleet.yaml from fleet.{yaml,json}.
+#
+# This example mirrors the defaults in ../fleet.example.yaml:
+#   3 DPUs (dpu-sim-01/02/03) on ports 50051-50053 / 8081-8083,
+#   real Redis on 6379, dash-redis-adapter on 52051,
+#   loopback-only bindings, network 'dashcenter-fleet'.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: dc-redis-fleet
+    ports: ["127.0.0.1:6379:6379"]
+    restart: unless-stopped
+    networks: [dashcenter-fleet]
+
+  dash-sim-dpu-sim-01:
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-dash-sim-dpu-sim-01
+    restart: unless-stopped
+    networks: [dashcenter-fleet]
+    volumes:
+      - ../scenarios:/scenarios:ro
+    command:
+      - --grpc-listen=:50051
+      - --admin-listen=:8080
+      - --device-id=dpu-sim-01
+      - --scenario=/scenarios/dpu-base.yaml
+    ports:
+      - "127.0.0.1:50051:50051"
+      - "127.0.0.1:8081:8080"
+
+  dash-sim-dpu-sim-02:
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-dash-sim-dpu-sim-02
+    restart: unless-stopped
+    networks: [dashcenter-fleet]
+    volumes:
+      - ../scenarios:/scenarios:ro
+    command:
+      - --grpc-listen=:50051
+      - --admin-listen=:8080
+      - --device-id=dpu-sim-02
+      - --scenario=/scenarios/dpu-base.yaml
+    ports:
+      - "127.0.0.1:50052:50051"
+      - "127.0.0.1:8082:8080"
+
+  dash-sim-dpu-sim-03:
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-dash-sim-dpu-sim-03
+    restart: unless-stopped
+    networks: [dashcenter-fleet]
+    volumes:
+      - ../scenarios:/scenarios:ro
+    command:
+      - --grpc-listen=:50051
+      - --admin-listen=:8080
+      - --device-id=dpu-sim-03
+      - --scenario=/scenarios/dpu-base.yaml
+    ports:
+      - "127.0.0.1:50053:50051"
+      - "127.0.0.1:8083:8080"
+
+  dash-redis-adapter:
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dash-redis-adapter/Dockerfile
+    image: dashcenter/dash-redis-adapter:dev
+    container_name: dc-dash-redis-adapter
+    restart: unless-stopped
+    networks: [dashcenter-fleet]
+    depends_on: [redis]
+    command:
+      - --grpc-listen=:52051
+      - --redis=redis:6379
+    ports:
+      - "127.0.0.1:52051:52051"
+
+  # One-shot CLI container.
+  #   docker compose -f docker-compose.fleet.yaml.example --profile cli run --rm cli \
+  #       --target dash-sim-dpu-sim-01:50051 ping
+  cli:
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dash-sim-client/Dockerfile
+    image: dashcenter/dash-sim-client:dev
+    profiles: [cli]
+    networks: [dashcenter-fleet]
+    entrypoint: [/usr/local/bin/dash-sim-client]
+
+networks:
+  dashcenter-fleet:
+    name: dashcenter-fleet
