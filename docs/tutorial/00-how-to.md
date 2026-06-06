@@ -25,6 +25,7 @@ to a section by name.
 | 6 | [Test](06-test.md) | 10 min | Run all unit and conformance tests; understand what they prove |
 | 7 | [dash-sim-client CLI](07-dash-sim-client.md) | 20 min | Use every CLI subcommand against the running services |
 | 8 | [Docker Compose](08-docker-compose.md) | 15 min | Stand the whole fleet up under Docker on Windows and Linux |
+| 9 | [Multi-DPU test infra](09-multi-dpu-test-infra.md) | 15 min | Drive an N-DPU fleet from one config file across three topologies |
 |   | [Modules deep-dives](modules/) |   | One markdown per module — internals + extension points |
 
 ---
@@ -93,7 +94,12 @@ Pick one — each has a recommended reading path.
 1. [03 — Build setup](03-build-setup.md)
 2. [08 — Docker Compose](08-docker-compose.md)
 3. [07 — CLI](07-dash-sim-client.md) — drive the running fleet
+### 🔧 "I'm setting up a multi-DPU test fleet"
 
+1. [03 — Build setup](03-build-setup.md)
+2. [09 — Multi-DPU test infra](09-multi-dpu-test-infra.md) — pick a topology
+3. The matching hands-on walkthrough in [deploy/test-setup/](../../deploy/test-setup/) — step by step with expected logs
+4. [07 — CLI](07-dash-sim-client.md) — drive the fleet
 ---
 
 ## A note on naming

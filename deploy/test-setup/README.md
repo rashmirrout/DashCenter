@@ -6,6 +6,12 @@ simulated DPUs plus the Redis APP_DB adapter) and driving it with
 your ports, your DPU count, and your redis mode in one place and every
 topology uses it.
 
+> **New to DashCenter?** Read
+> [docs/tutorial/09-multi-dpu-test-infra.md](../../docs/tutorial/09-multi-dpu-test-infra.md)
+> first — it puts this folder in context (what it is, when to pick which
+> topology, where it sits in the tutorial sequence). The current page
+> is the operator reference; the tutorial is the learning path.
+
 | #  | Topology                                                          | When to use                                              |
 |----|-------------------------------------------------------------------|----------------------------------------------------------|
 | 01 | [Host, multi-port](01-host-multi-port/README.md) — native procs   | Fastest dev loop — you just ran `go build`.              |
@@ -219,6 +225,28 @@ docker compose -f 03-multi-docker-fleet/docker-compose.fleet.yaml up -d --build
 
 Full operator drill: [cli-walkthrough.md](cli-walkthrough.md).
 
+## Pick a preload scenario
+
+The `defaults.scenario` field in your fleet config selects which YAML
+gets preloaded into every `dash-sim` at boot. Three ship in
+[scenarios/](scenarios/):
+
+| Scenario | Size | Use it when… |
+|---|---:|---|
+| [`scenarios/dpu-base.yaml`](scenarios/dpu-base.yaml) | ~10 objects | You want a minimal, working snapshot — 1 appliance, 2 vnets, 2 ENIs, 1 ACL/route/mapping. **This is the default.** |
+| [`scenarios/dpu-all-kinds.yaml`](scenarios/dpu-all-kinds.yaml) | 30 objects, one of every kind | You want every supported DASH kind populated for **exploration** — `kinds`/`list`/`get` return at least one row for all 29 types. Values are syntactically valid but not packet-pipeline meaningful. |
+| [`scenarios/dpu-medium.yaml`](scenarios/dpu-medium.yaml) | ~50 objects | You want a **realistic mid-scale** fleet: 3 vnets, 5 ENIs (one admin-disabled), 3 ACL groups (permit + protocol-filtered + port-range deny), 2 route groups with multi-prefix LPM including a surgical /24 hole, 3 vnet_mappings, inbound `route_rule`, and QoS/meter scaffolding. Comes with copy-pasteable simulate commands at the bottom of the YAML showing every meaningful pipeline outcome. |
+
+Swap by editing `fleet.yaml` / `fleet.json` once — every topology picks
+it up. To preload **a different scenario per DPU**, use `dpus[i].scenario`:
+
+```yaml
+dpus:
+  - { deviceId: dpu-sim-01, grpcPort: 50051, adminPort: 8081, scenario: scenarios/dpu-medium.yaml }
+  - { deviceId: dpu-sim-02, grpcPort: 50052, adminPort: 8082 }   # uses defaults.scenario
+  - { deviceId: dpu-sim-03, grpcPort: 50053, adminPort: 8083, scenario: scenarios/dpu-all-kinds.yaml }
+```
+
 ## Layout
 
 ```
@@ -226,8 +254,10 @@ deploy/test-setup/
 ├── fleet.example.yaml / .json   ← committed defaults
 ├── fleet.schema.json            ← JSON Schema (for editor linting)
 ├── fleet.yaml / fleet.json      ← YOUR config (gitignored)
-├── scenarios/                   ← shared DPU preloads
-│   └── dpu-base.yaml
+├── scenarios/                   ← shared DPU preloads (pick via defaults.scenario)
+│   ├── dpu-base.yaml            — minimal working snapshot (default)
+│   ├── dpu-all-kinds.yaml       — one example of EVERY 29 kinds (explorer)
+│   └── dpu-medium.yaml          — realistic mid-scale fleet (multi-vnet, multi-ACL, LPM)
 ├── lib/                         ← shared loaders + validators
 │   ├── Fleet.psm1               (PowerShell)
 │   ├── fleet_config.sh          (bash)

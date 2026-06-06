@@ -254,5 +254,11 @@ docker compose build --no-cache     # full rebuild
 
 ## Where to go next
 
+> **Want more than one DPU?** Go to
+> [09 — Multi-DPU test infra](09-multi-dpu-test-infra.md). It introduces
+> a config-driven test-setup that spins up N independent DPUs in any of
+> three topologies (native procs, single container, full compose fleet),
+> and links to step-by-step hands-on walkthroughs for each.
+
 - → [modules/](modules/) — deep dives into each binary's internals.
 - → [docs/CLI_GUIDE.md](../CLI_GUIDE.md) — the canonical CLI reference.

@@ -1,0 +1,286 @@
+# dpu-all-kinds.yaml — preloads one entry of EVERY supported DASH object kind.
+#
+# Purpose: a "smoke / explorer" scenario. After dash-sim boots with this
+# scenario, `dash-sim-client list --kind <name>` returns at least one row
+# for all 29 supported kinds. Perfect for:
+#   - learning the protojson shape of every kind hands-on
+#   - exercising `kinds`, `list`, `get`, `delete`, `apply` against every type
+#   - debugging the loader / store after a code change
+#
+# This is intentionally a TINY, NON-FUNCTIONAL fleet — values are chosen
+# for syntactic completeness, not for end-to-end packet correctness. If
+# you want a working pipeline + ACLs + routes, see scenarios/dpu-medium.yaml.
+#
+# Format reminders (see scenarios/dpu-base.yaml for the canonical small one):
+#   - Enums are written by full name (STATE_ENABLED, ROUTING_TYPE_VNET, ...).
+#   - Bytes are base64.
+#   - `IpAddress.ipv4` is a fixed32 in network byte order.
+#     A few common values:
+#         10.0.0.1   = 16777226
+#         10.0.0.20  = 335544330
+#         100.64.0.5 = 92274276
+#         100.64.0.20 = 343798372
+#   - `IpPrefix` has nested `ip` + `mask` (both `IpAddress`).
+#
+# The 29 kinds are emitted in the same order they're declared in
+# src/impl-go/dashapi-runtime/kinds/kinds.go.
+
+apiVersion: dashapi.dashcenter.io/v1
+kind: Scenario
+metadata:
+  name: dpu-all-kinds
+
+spec:
+  # ────────── 1. appliance ──────────
+  - kind: appliance
+    key: ["appliance-01"]
+    value:
+      sip:        { ipv4: 16777226 }      # 10.0.0.1
+      vm_vni:     1000
+      local_region_id: 1
+
+  # ────────── 2. vnet ──────────
+  - kind: vnet
+    key: ["vnet-prod"]
+    value:
+      vni: 1001
+  - kind: vnet
+    key: ["vnet-stage"]
+    value:
+      vni: 1002
+
+  # ────────── 3. eni ──────────
+  - kind: eni
+    key: ["eni-001"]
+    value:
+      eni_id:      "11111111-1111-1111-1111-111111111111"
+      mac_address: "ABEiM0RV"            # base64 of 00 11 22 33 44 55
+      vnet:        "vnet-prod"
+      admin_state: STATE_ENABLED
+      qos:         "qos-default"
+      v4_meter_policy_id: "mp-default"
+
+  # ────────── 4. eni_route ──────────
+  - kind: eni_route
+    key: ["eni-001"]
+    value:
+      group_id: "rg-prod"
+
+  # ────────── 5. acl_group ──────────
+  - kind: acl_group
+    key: ["acl-prod-in"]
+    value:
+      ip_version: IP_VERSION_IPV4
+
+  # ────────── 6. acl_rule ──────────
+  - kind: acl_rule
+    key: ["acl-prod-in", "100"]
+    value:
+      priority:    100
+      action:      ACTION_PERMIT
+      terminating: true
+
+  # ────────── 7. acl_in ──────────
+  - kind: acl_in
+    key: ["eni-001", "1"]
+    value:
+      v4_acl_group_id: "acl-prod-in"
+
+  # ────────── 8. acl_out ──────────
+  - kind: acl_out
+    key: ["eni-001", "1"]
+    value:
+      v4_acl_group_id: "acl-prod-in"
+
+  # ────────── 9. route ──────────
+  - kind: route
+    key: ["rg-prod", "10.1.0.0/16"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      vnet:         "vnet-stage"
+
+  # ────────── 10. route_group ──────────
+  - kind: route_group
+    key: ["rg-prod"]
+    value:
+      version: "v1"
+      guid:    "rg-prod-guid"
+
+  # ────────── 11. route_rule ──────────
+  # Key parts (in order): eni, vni, prefix_or_tag, priority
+  - kind: route_rule
+    key: ["eni-001", "1001", "10.0.0.0/24", "100"]
+    value:
+      action_type: ACTION_TYPE_DECAP
+      priority:    100
+      protocol:    6
+      vnet:        "vnet-prod"
+      pa_validation: true
+
+  # ────────── 12. route_type ──────────
+  # Key = the RoutingType enum NAME (string).
+  - kind: route_type
+    key: ["ROUTING_TYPE_VNET"]
+    value:
+      items:
+        - action_name: "vnet-encap"
+          action_type: ACTION_TYPE_STATICENCAP
+          encap_type:  ENCAP_TYPE_VXLAN
+          vni:         1001
+
+  # ────────── 13. routing_appliance ──────────
+  - kind: routing_appliance
+    key: ["app-route-01"]
+    value:
+      vni:        2000
+      encap_type: ENCAP_TYPE_VXLAN
+      addresses:
+        - { ipv4: 16777226 }              # 10.0.0.1
+
+  # ────────── 14. prefix_tag ──────────
+  - kind: prefix_tag
+    key: ["tag-private"]
+    value:
+      ip_version: IP_VERSION_IPV4
+      prefix_list:
+        - ip:   { ipv4: 167772160 }       # 10.0.0.0
+          mask: { ipv4: 16777215 }        # 255.255.255.0 (/24)
+
+  # ────────── 15. vnet_mapping ──────────
+  - kind: vnet_mapping
+    key: ["vnet-prod", "10.0.0.20"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      underlay_ip:  { ipv4: 343798372 }   # 100.64.0.20
+      mac_address:  "AKqrzN3u"            # base64 of 00 aa ab cc dd ee
+
+  # ────────── 16. tunnel ──────────
+  - kind: tunnel
+    key: ["tun-01"]
+    value:
+      encap_type: ENCAP_TYPE_VXLAN
+      vni:        4001
+      endpoints:
+        - { ipv4: 16777226 }              # 10.0.0.1
+        - { ipv4: 33554442 }              # 10.0.0.2
+
+  # ────────── 17. pa_validation ──────────
+  - kind: pa_validation
+    key: ["1001"]
+    value:
+      prefixes:
+        - ip:   { ipv4: 92274276 }        # 100.64.0.5
+          mask: { ipv4: 4294967295 }      # /32
+
+  # ────────── 18. qos ──────────
+  - kind: qos
+    key: ["qos-default"]
+    value:
+      qos_id: "qos-default"
+      bw:     1000000                     # 1 Gbps
+      cps:    10000
+      flows:  100000
+
+  # ────────── 19. meter ──────────
+  # Key parts (in order): eni, metering_class_id
+  - kind: meter
+    key: ["eni-001", "1"]
+    value:
+      metadata:   "demo meter slot"
+      tx_counter: 0
+      rx_counter: 0
+
+  # ────────── 20. meter_policy ──────────
+  - kind: meter_policy
+    key: ["mp-default"]
+    value:
+      ip_version: IP_VERSION_IPV4
+
+  # ────────── 21. meter_rule ──────────
+  # Key parts (in order): meter_policy_id, rule_num
+  - kind: meter_rule
+    key: ["mp-default", "10"]
+    value:
+      priority:       10
+      metering_class: 1
+      ip_prefix:
+        ip:   { ipv4: 167772160 }         # 10.0.0.0
+        mask: { ipv4: 16777215 }          # /24
+
+  # ────────── 22. outbound_port_map ──────────
+  - kind: outbound_port_map
+    key: ["pm-01"]
+    value:
+      guid: "pm-01-guid"
+
+  # ────────── 23. outbound_port_map_range ──────────
+  # Key parts (in order): map_id, start_port, end_port
+  - kind: outbound_port_map_range
+    key: ["pm-01", "1024", "2048"]
+    value:
+      action:            ACTION_MAP_PRIVATE_LINK_SERVICE
+      backend_ip:        { ipv4: 92274276 }   # 100.64.0.5
+      backend_port_base: 50000
+
+  # ────────── 24. ha_scope ──────────
+  - kind: ha_scope
+    key: ["hs-scope-01"]
+    value:
+      version:    "v1"
+      disabled:   false
+      ha_role:    HA_ROLE_ACTIVE
+      ha_set_id:  "hs-set-01"
+      vip_v4:     { ipv4: 16777226 }      # 10.0.0.1
+
+  # ────────── 25. ha_scope_config ──────────
+  # Key parts (in order): vdpu_id, ha_scope_id
+  - kind: ha_scope_config
+    key: ["vdpu-01", "hs-scope-01"]
+    value:
+      version:           "v1"
+      disabled:          false
+      owner:             HA_OWNER_DPU
+      ha_set_id:         "hs-set-01"
+      desired_ha_state:  DESIRED_HA_STATE_ACTIVE
+
+  # ────────── 26. ha_scope_state ──────────
+  - kind: ha_scope_state
+    key: ["hs-scope-01"]
+    value:
+      ha_state: HA_STATE_ACTIVE
+      ha_role:  HA_ROLE_ACTIVE
+      ha_term:  1
+
+  # ────────── 27. ha_set ──────────
+  - kind: ha_set
+    key: ["hs-set-01"]
+    value:
+      version:                       "v1"
+      vip_v4:                        { ipv4: 16777226 }    # 10.0.0.1
+      owner:                         HA_OWNER_DPU
+      scope:                         HA_SCOPE_DPU
+      local_npu_ip:                  { ipv4: 33554442 }    # 10.0.0.2
+      local_ip:                      { ipv4: 50331658 }    # 10.0.0.3
+      peer_ip:                       { ipv4: 67108874 }    # 10.0.0.4
+      cp_data_channel_port:          4791
+      dp_channel_dst_port:           4790
+      dp_channel_src_port_min:       30000
+      dp_channel_src_port_max:       40000
+      dp_channel_probe_interval_ms:  1000
+      dp_channel_probe_fail_threshold: 3
+
+  # ────────── 28. ha_set_config ──────────
+  - kind: ha_set_config
+    key: ["hs-set-01"]
+    value:
+      version:          "v1"
+      vip_v4:           { ipv4: 16777226 }
+      vdpu_ids:         ["vdpu-01", "vdpu-02"]
+      scope:            HA_SCOPE_DPU
+      preferred_vdpu_id: "vdpu-01"
+
+  # ────────── 29. ha_set_state ──────────
+  - kind: ha_set_state
+    key: ["hs-set-01"]
+    value:
+      dp_channel_state: HA_SET_EVENT_DP_CHANNEL_UP

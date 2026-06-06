@@ -1,0 +1,359 @@
+# dpu-medium.yaml — a realistically-sized DPU starter snapshot.
+#
+# Compared with scenarios/dpu-base.yaml (1 vnet/2 enis/1 acl/1 route) and
+# scenarios/dpu-all-kinds.yaml (one of every kind, smoke-only), this file
+# is a working, *useful* snapshot suitable for:
+#   - end-to-end SimulatePacket testing (outbound + inbound, multi-vnet)
+#   - exercising LPM tie-breaking across multiple route prefixes
+#   - exercising ACL evaluation order across stages and groups
+#   - subscribe/event load testing (50+ objects)
+#   - manual exploration of cross-vnet peering, drops, encap behaviour
+#
+# Shape:
+#   - 1 appliance
+#   - 3 vnets:        vnet-prod (1001), vnet-stage (1002), vnet-mgmt (1003)
+#   - 5 enis:         eni-001..003 (prod), eni-100 (stage), eni-200 (mgmt)
+#   - 2 acl groups:   acl-prod-in (permit dominant), acl-prod-out (mixed)
+#   - 8 acl rules:    permit + deny + protocol-filtered + port-range
+#   - acl_in/out bindings for ENI stages 1..3
+#   - 2 route groups: rg-prod (4 routes), rg-mgmt (2 routes)
+#   - vnet_mapping:   3 entries spanning prod + stage
+#   - tunnel + prefix_tag + qos + meter_policy / meter_rule
+#
+# It deliberately leaves the HA + outbound-port-map families OUT — those are
+# control-plane fixtures, not data-plane. If you want every kind populated,
+# concat this with dpu-all-kinds.yaml (kinds load idempotently).
+
+apiVersion: dashapi.dashcenter.io/v1
+kind: Scenario
+metadata:
+  name: dpu-medium
+
+spec:
+  # ────────── Appliance ──────────
+  - kind: appliance
+    key: ["appliance-01"]
+    value:
+      sip:             { ipv4: 16777226 }   # 10.0.0.1
+      vm_vni:          1000
+      local_region_id: 1
+
+  # ────────── VNets ──────────
+  - kind: vnet
+    key: ["vnet-prod"]
+    value: { vni: 1001 }
+  - kind: vnet
+    key: ["vnet-stage"]
+    value: { vni: 1002 }
+  - kind: vnet
+    key: ["vnet-mgmt"]
+    value: { vni: 1003 }
+
+  # ────────── QoS + Meter scaffolding (referenced by ENIs) ──────────
+  - kind: qos
+    key: ["qos-prod"]
+    value: { qos_id: "qos-prod", bw: 10000000, cps: 50000, flows: 500000 }
+  - kind: qos
+    key: ["qos-mgmt"]
+    value: { qos_id: "qos-mgmt", bw:  1000000, cps: 10000, flows: 100000 }
+
+  - kind: meter_policy
+    key: ["mp-prod"]
+    value: { ip_version: IP_VERSION_IPV4 }
+  - kind: meter_rule
+    key: ["mp-prod", "10"]
+    value:
+      priority:       10
+      metering_class: 100
+      ip_prefix:
+        ip:   { ipv4: 167772160 }    # 10.0.0.0
+        mask: { ipv4: 16777215  }    # /24
+  - kind: meter_rule
+    key: ["mp-prod", "20"]
+    value:
+      priority:       20
+      metering_class: 200
+      ip_prefix:
+        ip:   { ipv4: 184549376 }    # 11.0.0.0
+        mask: { ipv4: 16777215  }    # /24
+
+  # ────────── ENIs ──────────
+  # prod ENIs are all enabled, mgmt ENI uses qos-mgmt and a meter policy.
+  - kind: eni
+    key: ["eni-001"]
+    value:
+      eni_id:             "11111111-1111-1111-1111-111111111111"
+      mac_address:        "ABEiM0RV"
+      vnet:               "vnet-prod"
+      admin_state:        STATE_ENABLED
+      qos:                "qos-prod"
+      v4_meter_policy_id: "mp-prod"
+  - kind: eni
+    key: ["eni-002"]
+    value:
+      eni_id:      "22222222-2222-2222-2222-222222222222"
+      mac_address: "ABEiM0RW"
+      vnet:        "vnet-prod"
+      admin_state: STATE_ENABLED
+      qos:         "qos-prod"
+  - kind: eni
+    key: ["eni-003"]
+    value:
+      eni_id:      "33333333-3333-3333-3333-333333333333"
+      mac_address: "ABEiM0RX"
+      vnet:        "vnet-prod"
+      admin_state: STATE_DISABLED         # demonstrates admin-state DROP
+  - kind: eni
+    key: ["eni-100"]
+    value:
+      eni_id:      "44444444-4444-4444-4444-444444444444"
+      mac_address: "ABEiM0RY"
+      vnet:        "vnet-stage"
+      admin_state: STATE_ENABLED
+  - kind: eni
+    key: ["eni-200"]
+    value:
+      eni_id:      "55555555-5555-5555-5555-555555555555"
+      mac_address: "ABEiM0RZ"
+      vnet:        "vnet-mgmt"
+      admin_state: STATE_ENABLED
+      qos:         "qos-mgmt"
+
+  # ────────── Prefix tag (used by ACL src/dst lookups) ──────────
+  - kind: prefix_tag
+    key: ["tag-corp-net"]
+    value:
+      ip_version: IP_VERSION_IPV4
+      prefix_list:
+        - ip:   { ipv4: 167772160 }    # 10.0.0.0
+          mask: { ipv4: 16777215  }    # /24
+
+  # ────────── ACL groups + rules ──────────
+  # 1. acl-prod-in: permit-by-default with a couple of denies
+  - kind: acl_group
+    key: ["acl-prod-in"]
+    value: { ip_version: IP_VERSION_IPV4 }
+  - kind: acl_rule
+    key: ["acl-prod-in", "10"]
+    value:
+      priority:    10
+      action:      ACTION_DENY
+      terminating: true
+      protocol:    [6]                   # tcp
+      dst_port:
+        - { value: 22 }                  # block SSH
+  - kind: acl_rule
+    key: ["acl-prod-in", "20"]
+    value:
+      priority:    20
+      action:      ACTION_DENY
+      terminating: true
+      src_addr:
+        - ip:   { ipv4: 2887778304 }     # 172.16.0.0
+          mask: { ipv4: 16777215 }       # /24 (block this src)
+  - kind: acl_rule
+    key: ["acl-prod-in", "100"]
+    value:
+      priority:    100
+      action:      ACTION_PERMIT
+      terminating: true                  # catch-all permit
+
+  # 2. acl-prod-out: protocol-restricted egress
+  - kind: acl_group
+    key: ["acl-prod-out"]
+    value: { ip_version: IP_VERSION_IPV4 }
+  - kind: acl_rule
+    key: ["acl-prod-out", "10"]
+    value:
+      priority:    10
+      action:      ACTION_PERMIT
+      terminating: true
+      protocol:    [6, 17]              # tcp + udp only
+      dst_port:
+        - { range: { min: 1024, max: 65535 } }
+  - kind: acl_rule
+    key: ["acl-prod-out", "200"]
+    value:
+      priority:    200
+      action:      ACTION_DENY
+      terminating: true                 # catch-all deny
+
+  # 3. acl-mgmt-in: very small (1 permit)
+  - kind: acl_group
+    key: ["acl-mgmt-in"]
+    value: { ip_version: IP_VERSION_IPV4 }
+  - kind: acl_rule
+    key: ["acl-mgmt-in", "100"]
+    value:
+      priority: 100
+      action:   ACTION_PERMIT
+      terminating: true
+
+  # ACL bindings — eni-001 has multiple stages, others have stage 1 only.
+  - kind: acl_in
+    key: ["eni-001", "1"]
+    value: { v4_acl_group_id: "acl-prod-in" }
+  - kind: acl_in
+    key: ["eni-001", "2"]
+    value: { v4_acl_group_id: "acl-prod-in" }    # belt-and-suspenders
+  - kind: acl_out
+    key: ["eni-001", "1"]
+    value: { v4_acl_group_id: "acl-prod-out" }
+  - kind: acl_in
+    key: ["eni-002", "1"]
+    value: { v4_acl_group_id: "acl-prod-in" }
+  - kind: acl_in
+    key: ["eni-100", "1"]
+    value: { v4_acl_group_id: "acl-prod-in" }
+  - kind: acl_in
+    key: ["eni-200", "1"]
+    value: { v4_acl_group_id: "acl-mgmt-in" }
+
+  # ────────── Route groups + routes (LPM with multiple prefixes) ──────────
+  - kind: route_group
+    key: ["rg-prod"]
+    value: { version: "v1" }
+  - kind: route_group
+    key: ["rg-mgmt"]
+    value: { version: "v1" }
+
+  # rg-prod has 4 routes — demonstrates LPM ordering AND a DROP rule.
+  - kind: route
+    key: ["rg-prod", "10.0.0.0/8"]
+    value:
+      routing_type: ROUTING_TYPE_DIRECT      # broad catch
+  - kind: route
+    key: ["rg-prod", "10.1.0.0/16"]
+    value:
+      routing_type: ROUTING_TYPE_VNET        # peering -> vnet-stage
+      vnet:         "vnet-stage"
+  - kind: route
+    key: ["rg-prod", "10.1.1.0/24"]
+    value:
+      routing_type: ROUTING_TYPE_DROP        # surgical hole inside 10.1.0.0/16
+  - kind: route
+    key: ["rg-prod", "11.0.0.0/24"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      vnet:         "vnet-mgmt"
+
+  # rg-mgmt has 2 routes.
+  - kind: route
+    key: ["rg-mgmt", "10.0.0.0/24"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      vnet:         "vnet-prod"
+  - kind: route
+    key: ["rg-mgmt", "0.0.0.0/0"]
+    value:
+      routing_type: ROUTING_TYPE_DROP
+
+  # Bind ENIs to their route groups.
+  - kind: eni_route
+    key: ["eni-001"]
+    value: { group_id: "rg-prod" }
+  - kind: eni_route
+    key: ["eni-002"]
+    value: { group_id: "rg-prod" }
+  - kind: eni_route
+    key: ["eni-100"]
+    value: { group_id: "rg-prod" }
+  - kind: eni_route
+    key: ["eni-200"]
+    value: { group_id: "rg-mgmt" }
+
+  # ────────── vnet_mappings (so peering routes can ENCAP) ──────────
+  # Multiple overlay IPs in vnet-stage so simulate can hit different mappings.
+  - kind: vnet_mapping
+    key: ["vnet-stage", "10.1.0.10"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      underlay_ip:  { ipv4: 343798372 }     # 100.64.0.20
+      mac_address:  "AKqrzN3u"
+  - kind: vnet_mapping
+    key: ["vnet-stage", "10.1.0.11"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      underlay_ip:  { ipv4: 360575588 }     # 100.64.0.21
+      mac_address:  "AKqrzN3v"
+  - kind: vnet_mapping
+    key: ["vnet-mgmt", "11.0.0.5"]
+    value:
+      routing_type: ROUTING_TYPE_VNET
+      underlay_ip:  { ipv4: 377352804 }     # 100.64.0.22
+      mac_address:  "AKqrzN3w"
+
+  # ────────── Inbound route_rule (VNI 1001) ──────────
+  # Required so inbound simulate can DELIVER instead of dropping.
+  - kind: route_rule
+    key: ["eni-001", "1001", "10.0.0.0/24", "100"]
+    value:
+      action_type:   ACTION_TYPE_DECAP
+      priority:      100
+      pa_validation: false
+      vnet:          "vnet-prod"
+
+  # ────────── Tunnel (referenced by future vnet_mapping.tunnel feature) ──────────
+  - kind: tunnel
+    key: ["tun-stage-01"]
+    value:
+      encap_type: ENCAP_TYPE_VXLAN
+      vni:        1002
+      endpoints:
+        - { ipv4: 343798372 }                # 100.64.0.20
+        - { ipv4: 360575588 }                # 100.64.0.21
+
+# ──────────────────────────────────────────────────────────────────────────
+# Things to try once dash-sim is running with this scenario
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Replace 127.0.0.1:50051 with whatever target your fleet exposes.
+#
+# 1. ACL_OUT catch-all DENY (port 80 is below the permit's [1024..65535] range):
+#    dash-sim-client --target 127.0.0.1:50051 simulate \
+#      --direction outbound --eni eni-001 \
+#      --src-ip 10.0.0.1 --dst-ip 10.1.0.10 \
+#      --protocol 6 --src-port 1024 --dst-port 80 --trace
+#    -> action=DROP, reason=acl_out stage=1 priority=200 deny
+#
+# 2. ACL_OUT permits + LPM hits 10.1.0.0/16 + vnet_mapping resolves -> ENCAP:
+#    dash-sim-client --target 127.0.0.1:50051 simulate \
+#      --direction outbound --eni eni-001 \
+#      --src-ip 10.0.0.1 --dst-ip 10.1.0.10 \
+#      --protocol 6 --src-port 1024 --dst-port 8080 --trace
+#    -> action=FORWARD (ENCAP via 100.64.0.20)
+#
+# 3. ACL_OUT permits but LPM hits the surgical /24 hole -> DROP:
+#    dash-sim-client --target 127.0.0.1:50051 simulate \
+#      --direction outbound --eni eni-001 \
+#      --src-ip 10.0.0.1 --dst-ip 10.1.1.5 \
+#      --protocol 6 --src-port 1024 --dst-port 8080 --trace
+#    -> action=DROP, reason=route ROUTING_TYPE_DROP
+#
+# 4. ENI admin-state DISABLED -> immediate DROP before any ACL/route lookup:
+#    dash-sim-client --target 127.0.0.1:50051 simulate \
+#      --direction outbound --eni eni-003 \
+#      --src-ip 10.0.0.3 --dst-ip 10.1.0.10 \
+#      --protocol 6 --src-port 1024 --dst-port 8080 --trace
+#    -> action=DROP, reason=eni "eni-003" admin_state=STATE_DISABLED
+#
+# 5. ACL_IN deny on TCP/22 from any source -> DROP at stage 1:
+#    dash-sim-client --target 127.0.0.1:50051 simulate \
+#      --direction inbound --eni eni-001 --vni 1001 \
+#      --src-ip 100.64.0.5 --dst-ip 10.0.0.4 \
+#      --protocol 6 --src-port 50000 --dst-port 22 --trace
+#    -> action=DROP, reason=acl_in stage=1 priority=10 deny
+#
+# 6. ACL_IN deny on banned source CIDR 172.16.0.0/24 -> DROP at stage 1:
+#    dash-sim-client --target 127.0.0.1:50051 simulate \
+#      --direction inbound --eni eni-001 --vni 1001 \
+#      --src-ip 172.16.0.42 --dst-ip 10.0.0.4 \
+#      --protocol 6 --src-port 50000 --dst-port 8080 --trace
+#    -> action=DROP, reason=acl_in stage=1 priority=20 deny
+#
+# 7. ACL_IN permit + route_rule DECAP -> DELIVER:
+#    dash-sim-client --target 127.0.0.1:50051 simulate \
+#      --direction inbound --eni eni-001 --vni 1001 \
+#      --src-ip 100.64.0.5 --dst-ip 10.0.0.4 \
+#      --protocol 6 --src-port 50000 --dst-port 8080 --trace
+#    -> action=DELIVER
