@@ -1,0 +1,310 @@
+// migration.proto — DashCenter northbound ENI live-migration API.
+//
+// This service is the operator-facing surface of the 10-phase ENI live
+// migration state machine described in
+// specs/ENI-MIGRATION/dashcenter_eni_live_migration_design_spec.md.
+//
+// Why a separate service?
+// -----------------------
+// ENI migration crosses ControlPlane (write), OperationsService (drain),
+// HaService (role flip), and ObservabilityService (drift) concerns. A
+// dedicated service keeps the rich phase-aware control surface from
+// polluting the simpler CRUD shape of ControlPlane, and makes it easy to
+// gate migration features behind a capability or feature-flag.
+//
+// State machine
+// -------------
+// Phases follow MigrationPhase below. Transitions are linear (each phase
+// must be the immediate successor of the previous one) EXCEPT for terminal
+// rollback transitions:
+//
+//   ADMISSION -> SNAPSHOT -> PREPARE -> SYNC -> READY -> CUTOVER
+//        -> DRAIN -> COMMIT -> FINALIZE -> [COMPLETED]
+//
+//   any non-terminal phase -> ROLLBACK -> [ABORTED]
+//
+// Optimistic concurrency
+// ----------------------
+// Each AdvanceMigrationPhase call carries the expected_generation it
+// observed. dashd returns FAILED_PRECONDITION if any other actor has
+// progressed the session in the meantime. This makes the API safe to
+// drive from multiple operator tools concurrently.
+//
+// Bundle export/import
+// --------------------
+// ExportMigrationBundle/ImportMigrationBundle stream a self-contained
+// MigrationBundle (declared state slice + observed flows + cutover plan).
+// Used for cold-migration (source DPU offline) and for debugging stuck
+// migrations offline.
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+import "dashcenter/v1/types.proto";
+
+// -----------------------------------------------------------------------------
+// MigrationService
+// -----------------------------------------------------------------------------
+
+service MigrationService {
+  // Build a plan for a proposed migration. Pure computation — no state is
+  // mutated. Operators typically call this and inspect the plan before
+  // calling StartMigrationSession.
+  rpc CreateMigrationPlan(CreateMigrationPlanRequest) returns (MigrationPlan);
+
+  // Validate that a given plan is still actionable (target capacity hasn't
+  // been consumed, source DPU still UP, capabilities still match). Returns
+  // an updated plan with refreshed warnings.
+  rpc ValidateMigrationPlan(ValidateMigrationPlanRequest) returns (MigrationPlan);
+
+  // Persist a plan as a live MigrationSession in phase ADMISSION. Returns
+  // the session id; clients then drive it forward with
+  // AdvanceMigrationPhase.
+  rpc StartMigrationSession(StartMigrationSessionRequest) returns (MigrationSession);
+
+  // Transition a session to the requested next phase. Each call advances
+  // by exactly one phase and is gated by expected_generation. Rollback and
+  // Abort have dedicated RPCs because they bypass the linear phase order.
+  rpc AdvanceMigrationPhase(AdvanceMigrationPhaseRequest) returns (MigrationSession);
+
+  // Server-stream MigrationSession updates as the session progresses. Useful
+  // for `dashctl migration watch` and for UI dashboards.
+  rpc StreamMigrationSession(StreamMigrationSessionRequest) returns (stream MigrationSession);
+
+  // Force the session into ROLLBACK -> ABORTED. Honoured from any
+  // non-terminal phase. Used when an operator wants to undo an in-flight
+  // migration that hasn't yet cut over.
+  rpc RollbackMigration(MigrationActionRequest) returns (MigrationSession);
+
+  // Abort the session WITHOUT a clean rollback. Use only when rollback
+  // itself is failing. Leaves the system in a state that requires explicit
+  // reconcile.
+  rpc AbortMigration(MigrationActionRequest) returns (MigrationSession);
+
+  // Promote a session in FINALIZE to COMPLETED. Idempotent. dashd may also
+  // do this automatically once finalize prerequisites are met; this RPC is
+  // for operators who want explicit gating.
+  rpc CommitMigration(MigrationActionRequest) returns (MigrationSession);
+
+  // Read the current state of a session.
+  rpc GetMigrationSession(GetMigrationSessionRequest) returns (MigrationSession);
+
+  // List sessions matching a filter (e.g. all active sessions on a given
+  // source DPU).
+  rpc ListMigrationSessions(ListMigrationSessionsRequest) returns (stream MigrationSession);
+
+  // Server-stream a MigrationBundle as a chunked binary export. Used to
+  // hand-carry a migration to an operator workstation for offline analysis
+  // or to cold-restart a migration against a different target.
+  rpc ExportMigrationBundle(ExportMigrationBundleRequest) returns (stream MigrationBundleChunk);
+
+  // Client-stream the same chunked format back in. Server reconstructs the
+  // bundle and returns the resulting MigrationSession (in phase ADMISSION).
+  rpc ImportMigrationBundle(stream MigrationBundleChunk) returns (MigrationSession);
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+// MigrationPhase enumerates the 10 real phases plus the terminal states and
+// the synthetic ROLLBACK state. Phase ordinals are CONTRACTUAL — clients use
+// the int value to compare progress.
+enum MigrationPhase {
+  MIGRATION_PHASE_UNSPECIFIED = 0;
+  MIGRATION_PHASE_ADMISSION = 1;   // plan accepted, no DPU writes yet
+  MIGRATION_PHASE_SNAPSHOT = 2;    // source DPU policy snapshot captured
+  MIGRATION_PHASE_PREPARE = 3;     // target DPU pre-staged with policy
+  MIGRATION_PHASE_SYNC = 4;        // flow-sync from source to target
+  MIGRATION_PHASE_READY = 5;       // target hot, awaiting cutover
+  MIGRATION_PHASE_CUTOVER = 6;     // traffic redirect (HA role flip)
+  MIGRATION_PHASE_DRAIN = 7;       // source bleeding last flows
+  MIGRATION_PHASE_COMMIT = 8;      // declared state moved to target
+  MIGRATION_PHASE_FINALIZE = 9;    // cleanup, observability flushed
+  MIGRATION_PHASE_COMPLETED = 10;  // terminal success
+  MIGRATION_PHASE_ROLLBACK = 11;   // synthetic — undo in progress
+  MIGRATION_PHASE_ABORTED = 12;    // terminal failure
+}
+
+// MigrationStrategy picks the cutover algorithm. Strategies trade off
+// blast-radius vs duration vs operator-touch.
+enum MigrationStrategy {
+  MIGRATION_STRATEGY_UNSPECIFIED = 0;
+  // Default. New flows go to target as soon as READY; source DPU drains
+  // existing flows to age-out. Lowest blast radius, longest duration.
+  MIGRATION_STRATEGY_NEW_FLOWS_FIRST_DRAIN = 1;
+  // Full re-home: all flows are synced before cutover, then source goes
+  // cold immediately. Fastest cutover but biggest sync cost.
+  MIGRATION_STRATEGY_FULL_REHOME = 2;
+  // Maintenance-fast: skip sync, accept brief connection reset for live
+  // flows. Use only when downtime tolerance is high.
+  MIGRATION_STRATEGY_MAINTENANCE_FAST = 3;
+  // Canary split: traffic is divided between source and target at CUTOVER
+  // with progressive shift. Requires operator-driven phase advance per
+  // increment.
+  MIGRATION_STRATEGY_CANARY_SPLIT = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Plan & session messages
+// -----------------------------------------------------------------------------
+
+message CreateMigrationPlanRequest {
+  string namespace = 1;
+  // ENIs to migrate. Typically 1 per session, but the API supports bulk
+  // moves (e.g. when draining a DPU).
+  repeated string eni_names = 2;
+  string source_dpu_id = 3;
+  // Optional explicit target. If empty, dashd picks one based on capacity,
+  // capabilities, and placement labels.
+  string target_dpu_id = 4;
+  MigrationStrategy strategy = 5;
+  // Optional advisory budgets — server may clamp.
+  int64 max_sync_duration_seconds = 6;
+  int64 max_total_duration_seconds = 7;
+  // Free-form reason recorded in the audit log.
+  string reason = 8;
+}
+
+message ValidateMigrationPlanRequest {
+  MigrationPlan plan = 1;
+}
+
+message StartMigrationSessionRequest {
+  MigrationPlan plan = 1;
+}
+
+// MigrationPlan is the immutable, validated description of a proposed
+// migration. It can be passed to ValidateMigrationPlan and
+// StartMigrationSession verbatim.
+message MigrationPlan {
+  string plan_id = 1;
+  string namespace = 2;
+  repeated string eni_names = 3;
+  string source_dpu_id = 4;
+  string target_dpu_id = 5;
+  MigrationStrategy strategy = 6;
+  int64 max_sync_duration_seconds = 7;
+  int64 max_total_duration_seconds = 8;
+  // Estimated flow count to be synced (informational).
+  int64 estimated_flow_count = 9;
+  // Estimated capacity delta on the target after migration.
+  SimulatedCapacityImpact target_capacity_impact = 10;
+  // Warnings the operator should see before approving (e.g. "target lacks
+  // ipv6 capability", "estimated_flow_count > 80% of target free flow
+  // budget").
+  repeated string warnings = 11;
+  google.protobuf.Timestamp created_at = 12;
+  string created_by = 13;
+}
+
+// SimulatedCapacityImpact piggy-backs on the SimulateApply primitive in
+// control_plane.proto but is duplicated here to avoid cross-file import on
+// migration-only clients.
+message SimulatedCapacityImpact {
+  string dpu_id = 1;
+  int64 delta_enis = 2;
+  int64 delta_active_flows = 3;
+  int64 delta_acl_rules = 4;
+  int64 delta_routes = 5;
+  bool exceeds_capacity = 6;
+  string capacity_failure_reason = 7;
+}
+
+// MigrationSession is the live state of a single migration. Returned by
+// every mutating RPC and streamed by StreamMigrationSession.
+message MigrationSession {
+  string session_id = 1;
+  uint64 generation = 2;       // bumped on every phase advance
+  MigrationPlan plan = 3;
+  MigrationPhase phase = 4;
+  // Per-phase timestamps. Unset for phases not yet reached.
+  map<int32, string> phase_started_at = 5;   // key = phase int32
+  // Optional structured progress detail (e.g. flow-sync progress
+  // percentage). JSON-encoded blob; schema varies by strategy & phase.
+  string detail_json = 6;
+  // Populated when phase = ROLLBACK or ABORTED.
+  string failure_reason = 7;
+  // Latest dispatch result per DPU. Empty for phases that don't dispatch.
+  repeated DpuDispatchResult last_dispatch = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// -----------------------------------------------------------------------------
+// Phase-transition requests
+// -----------------------------------------------------------------------------
+
+message AdvanceMigrationPhaseRequest {
+  string session_id = 1;
+  uint64 expected_generation = 2;
+  // The phase the caller WANTS the session to be in after this call. Server
+  // verifies this is exactly current_phase + 1 (else FAILED_PRECONDITION).
+  MigrationPhase to_phase = 3;
+  // Optional reason — recorded in the audit log alongside the transition.
+  string reason = 4;
+}
+
+message MigrationActionRequest {
+  string session_id = 1;
+  uint64 expected_generation = 2;
+  string reason = 3;
+}
+
+message GetMigrationSessionRequest {
+  string session_id = 1;
+}
+
+message StreamMigrationSessionRequest {
+  string session_id = 1;
+  // If true, send only deltas after the initial snapshot. Default: false.
+  bool deltas_only = 2;
+}
+
+message ListMigrationSessionsRequest {
+  // Optional filters. Empty list = no filter on that field.
+  repeated string namespaces = 1;
+  repeated string source_dpu_ids = 2;
+  repeated string target_dpu_ids = 3;
+  repeated MigrationPhase phases = 4;
+  // If true, include terminal sessions (COMPLETED, ABORTED). Default: false.
+  bool include_terminal = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Bundle export/import
+// -----------------------------------------------------------------------------
+
+message ExportMigrationBundleRequest {
+  string session_id = 1;
+  // Optional max chunk size in bytes. 0 = server default.
+  int32 chunk_size_bytes = 2;
+}
+
+// MigrationBundleChunk is the wire-format for streaming a bundle. The first
+// chunk carries the header; subsequent chunks carry opaque payload bytes.
+// The final chunk carries `is_final=true` and an integrity hash.
+message MigrationBundleChunk {
+  oneof kind {
+    MigrationBundleHeader header = 1;
+    bytes payload = 2;
+    MigrationBundleTrailer trailer = 3;
+  }
+}
+
+message MigrationBundleHeader {
+  string session_id = 1;
+  string bundle_format_version = 2;  // semver
+  int64 total_size_bytes = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message MigrationBundleTrailer {
+  bool is_final = 1;
+  // SHA-256 of the concatenated payload bytes, hex-encoded.
+  string sha256 = 2;
+}

@@ -1,0 +1,328 @@
+// control_plane.proto — DashCenter northbound mutating API.
+//
+// This is the operator-facing service that dashctl, the Web Console, and
+// 3rd-party SDKs talk to. It is the ONLY surface that mutates desired state.
+//
+// Relationship to dashapi.v1 (southbound)
+// ---------------------------------------
+// dashapi.v1 is the *southbound* contract dashd uses to talk to each DPU agent
+// (dash-sim, dash-redis-adapter, real DPUs). dashcenter.v1 (this file) is the
+// *northbound* contract operators use to talk to dashd. dashd is responsible
+// for translating northbound intent into per-DPU dashapi.v1 calls via its
+// placement function and 5-stage write pipeline:
+//
+//     Receive → Validate → Stage(pending:txn_id) → Dispatch → Commit(MULTI/EXEC)
+//
+// Multi-tenancy
+// -------------
+// Every spec message carries a `namespace` field. Namespace boundaries are
+// enforced at validation time; cross-namespace references (e.g. an ENI in
+// namespace "team-a" pointing at a VNET in namespace "shared") are rejected
+// unless the target namespace explicitly exports the object (out of scope for
+// this file — handled by dashd RBAC config).
+//
+// Generations & optimistic concurrency
+// ------------------------------------
+// Every Put* carries an optional `expected_generation`. If non-zero, dashd
+// returns FAILED_PRECONDITION when the current stored generation differs.
+// Returned Ack messages always include the new generation in `txn_id` metadata
+// (the txn_id is the canonical handle for follow-up queries).
+//
+// Streaming
+// ---------
+// ApplyBatch is a *client-streaming* RPC: the client streams PolicyObject
+// messages, the server commits them as a single Stage→Dispatch→Commit
+// transaction, and returns one terminal BatchAck. SimulateApply is unary but
+// returns a synthesised SimulateApplyResult without mutating anything.
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+import "dashcenter/v1/types.proto";
+
+// -----------------------------------------------------------------------------
+// ControlPlane service
+// -----------------------------------------------------------------------------
+
+service ControlPlane {
+  // -- Inventory (operator-visible DPU registration & label management) -------
+  rpc PutInventory(PutInventoryRequest) returns (Ack);
+  rpc RegisterDpu(DpuRegistration) returns (Ack);
+  rpc DeregisterDpu(NameRef) returns (Ack);
+
+  // -- Per-kind Put / Delete / Get / List --------------------------------------
+  // Each kind has its own typed Put because the spec payload is kind-specific.
+  // Delete/Get/List are uniform on NameRef / KindFilter.
+  rpc PutVnet(VnetSpec) returns (Ack);
+  rpc PutEni(EniSpec) returns (Ack);
+  rpc PutVnetMapping(VnetMappingSpec) returns (Ack);
+  rpc PutAclPolicy(AclPolicySpec) returns (Ack);
+  rpc PutRoutePolicy(RoutePolicySpec) returns (Ack);
+  rpc PutHaSet(HaSetSpec) returns (Ack);
+  rpc PutServiceTunnel(ServiceTunnelSpec) returns (Ack);
+
+  rpc Delete(NameRef) returns (Ack);
+  rpc Get(NameRef) returns (PolicyObject);
+  rpc List(KindFilter) returns (stream PolicyObject);
+
+  // -- Batch & dry-run ---------------------------------------------------------
+  // ApplyBatch streams a transactional set of changes. The server commits all
+  // or nothing (rollback on any per-DPU dispatch failure unless
+  // BatchOptions.partial_ok is true).
+  rpc ApplyBatch(stream PolicyApplyRequest) returns (BatchAck);
+  rpc SimulateApply(PolicyApplyRequest) returns (SimulateApplyResult);
+
+  // -- Reconcile ---------------------------------------------------------------
+  // Force dashd to re-run its reconciler against the current declared state.
+  // Use after a DPU comes back from UNREACHABLE, or to recover from drift.
+  rpc Reconcile(ReconcileRequest) returns (Ack);
+}
+
+// -----------------------------------------------------------------------------
+// Inventory requests
+// -----------------------------------------------------------------------------
+
+message PutInventoryRequest {
+  Inventory inventory = 1;
+}
+
+// DpuRegistration is the phone-home payload a new DPU sends. dashd inserts it
+// into the inventory in DPU_STATE_REGISTERING and transitions to DPU_STATE_UP
+// once initial reconcile completes.
+message DpuRegistration {
+  DpuIdentity identity = 1;
+  DpuCapacityLimits limits = 2;
+  DpuCapabilities capabilities = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Spec messages — one per kind grouping
+// -----------------------------------------------------------------------------
+//
+// These messages are intentionally lean. They carry only the fields that
+// dashd needs to (a) place the object on one or more DPUs and (b) validate
+// cross-object references. The richer per-DPU schema (e.g. fast-path config,
+// VXLAN UDP port, etc.) is in the upstream `dash.*` packages and is supplied
+// by dashd to each DPU via dashapi.v1.
+
+message VnetSpec {
+  string namespace = 1;
+  string name = 2;
+  uint32 vni = 3;
+  string guid = 4;
+  map<string, string> labels = 5;
+  uint64 expected_generation = 6;
+}
+
+message EniSpec {
+  string namespace = 1;
+  string name = 2;
+  string vnet_name = 3;
+  string mac_address = 4;
+  string underlay_ip = 5;
+  string admin_state = 6;       // "up" | "down"
+  // Optional placement hint: comma-separated DPU IDs the operator prefers.
+  // dashd may override if capacity/capabilities don't match.
+  repeated string placement_hint_dpu_ids = 7;
+  // If true, dashd resimulates all existing flows for this ENI after Apply,
+  // forcing slow-path re-evaluation against the new policy. Default: false.
+  bool resimulate_flows = 8;
+  map<string, string> labels = 9;
+  uint64 expected_generation = 10;
+}
+
+message VnetMappingSpec {
+  string namespace = 1;
+  string vnet_name = 2;
+  string ip_address = 3;     // overlay IP being mapped
+  string underlay_ip = 4;    // physical address
+  string mac_address = 5;
+  // Action: "vnet_encap" | "service_tunnel" | "drop" | ...
+  string action = 6;
+  // Free-form params for non-default actions (e.g. service-tunnel parameters).
+  map<string, string> params = 7;
+  map<string, string> labels = 8;
+  uint64 expected_generation = 9;
+}
+
+message AclRuleSpec {
+  uint32 priority = 1;
+  string action = 2;                   // "allow" | "deny" | "allow_and_continue"
+  repeated string src_prefixes = 3;
+  repeated string dst_prefixes = 4;
+  repeated string src_ports = 5;       // e.g. "80", "1000-2000"
+  repeated string dst_ports = 6;
+  repeated string protocols = 7;       // e.g. "tcp", "udp", "icmp", "6"
+  string description = 8;
+}
+
+message AclPolicySpec {
+  string namespace = 1;
+  string name = 2;
+  string stage = 3;                    // "inbound" | "outbound"
+  // Each policy targets one or more ENIs via name.
+  repeated string eni_names = 4;
+  repeated AclRuleSpec rules = 5;
+  map<string, string> labels = 6;
+  uint64 expected_generation = 7;
+}
+
+message RouteSpec {
+  string prefix = 1;
+  string next_hop_type = 2;            // "vnet" | "service_tunnel" | "direct" | "drop"
+  string next_hop_target = 3;          // VNET name / tunnel name / "" for drop
+  // Optional ECMP next-hop set. If non-empty, next_hop_type/target are ignored.
+  repeated EcmpMember ecmp_members = 4;
+  uint32 metric = 5;
+}
+
+message EcmpMember {
+  string next_hop_type = 1;
+  string next_hop_target = 2;
+  uint32 weight = 3;
+}
+
+message RoutePolicySpec {
+  string namespace = 1;
+  string name = 2;
+  repeated string eni_names = 3;
+  repeated RouteSpec routes = 4;
+  map<string, string> labels = 5;
+  uint64 expected_generation = 6;
+}
+
+message HaSetSpec {
+  string namespace = 1;
+  string name = 2;
+  // Mode: "active_active" | "active_standby"
+  string mode = 3;
+  // Member DPU IDs that make up this HA set.
+  repeated string member_dpu_ids = 4;
+  // VIP advertised by the HA set, if any.
+  string virtual_ip = 5;
+  // Flow-sync transport endpoints (typically peer-to-peer UDP).
+  repeated string flow_sync_endpoints = 6;
+  map<string, string> labels = 7;
+  uint64 expected_generation = 8;
+}
+
+message ServiceTunnelSpec {
+  string namespace = 1;
+  string name = 2;
+  // The underlay endpoint pair backing the service tunnel.
+  string local_underlay_ip = 3;
+  string remote_underlay_ip = 4;
+  // VNI on the wire for this service tunnel.
+  uint32 vni = 5;
+  // Optional NSG/PrivateLink-style routing parameters.
+  map<string, string> params = 6;
+  map<string, string> labels = 7;
+  uint64 expected_generation = 8;
+}
+
+// -----------------------------------------------------------------------------
+// Batch / dry-run
+// -----------------------------------------------------------------------------
+
+// PolicyObject is the discriminated union of every kind ControlPlane can
+// mutate. Used by Get/List responses and as the inner payload of
+// PolicyApplyRequest. Add new kinds as additional oneof arms.
+message PolicyObject {
+  oneof object {
+    VnetSpec vnet = 1;
+    EniSpec eni = 2;
+    VnetMappingSpec vnet_mapping = 3;
+    AclPolicySpec acl_policy = 4;
+    RoutePolicySpec route_policy = 5;
+    HaSetSpec ha_set = 6;
+    ServiceTunnelSpec service_tunnel = 7;
+  }
+  // Server-populated on Get/List. Ignored on Put/Apply.
+  google.protobuf.Timestamp last_modified_at = 50;
+  uint64 generation = 51;
+}
+
+// PolicyApplyRequest is one element of an ApplyBatch stream OR the input to a
+// SimulateApply. Each request carries one PolicyObject plus the action.
+message PolicyApplyRequest {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_PUT = 1;
+    ACTION_DELETE = 2;
+  }
+  Action action = 1;
+  PolicyObject object = 2;
+  // Optional batch options. Only respected on the FIRST stream message of an
+  // ApplyBatch; ignored on subsequent messages and on SimulateApply.
+  BatchOptions batch_options = 3;
+}
+
+message BatchOptions {
+  // If true, partial success is allowed: individual per-DPU dispatch failures
+  // are reported in BatchAck but the transaction is still committed for the
+  // objects that succeeded. Default: false (atomic all-or-nothing).
+  bool partial_ok = 1;
+  // Maximum time the server will spend waiting for per-DPU acks before
+  // declaring the dispatch phase failed. Zero means "use server default".
+  int64 dispatch_timeout_seconds = 2;
+  // If true, run validation only (Stage but never Dispatch). Useful for
+  // CI-style policy linting against a live dashd.
+  bool validate_only = 3;
+}
+
+// BatchAck is the single terminal response from ApplyBatch.
+message BatchAck {
+  string txn_id = 1;
+  google.protobuf.Timestamp committed_at = 2;
+  int32 objects_total = 3;
+  int32 objects_succeeded = 4;
+  int32 objects_failed = 5;
+  repeated PerObjectResult per_object = 6;
+  repeated DpuDispatchResult per_dpu = 7;
+}
+
+message PerObjectResult {
+  NameRef target = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+// SimulateApplyResult is what SimulateApply returns. It enumerates what WOULD
+// have happened: which DPUs would receive which writes, which validation
+// errors would fire, and an estimated capacity-impact diff per DPU.
+message SimulateApplyResult {
+  bool would_succeed = 1;
+  repeated string validation_errors = 2;
+  repeated SimulatedDpuImpact per_dpu_impact = 3;
+  // Concrete dashapi.v1 calls that would be issued, as RPC-name strings. Useful
+  // for operator-facing dry-run output.
+  repeated string would_issue_rpcs = 4;
+}
+
+message SimulatedDpuImpact {
+  string dpu_id = 1;
+  int64 delta_enis = 2;
+  int64 delta_vnet_mappings = 3;
+  int64 delta_acl_rules = 4;
+  int64 delta_routes = 5;
+  // True if the change would push the DPU above an advertised capacity ceiling.
+  bool exceeds_capacity = 6;
+  string capacity_failure_reason = 7;
+}
+
+// -----------------------------------------------------------------------------
+// Reconcile
+// -----------------------------------------------------------------------------
+
+message ReconcileRequest {
+  // Optional scope. If both are empty, reconcile the entire fleet.
+  repeated string namespaces = 1;
+  repeated string dpu_ids = 2;
+  // If true, force a full re-push even if dashd's hash-compare says the DPU
+  // is already in sync. Use for break-glass recovery after a DPU restore.
+  bool force_full_resync = 3;
+}

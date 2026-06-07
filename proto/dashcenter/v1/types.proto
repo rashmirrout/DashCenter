@@ -1,0 +1,271 @@
+// types.proto — shared types for the DashCenter northbound API (dashcenter.v1).
+//
+// This file defines the cross-service vocabulary used by every dashcenter.v1
+// service: DPU identity & state, capacity & capability descriptors, inventory,
+// generic acknowledgements, name references, kind filters, flow-table
+// statistics, the consolidated counter report, and the audit-log envelope.
+//
+// Design rules
+// ------------
+//  * `namespace` is REQUIRED on every spec-bearing message in the sibling files
+//    so multi-tenancy is intrinsic, not bolted on later.
+//  * Enums are CLOSED (no ALIAS option, explicit `_UNSPECIFIED = 0`) so wire
+//    forward-compat is via additive enum values, not via re-using zero.
+//  * Counter names are stable and align 1:1 with the names exposed by the
+//    upstream DASH counter inventory (see specs/HLD/dash_diagnostic_system_spec
+//    and the sonic-dash-api counter docs).
+//  * No domain object schemas live here — those are referenced by name from
+//    control_plane.proto via the upstream `dash.*` packages. This file is
+//    intentionally schema-agnostic.
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+
+// -----------------------------------------------------------------------------
+// DPU identity & state
+// -----------------------------------------------------------------------------
+
+// DpuIdentity uniquely identifies a single DPU instance within the fleet.
+// The `dpu_id` is the operator-facing identifier (e.g. "rack1-dpu-03"); the
+// `appliance_id` and `slot` fields locate it physically. `software_version` is
+// reported by the DPU on registration phone-home and is used by dashd to gate
+// rolling upgrades and capability negotiation.
+message DpuIdentity {
+  string dpu_id = 1;
+  string appliance_id = 2;
+  uint32 slot = 3;
+  string software_version = 4;
+  // Free-form labels for placement & selection (e.g. "zone=eu-west-1a",
+  // "tier=gold"). dashd merges these with operator-supplied labels.
+  map<string, string> labels = 5;
+}
+
+// DpuState is the lifecycle state of a DPU as seen by dashd. Transitions are
+// driven by phone-home health, operator commands (cordon/drain), and HA role
+// changes. This enum is intentionally distinct from HaScopeRole (see ha.proto)
+// because a DPU can be UP but still be HA-STANDBY, or CORDONED but still serve
+// existing flows.
+enum DpuState {
+  DPU_STATE_UNSPECIFIED = 0;
+  DPU_STATE_REGISTERING = 1;   // initial phone-home in progress
+  DPU_STATE_UP = 2;            // healthy, accepting new placements
+  DPU_STATE_DEGRADED = 3;      // partial — e.g. one pipeline down
+  DPU_STATE_CORDONED = 4;      // no new placements; existing flows OK
+  DPU_STATE_DRAINING = 5;      // operator-initiated workload migration
+  DPU_STATE_UNREACHABLE = 6;   // missed heartbeats; pending failover
+  DPU_STATE_FAILED = 7;        // confirmed down
+  DPU_STATE_DECOMMISSIONED = 8;
+}
+
+// DpuCapacityLimits enumerates the hard ceilings advertised by a DPU. dashd
+// uses these for placement decisions and admission control. All counts are
+// signed int64 to allow `-1` to mean "no advertised limit" (rare but legal for
+// some emulated targets).
+message DpuCapacityLimits {
+  int64 max_enis = 1;
+  int64 max_vnets = 2;
+  int64 max_vnet_mappings = 3;
+  int64 max_acl_groups = 4;
+  int64 max_acl_rules_per_group = 5;
+  int64 max_routes = 6;
+  int64 max_route_groups = 7;
+  int64 max_route_rules = 8;
+  int64 max_meters = 9;
+  int64 max_meter_rules = 10;
+  int64 max_ha_scopes = 11;
+  int64 max_ha_sets = 12;
+  int64 max_outbound_port_maps = 13;
+  int64 max_outbound_port_map_ranges = 14;
+  // Flow-table dimensioning. dashd uses these as the canonical "is this DPU
+  // hot?" inputs alongside live counters.
+  int64 max_active_flows = 15;
+  int64 max_flow_inserts_per_second = 16;
+  int64 max_pps = 17;
+  int64 max_bps = 18;
+}
+
+// DpuCapabilities is a feature-flag matrix the DPU advertises on registration.
+// dashd uses this to decide whether a placement is legal (e.g. don't put an
+// IPv6 VNET on a DPU that doesn't advertise `ipv6`) and to surface
+// capability-gated UI in dashctl. Add new flags ADDITIVELY — never repurpose.
+message DpuCapabilities {
+  bool ipv6 = 1;
+  bool service_tunnel = 2;             // PrivateLink-style NSG
+  bool ecmp = 3;
+  bool fast_path = 4;                  // hardware slow/fast path split
+  bool fast_path_icmp_redirection = 5; // disable_fast_path_icmp_flow_redirection
+  bool trusted_vni = 6;
+  bool ha_active_active = 7;
+  bool ha_active_standby = 8;
+  bool flow_sync = 9;                  // perfect-sync colour-flip
+  bool gnmi_telemetry = 10;
+  bool flow_resimulation = 11;
+  bool eni_live_migration = 12;
+  // Schema version the DPU's local agent implements (semver).
+  string dash_api_schema_version = 13;
+}
+
+// Inventory is the snapshot of every DPU known to dashd at a point in time.
+// Used by both the Centralized (Model 1) and Controllerless (Model 2)
+// topologies — in Model 2 the slice is the union of every peer's local view
+// after SWIM convergence.
+message Inventory {
+  repeated DpuRecord dpus = 1;
+  google.protobuf.Timestamp snapshot_at = 2;
+  // Monotonic generation, incremented on every membership change. Operators
+  // and downstream sagas use this to detect mid-flight membership churn.
+  uint64 generation = 3;
+}
+
+message DpuRecord {
+  DpuIdentity identity = 1;
+  DpuState state = 2;
+  DpuCapacityLimits limits = 3;
+  DpuCapabilities capabilities = 4;
+  google.protobuf.Timestamp last_seen_at = 5;
+  // Reason string for non-UP states (e.g. "missed 3 heartbeats",
+  // "operator drain in progress").
+  string state_reason = 6;
+}
+
+// -----------------------------------------------------------------------------
+// Generic envelopes
+// -----------------------------------------------------------------------------
+
+// Ack is the universal positive-result envelope for mutating RPCs that don't
+// need to return a typed object (Delete, Reconcile, simple Put confirmations).
+// txn_id refers to dashd's 5-stage write pipeline (see specs/LLD/dashd.md).
+message Ack {
+  string txn_id = 1;
+  google.protobuf.Timestamp committed_at = 2;
+  // Optional per-DPU dispatch result. Empty for namespace-only operations.
+  repeated DpuDispatchResult dispatch_results = 3;
+}
+
+message DpuDispatchResult {
+  string dpu_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+// NameRef is the small "address" tuple used by Get/Delete/List RPCs.
+// `namespace` MUST be present; `name` is the canonical object name; `kind`
+// is the ObjectKind string (see dashapi.v1.ObjectKind).
+message NameRef {
+  string namespace = 1;
+  string name = 2;
+  string kind = 3;
+}
+
+// KindFilter narrows a List or Watch call to a subset of ObjectKinds and/or
+// label selectors. An empty filter means "everything".
+message KindFilter {
+  repeated string kinds = 1;
+  // Label selector in Kubernetes-style equality form, e.g.
+  //   ["env=prod", "tier=gold"]
+  // All entries are ANDed.
+  repeated string label_selectors = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Flow-table statistics
+// -----------------------------------------------------------------------------
+
+// FlowTableStats is the per-DPU summary returned by ObservabilityService and
+// piggy-backed into DpuStatusReport.
+message FlowTableStats {
+  int64 active_flows = 1;
+  int64 flow_creations_total = 2;
+  int64 flow_deletions_total = 3;
+  int64 flow_age_outs_total = 4;
+  int64 slow_path_packets = 5;
+  int64 fast_path_packets = 6;
+  int64 flow_sync_in_progress = 7;
+  int64 flow_sync_completed = 8;
+  int64 flow_sync_failed = 9;
+}
+
+// -----------------------------------------------------------------------------
+// Counters
+// -----------------------------------------------------------------------------
+
+// CounterReport is the consolidated diagnostic counter dump for a single DPU
+// at a single point in time. Field names mirror the upstream DASH counter
+// inventory so that operators can correlate dashctl output with raw on-DPU
+// telemetry. Add new counters ADDITIVELY.
+message CounterReport {
+  string dpu_id = 1;
+  google.protobuf.Timestamp sampled_at = 2;
+
+  // L4/TCP — connection lifecycle visibility.
+  int64 tcp_syn_rx = 10;
+  int64 tcp_syn_ack_tx = 11;
+  int64 tcp_established = 12;
+  int64 tcp_fin_rx = 13;
+  int64 tcp_rst_rx = 14;
+  int64 tcp_retransmits = 15;
+
+  // Drops — every reason DASH can drop a packet, partitioned for triage.
+  int64 drop_acl_in = 20;
+  int64 drop_acl_out = 21;
+  int64 drop_route_miss = 22;
+  int64 drop_vnet_mapping_miss = 23;
+  int64 drop_pa_validation_fail = 24;
+  int64 drop_meter_exceed = 25;
+  int64 drop_ttl_zero = 26;
+  int64 drop_invalid_header = 27;
+  int64 drop_flow_table_full = 28;
+  int64 drop_no_capacity = 29;
+
+  // Flow — the workhorse of fast-path/slow-path observability.
+  int64 flow_created = 40;
+  int64 flow_deleted = 41;
+  int64 flow_aged_out = 42;
+  int64 flow_table_size = 43;
+  int64 slow_path_packets = 44;
+  int64 fast_path_packets = 45;
+
+  // HA — perfect-sync colour-flip & flow-sync visibility.
+  int64 ha_sync_messages_tx = 50;
+  int64 ha_sync_messages_rx = 51;
+  int64 ha_sync_bytes_tx = 52;
+  int64 ha_sync_bytes_rx = 53;
+  int64 ha_role_switches = 54;
+  int64 ha_split_brain_detected = 55;
+
+  // Encap — DASH overlay encap/decap counters.
+  int64 vxlan_encap = 60;
+  int64 vxlan_decap = 61;
+
+  // Service tunnel (PrivateLink/NSG path) — only meaningful if capability
+  // `service_tunnel` is advertised.
+  int64 service_tunnel_hit = 70;
+  int64 service_tunnel_miss = 71;
+}
+
+// -----------------------------------------------------------------------------
+// Audit log
+// -----------------------------------------------------------------------------
+
+// AuditEntry is the canonical audit-log record for every operator-visible
+// mutation (Put*, Delete*, ApplyBatch, Cordon, Drain, migration phase
+// transitions, HA switchover). Streamed by ObservabilityService.GetAuditLog.
+message AuditEntry {
+  string txn_id = 1;
+  google.protobuf.Timestamp at = 2;
+  // Principal that initiated the change (e.g. mTLS CN or OIDC subject).
+  string principal = 3;
+  // RPC name (e.g. "ControlPlane/PutEni").
+  string rpc = 4;
+  // Optional object the call targeted.
+  NameRef target = 5;
+  // "ok" or short failure reason.
+  string outcome = 6;
+  // Optional structured detail (JSON-encoded blob). Avoid PII.
+  string detail_json = 7;
+}

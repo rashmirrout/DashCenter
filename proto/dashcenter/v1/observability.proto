@@ -1,0 +1,261 @@
+// observability.proto — DashCenter northbound read-only telemetry API.
+//
+// This service is the "look but don't touch" half of the dashcenter.v1 surface.
+// Every RPC here is non-mutating; clients use it to:
+//
+//   * watch per-DPU status (lifecycle, HA role, capacity, flow stats),
+//   * query the flow table (per-DPU summary, optional per-flow list),
+//   * inspect declared-vs-observed drift,
+//   * pull consolidated counter reports,
+//   * subscribe to the policy-change event stream,
+//   * stream the immutable audit log.
+//
+// Streaming
+// ---------
+// GetDpuStatus, GetFlowList, WatchEvents, GetAuditLog are server-streaming.
+// Long-lived watches use server-side keepalives (gRPC HTTP/2 PING) and clients
+// MUST be prepared for re-subscription on transient disconnects.
+//
+// Read budget
+// -----------
+// dashd's HLD constrains read responses to a 500ms p99 budget for any single
+// unary RPC. Streaming RPCs use chunked delivery and are not subject to the
+// 500ms budget per chunk.
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+import "dashcenter/v1/types.proto";
+
+// -----------------------------------------------------------------------------
+// ObservabilityService
+// -----------------------------------------------------------------------------
+
+service ObservabilityService {
+  // Stream per-DPU status updates. Behaves as an initial-snapshot + delta
+  // protocol: on subscribe, the server emits one DpuStatusReport per DPU in
+  // the current inventory, then streams further reports as state changes.
+  rpc GetDpuStatus(DpuStatusRequest) returns (stream DpuStatusReport);
+
+  // Per-DPU flow-table summary (active flows, slow/fast path, etc).
+  rpc GetFlowStats(FlowStatsRequest) returns (FlowTableStats);
+
+  // Stream individual FlowEntry records. Can be expensive on busy DPUs;
+  // clients should always apply at least one filter.
+  rpc GetFlowList(FlowListRequest) returns (stream FlowEntry);
+
+  // Compute declared-vs-observed drift for the requested scope. Used by
+  // `dashctl drift` and by automated reconciliation triggers.
+  rpc GetDrift(DriftRequest) returns (DriftReport);
+
+  // Pull the consolidated counter report for one or more DPUs.
+  rpc GetCounters(CounterRequest) returns (stream CounterReport);
+
+  // Subscribe to the policy-change event stream. Mirrors the WebSocket payload
+  // surfaced by the Web Console.
+  rpc WatchEvents(EventFilter) returns (stream PolicyEvent);
+
+  // Stream the immutable audit log. Used by SOC tooling and by
+  // `dashctl audit`. Server may rate-limit very-large historical pulls.
+  rpc GetAuditLog(AuditFilter) returns (stream AuditEntry);
+}
+
+// -----------------------------------------------------------------------------
+// DPU status
+// -----------------------------------------------------------------------------
+
+message DpuStatusRequest {
+  // Optional filter. If empty, the stream covers all DPUs.
+  repeated string dpu_ids = 1;
+  // If true, send only deltas (suppress the initial snapshot).
+  bool deltas_only = 2;
+}
+
+// DpuStatusReport is the consolidated runtime view of a single DPU as
+// streamed by GetDpuStatus.
+message DpuStatusReport {
+  DpuIdentity identity = 1;
+  DpuState state = 2;
+  string state_reason = 3;
+  // Live capacity usage. Compare against limits in DpuRecord to spot
+  // saturation.
+  DpuCapacityUsage usage = 4;
+  // HA role at the time of report. UNSPECIFIED if the DPU is not in any HA set.
+  // Mirrors the HaScopeRole enum from ha.proto without importing it (avoids a
+  // cyclic dependency for clients that only want status).
+  int32 ha_role = 5;
+  FlowTableStats flow_stats = 6;
+  string software_version = 7;
+  google.protobuf.Timestamp last_seen_at = 8;
+  google.protobuf.Timestamp reported_at = 9;
+}
+
+// DpuCapacityUsage is the live counterpart to DpuCapacityLimits. Pairs of
+// (used, limit) live in different messages on purpose so that limits-only
+// queries (e.g. for placement) don't drag in volatile counters.
+message DpuCapacityUsage {
+  int64 enis_used = 1;
+  int64 vnets_used = 2;
+  int64 vnet_mappings_used = 3;
+  int64 acl_groups_used = 4;
+  int64 acl_rules_used = 5;
+  int64 routes_used = 6;
+  int64 route_groups_used = 7;
+  int64 meters_used = 8;
+  int64 active_flows = 9;
+  int64 flow_inserts_per_second = 10;
+  int64 pps_in = 11;
+  int64 pps_out = 12;
+  int64 bps_in = 13;
+  int64 bps_out = 14;
+}
+
+// -----------------------------------------------------------------------------
+// Flow queries
+// -----------------------------------------------------------------------------
+
+message FlowStatsRequest {
+  repeated string dpu_ids = 1;
+  // Optional ENI filter. Empty = all ENIs on the named DPUs.
+  repeated string eni_names = 2;
+}
+
+// FlowListRequest narrows the flow stream. At least one of (dpu_ids, eni_names)
+// SHOULD be set; server enforces a max page size and ages out long-lived
+// streams.
+message FlowListRequest {
+  repeated string dpu_ids = 1;
+  repeated string eni_names = 2;
+  // Optional 7-tuple filter (any unset field matches all).
+  string src_ip = 3;
+  string dst_ip = 4;
+  uint32 src_port = 5;
+  uint32 dst_port = 6;
+  string protocol = 7;
+  string vni = 8;
+  uint32 limit = 9;     // 0 = server default
+}
+
+// FlowEntry is one flow-table row. Fields mirror the DASH 7-tuple model.
+message FlowEntry {
+  string dpu_id = 1;
+  string eni_name = 2;
+  string src_ip = 3;
+  string dst_ip = 4;
+  uint32 src_port = 5;
+  uint32 dst_port = 6;
+  string protocol = 7;
+  string vni = 8;
+  // Sync state — see ha.proto FlowSyncState (mirrored as int32 to avoid
+  // circular imports).
+  int32 sync_state = 9;
+  // True if the flow is currently being served from fast path.
+  bool fast_path = 10;
+  int64 bytes = 11;
+  int64 packets = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp last_seen_at = 14;
+}
+
+// -----------------------------------------------------------------------------
+// Drift
+// -----------------------------------------------------------------------------
+
+message DriftRequest {
+  // Optional scope. Empty = whole fleet.
+  repeated string namespaces = 1;
+  repeated string dpu_ids = 2;
+  // Optional kind filter.
+  KindFilter filter = 3;
+}
+
+message DriftReport {
+  google.protobuf.Timestamp computed_at = 1;
+  int32 items_total = 2;
+  repeated DriftItem items = 3;
+}
+
+message DriftItem {
+  enum Kind {
+    DRIFT_KIND_UNSPECIFIED = 0;
+    DRIFT_KIND_DECLARED_NOT_OBSERVED = 1; // dashd has it, DPU doesn't
+    DRIFT_KIND_OBSERVED_NOT_DECLARED = 2; // DPU has it, dashd doesn't
+    DRIFT_KIND_FIELD_MISMATCH = 3;        // both sides know it, fields differ
+  }
+  Kind kind = 1;
+  NameRef target = 2;
+  string dpu_id = 3;
+  // Free-form description (e.g. "field 'admin_state': declared='up',
+  // observed='down'").
+  string detail = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Counters
+// -----------------------------------------------------------------------------
+
+message CounterRequest {
+  repeated string dpu_ids = 1;
+  // If true, server streams continuously, emitting one report per DPU per
+  // sample interval until the client disconnects. If false, server emits one
+  // report per DPU and ends the stream.
+  bool follow = 2;
+  // Sample interval in seconds when follow=true. Zero = server default.
+  int32 interval_seconds = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Events
+// -----------------------------------------------------------------------------
+
+message EventFilter {
+  // Optional namespace scope.
+  repeated string namespaces = 1;
+  // Optional kind scope.
+  repeated string kinds = 2;
+  // Optional event-type scope. Empty = all event types.
+  repeated PolicyEvent.Type types = 3;
+}
+
+message PolicyEvent {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_PUT = 1;
+    TYPE_DELETE = 2;
+    TYPE_RECONCILE_STARTED = 3;
+    TYPE_RECONCILE_COMPLETED = 4;
+    TYPE_DRIFT_DETECTED = 5;
+    TYPE_DPU_STATE_CHANGED = 6;
+    TYPE_HA_ROLE_CHANGED = 7;
+    TYPE_MIGRATION_PHASE_CHANGED = 8;
+  }
+  Type type = 1;
+  google.protobuf.Timestamp at = 2;
+  string txn_id = 3;
+  NameRef target = 4;
+  // Free-form structured detail (JSON). Schema varies by type.
+  string detail_json = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Audit log
+// -----------------------------------------------------------------------------
+
+message AuditFilter {
+  // Optional time window. Either bound may be unset.
+  google.protobuf.Timestamp since = 1;
+  google.protobuf.Timestamp until = 2;
+  // Optional principal scope.
+  repeated string principals = 3;
+  // Optional namespace scope.
+  repeated string namespaces = 4;
+  // Optional RPC-name scope (e.g. "ControlPlane/PutEni").
+  repeated string rpcs = 5;
+  // If true, server tails the audit log (long-lived stream). If false, server
+  // sends the matching window and closes the stream.
+  bool follow = 6;
+}

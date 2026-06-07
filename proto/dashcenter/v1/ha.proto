@@ -1,0 +1,247 @@
+// ha.proto — DashCenter northbound HA control & telemetry API.
+//
+// This service exposes the upstream DASH HA model (10-state DPU machine,
+// 5-state flow-sync, perfect-sync colour-flip) at the operator surface.
+// Read RPCs reflect the current role/state of each HA scope and set;
+// mutating RPCs trigger operator-initiated switchover or failover with
+// per-phase progress streamed back.
+//
+// Relationship to upstream
+// ------------------------
+// The 10-state DPU role machine and 5-state flow-sync state are defined in
+// sonic-net/DASH (specs/dash-ha-scope-orchestration, dash-ha-set-fsm). We
+// mirror their semantics here but expose them as a clean operator-facing
+// enum: HaScopeRole has 12 entries (10 upstream + UNSPECIFIED +
+// TRANSITIONING), FlowSyncState has 5 entries (NONE, INITIATING, SYNCING,
+// SYNCED, FAILED).
+//
+// Switchover vs failover
+// ----------------------
+// Switchover = planned, coordinated role flip. The current active first
+// drains, then the standby promotes. Used during maintenance.
+//
+// Failover = unplanned, fast role flip. Trigger when the operator has
+// independently confirmed the active DPU is dead and does not want to wait
+// for dashd's health-check budget to expire. There is NO drain.
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+import "dashcenter/v1/types.proto";
+
+// -----------------------------------------------------------------------------
+// HaService
+// -----------------------------------------------------------------------------
+
+service HaService {
+  // Get the current status of an HA set (membership + per-member role).
+  rpc GetHaSetState(HaSetStateRequest) returns (HaSetStatus);
+
+  // Get the current status of a single HA scope (a logical bundle of
+  // policy that is owned by one role-holder within an HA set).
+  rpc GetHaScopeState(HaScopeStateRequest) returns (HaScopeStatus);
+
+  // Trigger a planned switchover (drain-then-promote). Server-streaming:
+  // emits a sequence of HaScopeStatus updates as the role transitions
+  // through TRANSITIONING_TO_STANDBY -> STANDBY (old active) and
+  // TRANSITIONING_TO_ACTIVE -> ACTIVE (new active).
+  rpc TriggerSwitchover(SwitchoverRequest) returns (stream HaScopeStatus);
+
+  // Trigger an unplanned failover (immediate promote, no drain). Same
+  // streaming shape as TriggerSwitchover but skips the drain phases.
+  rpc TriggerFailover(FailoverRequest) returns (stream HaScopeStatus);
+
+  // Subscribe to HA events fleet-wide (role changes, split-brain
+  // detections, flow-sync state changes). Used by SOC tooling and the
+  // Web Console.
+  rpc WatchHaEvents(HaEventFilter) returns (stream HaEvent);
+
+  // Get aggregate flow-sync statistics for a scope (or all scopes). Used
+  // by `dashctl ha sync-stats` to gauge sync backlog and bandwidth.
+  rpc GetFlowSyncStats(FlowSyncStatsRequest) returns (FlowSyncStats);
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+// HaScopeRole mirrors the upstream 10-state DPU role machine plus an
+// explicit UNSPECIFIED and a synthetic TRANSITIONING umbrella for clients
+// that don't care which direction a flip is going.
+enum HaScopeRole {
+  HA_SCOPE_ROLE_UNSPECIFIED = 0;
+  HA_SCOPE_ROLE_DEAD = 1;
+  HA_SCOPE_ROLE_CONNECTING = 2;
+  HA_SCOPE_ROLE_CONNECTED = 3;
+  HA_SCOPE_ROLE_INITIALIZING = 4;
+  HA_SCOPE_ROLE_STANDBY = 5;
+  HA_SCOPE_ROLE_ACTIVE = 6;
+  HA_SCOPE_ROLE_DESTROYING = 7;
+  HA_SCOPE_ROLE_SWITCHING_TO_STANDBY = 8;
+  HA_SCOPE_ROLE_SWITCHING_TO_ACTIVE = 9;
+  HA_SCOPE_ROLE_PENDING_STANDBY = 10;
+  HA_SCOPE_ROLE_TRANSITIONING = 11;       // umbrella for SWITCHING_* states
+}
+
+// FlowSyncState mirrors the upstream 5-state flow-sync state machine.
+enum FlowSyncState {
+  FLOW_SYNC_STATE_UNSPECIFIED = 0;
+  FLOW_SYNC_STATE_NONE = 1;          // no sync needed (only one role holder)
+  FLOW_SYNC_STATE_INITIATING = 2;    // handshake in progress
+  FLOW_SYNC_STATE_SYNCING = 3;       // perfect-sync colour-flip in progress
+  FLOW_SYNC_STATE_SYNCED = 4;        // steady state
+  FLOW_SYNC_STATE_FAILED = 5;        // sync broke; HA set degraded
+}
+
+// -----------------------------------------------------------------------------
+// Status messages
+// -----------------------------------------------------------------------------
+
+message HaSetStateRequest {
+  string namespace = 1;
+  string ha_set_name = 2;
+}
+
+message HaScopeStateRequest {
+  string namespace = 1;
+  // HA scope is addressed by (vdpu_id, ha_scope_id) per upstream.
+  string vdpu_id = 2;
+  string ha_scope_id = 3;
+}
+
+// HaSetStatus is the aggregate view of an HA set: membership, mode, and
+// per-member role.
+message HaSetStatus {
+  string namespace = 1;
+  string name = 2;
+  string mode = 3;                       // "active_active" | "active_standby"
+  string virtual_ip = 4;
+  repeated HaSetMember members = 5;
+  FlowSyncState flow_sync = 6;
+  google.protobuf.Timestamp reported_at = 7;
+}
+
+message HaSetMember {
+  string dpu_id = 1;
+  HaScopeRole role = 2;
+  // Optional health/HA reason (e.g. "lost connection to peer",
+  // "promoted by operator").
+  string reason = 3;
+  google.protobuf.Timestamp last_role_change_at = 4;
+}
+
+// HaScopeStatus is the per-scope view (one entry per role-holder within a
+// HA set).
+message HaScopeStatus {
+  string namespace = 1;
+  string vdpu_id = 2;
+  string ha_scope_id = 3;
+  string dpu_id = 4;
+  HaScopeRole role = 5;
+  // True if this scope is currently the role-holder for the underlying
+  // workload (the "active" of the pair, or any of N active members in
+  // active-active).
+  bool is_role_holder = 6;
+  FlowSyncState flow_sync = 7;
+  string reason = 8;
+  google.protobuf.Timestamp reported_at = 9;
+}
+
+// -----------------------------------------------------------------------------
+// Switchover & failover
+// -----------------------------------------------------------------------------
+
+message SwitchoverRequest {
+  string namespace = 1;
+  string ha_set_name = 2;
+  // Target DPU that should become ACTIVE after the switchover. If unset,
+  // dashd picks the highest-priority STANDBY in the set.
+  string target_dpu_id = 3;
+  // Free-form reason recorded in audit log.
+  string reason = 4;
+}
+
+message FailoverRequest {
+  string namespace = 1;
+  string ha_set_name = 2;
+  // Required: DPU that is being declared dead. dashd will not start the
+  // failover unless this DPU is in the named HA set.
+  string failed_dpu_id = 3;
+  // Optional explicit promotion target. If unset, dashd picks highest-
+  // priority STANDBY.
+  string target_dpu_id = 4;
+  string reason = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Events
+// -----------------------------------------------------------------------------
+
+message HaEventFilter {
+  // Optional namespace scope.
+  repeated string namespaces = 1;
+  // Optional HA-set scope.
+  repeated string ha_set_names = 2;
+  // Optional event-type scope.
+  repeated HaEvent.Type types = 3;
+}
+
+message HaEvent {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_ROLE_CHANGED = 1;
+    TYPE_FLOW_SYNC_STATE_CHANGED = 2;
+    TYPE_SPLIT_BRAIN_DETECTED = 3;
+    TYPE_SWITCHOVER_STARTED = 4;
+    TYPE_SWITCHOVER_COMPLETED = 5;
+    TYPE_FAILOVER_STARTED = 6;
+    TYPE_FAILOVER_COMPLETED = 7;
+    TYPE_HA_SET_DEGRADED = 8;
+    TYPE_HA_SET_RECOVERED = 9;
+  }
+  Type type = 1;
+  google.protobuf.Timestamp at = 2;
+  string namespace = 3;
+  string ha_set_name = 4;
+  string dpu_id = 5;
+  // For role-change events: the previous and new roles.
+  HaScopeRole previous_role = 6;
+  HaScopeRole new_role = 7;
+  // Free-form structured detail (JSON). Schema varies by type.
+  string detail_json = 8;
+}
+
+// -----------------------------------------------------------------------------
+// Flow-sync stats
+// -----------------------------------------------------------------------------
+
+message FlowSyncStatsRequest {
+  // Optional namespace scope.
+  string namespace = 1;
+  // Optional HA-set scope. If empty, returns aggregate over every HA set.
+  string ha_set_name = 2;
+}
+
+// FlowSyncStats is the aggregate counters for the perfect-sync colour-flip
+// transport. Useful for diagnosing slow sync / backlog.
+message FlowSyncStats {
+  string namespace = 1;
+  string ha_set_name = 2;
+  FlowSyncState state = 3;
+  int64 flows_synced = 4;
+  int64 flows_pending = 5;
+  int64 flows_failed_to_sync = 6;
+  int64 sync_messages_tx = 7;
+  int64 sync_messages_rx = 8;
+  int64 sync_bytes_tx = 9;
+  int64 sync_bytes_rx = 10;
+  // Latest perfect-sync round-trip in milliseconds (0 if no completed round).
+  int64 last_round_trip_ms = 11;
+  // Colour of the most recently completed sync round.
+  string last_round_colour = 12;
+  google.protobuf.Timestamp reported_at = 13;
+}
