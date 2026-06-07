@@ -1605,7 +1605,7 @@ type Node interface {
 ```mermaid
 flowchart LR
     A[grpc/ControlPlane.PutVnet] --> B[raft_store.Put]
-    B --> C[raft.Node.Propose &lpar;STORE_PUT&rpar;]
+    B --> C[raft.Node.Propose STORE_PUT]
     C -->|leader| D[Raft log + AppendEntries to followers]
     D -->|quorum committed| E[FSM.Apply]
     E --> F[local boltdb write]
@@ -2233,7 +2233,7 @@ sequenceDiagram
 
     rect rgb(245,245,245)
         note over API,Store: STAGE 3 — STAGE
-        API->>Store: CAS write &lpar;key, spec, expected_gen&rpar;
+        API->>Store: CAS write key+spec+expected_gen
         Store-->>API: new_gen
         API->>Audit: append AuditEntry(outcome=ok)
         API-->>Op: Ack{accepted=true, new_gen}
@@ -2305,7 +2305,7 @@ For `GetDpuStatus`:
 ```mermaid
 flowchart TD
     A[grpc/ObservabilityService.GetDpuStatus] --> B[loop on subscription channel]
-    B --> C[merge<br/>Inventory.Get&lpar;dpu&rpar; +<br/>ObservedCache.AllForDpu&lpar;dpu&rpar; +<br/>dispatcher drift summary +<br/>recent_errors ring buffer]
+    B --> C[merge<br/>Inventory.Get dpu +<br/>ObservedCache.AllForDpu dpu +<br/>dispatcher drift summary +<br/>recent_errors ring buffer]
     C --> D[emit DpuStatusReport]
     D --> B
 ```
@@ -2691,14 +2691,14 @@ sequenceDiagram
     OS->>Main: SIGTERM
     Main->>Adm: Shutdown(timeout=5s)
     Main->>Rest: Shutdown(timeout=10s)
-    Main->>Grpc: GracefulStop &lpar;reject new, drain in-flight&rpar;
+    Main->>Grpc: GracefulStop - reject new, drain in-flight
     Main->>Recon: Stop()
     Recon-->>Main: exited
     Main->>Disp: StopAll()
     Disp-->>Main: workers drained
     Main->>Sub: StopAll()
     Sub-->>Main: pumps closed
-    Main->>HA: Release() &lpar;step-down voluntarily&rpar;
+    Main->>HA: Release - step-down voluntarily
     HA-->>Main: leadership released
     Main->>Audit: Close()
     Main->>Store: Close()

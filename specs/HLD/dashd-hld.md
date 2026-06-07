@@ -352,8 +352,8 @@ spaces:
 
 ```mermaid
 flowchart LR
-    A[OPERATOR<br/>writes desired spec] -->|dashcenter.v1.Put*| B[(Desired Store<br/>by &lpar;ns,kind,name&rpar;)]
-    B -->|placement function<br/>pure, deterministic| C[Resolved by DPU<br/>map&lbrack;dpu&rbrack; -&gt; &lbrack;&rsqb;dashapi.Object]
+    A[OPERATOR<br/>writes desired spec] -->|dashcenter.v1.Put*| B[(Desired Store<br/>by ns+kind+name)]
+    B -->|placement function<br/>pure, deterministic| C[Resolved by DPU<br/>per-dpu dashapi.Object list]
     C -->|dispatcher diff vs observed| D[Per-DPU work queue]
     D -->|dashapi.v1.Apply / Delete| E[DPU agent]
     E -->|dashapi.v1.Subscribe| F[(Observed Cache<br/>per DPU)]
