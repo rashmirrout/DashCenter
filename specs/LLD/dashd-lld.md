@@ -2662,12 +2662,12 @@ sequenceDiagram
     Main->>Rest: NewGateway + Serve
     Main->>Adm: New + Serve
 
-    Note over Main,HA: All listeners are up;<br/>follower mode (writes 503 until leader)
+    Note over Main,HA: All listeners are up.<br/>Follower mode - writes return 503 until leader.
 
     HA-->>Main: leadership acquired
     Main->>Sub: StartAll()
-    Main->>Disp: StartAll()
-    Main->>Recon: Run(leaderCtx)
+    Main->>Disp: StartAll
+    Main->>Recon: Run leaderCtx
     Note over Main,Recon: full system running
 ```
 
