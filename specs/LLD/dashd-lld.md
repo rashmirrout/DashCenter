@@ -2658,9 +2658,9 @@ sequenceDiagram
     Main->>Audit: Open
     Main->>HA: Run(ctx)
     HA-->>Main: started (will signal leadership async)
-    Main->>Grpc: New(deps); Serve()
-    Main->>Rest: NewGateway; Serve()
-    Main->>Adm: New(deps); Serve()
+    Main->>Grpc: New + Serve
+    Main->>Rest: NewGateway + Serve
+    Main->>Adm: New + Serve
 
     Note over Main,HA: All listeners are up;<br/>follower mode (writes 503 until leader)
 
@@ -2689,19 +2689,19 @@ sequenceDiagram
     participant Obs
 
     OS->>Main: SIGTERM
-    Main->>Adm: Shutdown(timeout=5s)
-    Main->>Rest: Shutdown(timeout=10s)
+    Main->>Adm: Shutdown 5s timeout
+    Main->>Rest: Shutdown 10s timeout
     Main->>Grpc: GracefulStop - reject new, drain in-flight
-    Main->>Recon: Stop()
+    Main->>Recon: Stop
     Recon-->>Main: exited
-    Main->>Disp: StopAll()
+    Main->>Disp: StopAll
     Disp-->>Main: workers drained
-    Main->>Sub: StopAll()
+    Main->>Sub: StopAll
     Sub-->>Main: pumps closed
     Main->>HA: Release - step-down voluntarily
     HA-->>Main: leadership released
-    Main->>Audit: Close()
-    Main->>Store: Close()
+    Main->>Audit: Close
+    Main->>Store: Close
     Main->>Obs: shutdown tracer
     Main->>OS: exit 0
 ```
