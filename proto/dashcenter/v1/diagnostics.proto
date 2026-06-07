@@ -1,0 +1,259 @@
+// diagnostics.proto — DashCenter northbound fleet-diagnostics API.
+//
+// This service complements ObservabilityService with COMPUTED diagnostic
+// primitives: trace-flow, explain-match, ACL hit stats, drift explanation,
+// and triggered flow re-simulation. These RPCs are typically interactive
+// (operator-driven) rather than continuous.
+//
+// Cost model
+// ----------
+// Diagnostic RPCs may fan out to multiple DPUs and aggregate results in dashd
+// before responding. Trace-flow and explain-match are bounded per RPC (single
+// flow, single packet, single decision); GetAclHitStats can return large
+// streams and is paginated.
+//
+// Determinism
+// -----------
+// TraceFlow and ExplainMatch operate on the CURRENT installed policy on the
+// targeted DPU(s). If the policy is mid-update (a Stage exists in
+// `pending:<txn_id>`), the diagnostic uses the COMMITTED view, not the staged
+// view. To diagnose a staged policy, run SimulateApply on ControlPlane first.
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+import "dashcenter/v1/types.proto";
+
+// -----------------------------------------------------------------------------
+// DiagnosticsService
+// -----------------------------------------------------------------------------
+
+service DiagnosticsService {
+  // Trace a synthetic packet through the DASH pipeline on one DPU. Returns
+  // the per-stage decision (route, vnet mapping, ACL inbound, ACL outbound,
+  // meter, fast/slow path) for that flow descriptor.
+  rpc TraceFlow(TraceFlowRequest) returns (FlowTraceResult);
+
+  // Explain why a given match (ACL rule, route, VNET mapping) was or was
+  // not selected for a given input. Used to answer "why is this packet
+  // dropped?" without running TraceFlow's full pipeline.
+  rpc ExplainMatch(MatchRequest) returns (MatchExplanation);
+
+  // Stream per-rule ACL hit counters across the named DPUs. Each report covers
+  // one (dpu, policy, rule) triple. Use this for ACL audit and dead-rule
+  // detection.
+  rpc GetAclHitStats(AclStatsRequest) returns (stream AclStatsPerDpu);
+
+  // Explain a single DriftItem in detail: which field differs, what value
+  // dashd believes is canonical, what value the DPU reported, and the
+  // suggested remediation (Reconcile vs ImportObserved).
+  rpc ExplainDrift(DriftExplainRequest) returns (DriftExplanation);
+
+  // Trigger flow re-simulation for a subset of ENIs. Useful after a policy
+  // change that needs to take effect for already-established flows (slow-path
+  // re-evaluation). Same semantics as EniSpec.resimulate_flows but invocable
+  // standalone.
+  rpc TriggerResimulation(ResimRequest) returns (Ack);
+}
+
+// -----------------------------------------------------------------------------
+// Trace flow
+// -----------------------------------------------------------------------------
+
+// FlowDescriptor is the 7-tuple identifying the synthetic packet for tracing.
+// Direction discriminates inbound vs outbound pipeline traversal.
+message FlowDescriptor {
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DIRECTION_INBOUND = 1;   // entering the DPU from the wire (downlink)
+    DIRECTION_OUTBOUND = 2;  // leaving the ENI toward the wire (uplink)
+  }
+  Direction direction = 1;
+  string eni_name = 2;
+  string src_ip = 3;
+  string dst_ip = 4;
+  uint32 src_port = 5;
+  uint32 dst_port = 6;
+  string protocol = 7;       // "tcp" | "udp" | "icmp" | numeric
+  string vni = 8;
+}
+
+message TraceFlowRequest {
+  string dpu_id = 1;
+  FlowDescriptor flow = 2;
+  // If true, only return the final verdict (allow/deny/encap/drop); skip the
+  // per-stage trace. Default: false (emit full trace).
+  bool verdict_only = 3;
+}
+
+// FlowTraceResult contains the verdict plus the per-stage decision trace.
+message FlowTraceResult {
+  enum Verdict {
+    VERDICT_UNSPECIFIED = 0;
+    VERDICT_ALLOW = 1;
+    VERDICT_DENY = 2;
+    VERDICT_ENCAP = 3;        // packet would be forwarded with overlay encap
+    VERDICT_DROP_NO_ROUTE = 4;
+    VERDICT_DROP_NO_MAPPING = 5;
+    VERDICT_DROP_ACL = 6;
+    VERDICT_DROP_METER = 7;
+    VERDICT_DROP_INVALID = 8;
+  }
+  Verdict verdict = 1;
+  // True if this flow would have been served from fast path on the next
+  // packet (i.e. is already in the flow table).
+  bool fast_path_hit = 2;
+  // Per-stage trace lines, in pipeline order. Each line is a free-form
+  // human-readable string such as "ACL inbound: rule 50 (allow) matched"
+  // or "Route: prefix 10.0.0.0/24 -> vnet-prod".
+  repeated string trace = 3;
+  // Optional matched ACL rule (if verdict involved an ACL stage).
+  MatchedAclRule matched_acl_rule = 4;
+  // Optional matched route.
+  MatchedRoute matched_route = 5;
+  // Optional matched VNET mapping.
+  MatchedVnetMapping matched_vnet_mapping = 6;
+  google.protobuf.Timestamp computed_at = 7;
+}
+
+message MatchedAclRule {
+  string policy_name = 1;
+  uint32 priority = 2;
+  string action = 3;
+}
+
+message MatchedRoute {
+  string policy_name = 1;
+  string prefix = 2;
+  string next_hop_type = 3;
+  string next_hop_target = 4;
+}
+
+message MatchedVnetMapping {
+  string vnet_name = 1;
+  string ip_address = 2;
+  string action = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Explain match
+// -----------------------------------------------------------------------------
+
+message MatchRequest {
+  string dpu_id = 1;
+  enum Subject {
+    SUBJECT_UNSPECIFIED = 0;
+    SUBJECT_ACL = 1;
+    SUBJECT_ROUTE = 2;
+    SUBJECT_VNET_MAPPING = 3;
+  }
+  Subject subject = 2;
+  FlowDescriptor flow = 3;
+}
+
+// MatchExplanation lists every candidate considered, with a per-candidate
+// reason it was or was not selected. Ordered by evaluation order (highest
+// priority first for ACLs, longest-prefix first for routes).
+message MatchExplanation {
+  repeated MatchCandidate candidates = 1;
+  string selected_candidate_id = 2;
+  google.protobuf.Timestamp computed_at = 3;
+}
+
+message MatchCandidate {
+  // Stable identifier for the candidate (e.g. "acl/policy-1/rule-50",
+  // "route/policy-x/10.0.0.0/24"). Used to correlate with the selected entry.
+  string candidate_id = 1;
+  bool matched = 2;
+  // Human-readable reason: e.g. "src_ip 10.0.0.5 in src_prefix 10.0.0.0/24
+  // AND dst_port 80 in dst_ports [80,443]", or "not matched: src_prefix
+  // disjoint".
+  string reason = 3;
+  // For tie-break visibility.
+  uint32 priority = 4;
+}
+
+// -----------------------------------------------------------------------------
+// ACL hit stats
+// -----------------------------------------------------------------------------
+
+message AclStatsRequest {
+  // Optional DPU scope. Empty = all DPUs.
+  repeated string dpu_ids = 1;
+  // Optional namespace scope.
+  repeated string namespaces = 2;
+  // Optional policy-name scope.
+  repeated string policy_names = 3;
+  // If true, only include rules with zero hits since dashd started. Useful
+  // for dead-rule detection.
+  bool zero_hits_only = 4;
+}
+
+// AclStatsPerDpu is one streamed unit: per-DPU per-policy per-rule counters.
+message AclStatsPerDpu {
+  string dpu_id = 1;
+  string namespace = 2;
+  string policy_name = 3;
+  string stage = 4;            // "inbound" | "outbound"
+  repeated AclRuleHit rules = 5;
+  google.protobuf.Timestamp sampled_at = 6;
+}
+
+message AclRuleHit {
+  uint32 priority = 1;
+  string action = 2;
+  int64 hits = 3;
+  int64 bytes = 4;
+  // Optional last-hit timestamp. Zero if never hit.
+  google.protobuf.Timestamp last_hit_at = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Drift explain
+// -----------------------------------------------------------------------------
+
+message DriftExplainRequest {
+  NameRef target = 1;
+  string dpu_id = 2;
+}
+
+message DriftExplanation {
+  NameRef target = 1;
+  string dpu_id = 2;
+  // Field-by-field diff: ("admin_state", "up", "down"), etc.
+  repeated FieldDiff field_diffs = 3;
+  enum Remediation {
+    REMEDIATION_UNSPECIFIED = 0;
+    REMEDIATION_RECONCILE = 1;          // Push declared -> DPU
+    REMEDIATION_IMPORT_OBSERVED = 2;    // Adopt observed as new declared
+    REMEDIATION_MANUAL = 3;             // Operator must intervene
+  }
+  Remediation suggested = 4;
+  string rationale = 5;
+}
+
+message FieldDiff {
+  string field = 1;
+  string declared = 2;
+  string observed = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Resimulation
+// -----------------------------------------------------------------------------
+
+message ResimRequest {
+  // Optional scope. If both lists are empty, the request is rejected
+  // (INVALID_ARGUMENT). Server requires the operator to be explicit.
+  repeated string dpu_ids = 1;
+  repeated string eni_names = 2;
+  string namespace = 3;
+  // If true, drop existing flows and force fresh slow-path evaluation. If
+  // false (default), only flows whose first slow-path verdict differs from
+  // the current policy outcome are evicted.
+  bool drop_all_flows = 4;
+}

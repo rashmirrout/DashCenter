@@ -167,143 +167,67 @@ reconciler emits per-DPU `Apply` / `Delete` calls to converge them.
 
 ---
 
-## 5. `dashcenter.v1` — proposed proto surface
+## 5. `dashcenter.v1` — proto surface
 
-This proto **does not exist today**. The shape below is the recommended
-v1 starting point.
+The `dashcenter.v1` proto surface **now exists** under
+[`proto/dashcenter/v1/`](../../proto/dashcenter/v1/). It is the
+operator-facing northbound API consumed by `dashctl`, the Web Console, and
+3rd-party SDKs. It is intentionally distinct from `dashapi.v1` (the
+per-DPU southbound contract): many `dashcenter.v1` specs trans-compile
+into multiple `dashapi.v1.Object`s on multiple DPUs via the placement
+function and 5-stage write pipeline (§ 4 and § 8).
 
-```protobuf
-syntax = "proto3";
-package dashcenter.v1;
+### 5.1 File map
 
-import "dashapi/v1/dashapi.proto";   // re-uses the same upstream payload types
+| File | Service | Responsibility |
+|---|---|---|
+| [`types.proto`](../../proto/dashcenter/v1/types.proto) | _(shared types)_ | `DpuIdentity`, `DpuState` (8-state lifecycle), `DpuCapacityLimits`, `DpuCapabilities` (13 capability flags incl. `service_tunnel`, `ipv6`, `eni_live_migration`), `Inventory`, generic envelopes (`Ack`, `NameRef`, `KindFilter`), `FlowTableStats`, `CounterReport` (30+ counters across TCP / drops / flow / HA / encap / service-tunnel), `AuditEntry`. |
+| [`control_plane.proto`](../../proto/dashcenter/v1/control_plane.proto) | `ControlPlane` | Per-kind `Put*` for `Vnet` / `Eni` / `VnetMapping` / `AclPolicy` / `RoutePolicy` / `HaSet` / `ServiceTunnel`; uniform `Delete` / `Get` / `List`; streamed `ApplyBatch` (transactional, all-or-nothing or `partial_ok`); unary `SimulateApply` (dry-run); `Reconcile`. Every spec carries `namespace` (multi-tenancy) and `expected_generation` (optimistic concurrency). |
+| [`observability.proto`](../../proto/dashcenter/v1/observability.proto) | `ObservabilityService` | Streamed `GetDpuStatus`, `GetFlowList`, `GetCounters`, `WatchEvents`, `GetAuditLog`; unary `GetFlowStats`, `GetDrift`. Read-only telemetry. |
+| [`diagnostics.proto`](../../proto/dashcenter/v1/diagnostics.proto) | `DiagnosticsService` | `TraceFlow` (synthetic-packet pipeline trace), `ExplainMatch` (per-candidate rationale), streamed `GetAclHitStats` (dead-rule detection), `ExplainDrift`, `TriggerResimulation`. |
+| [`operations.proto`](../../proto/dashcenter/v1/operations.proto) | `OperationsService` | `CordonDpu` / `UncordonDpu`; streamed `DrainDpu` with phase-aware `DrainProgress` (planning → migrating → draining → complete). |
+| [`migration.proto`](../../proto/dashcenter/v1/migration.proto) | `MigrationService` | Full 10-phase ENI live-migration state machine: `CreateMigrationPlan` / `ValidateMigrationPlan` / `StartMigrationSession` / `AdvanceMigrationPhase` (generation-gated) / `RollbackMigration` / `AbortMigration` / `CommitMigration`; streamed `StreamMigrationSession`; chunked `ExportMigrationBundle` / `ImportMigrationBundle`. Four `MigrationStrategy` variants: `NEW_FLOWS_FIRST_DRAIN` (default), `FULL_REHOME`, `MAINTENANCE_FAST`, `CANARY_SPLIT`. |
+| [`ha.proto`](../../proto/dashcenter/v1/ha.proto) | `HaService` | `GetHaSetState` / `GetHaScopeState`; streamed `TriggerSwitchover` (planned, drains first) / `TriggerFailover` (unplanned, immediate); `WatchHaEvents`; `GetFlowSyncStats`. Mirrors the upstream 10-state DPU role machine (`HaScopeRole`, 12 values) and 5-state flow-sync state (`FlowSyncState`). |
 
-// Identity of a DPU as known to the controller.
-message DpuIdentity {
-  string id        = 1;     // operator-assigned, e.g. "dpu-rack1-r5"
-  string endpoint  = 2;     // dashapi.v1 gRPC target, e.g. "10.0.5.7:50051"
-  string region    = 3;
-  string site      = 4;
-  map<string,string> labels = 5;
-}
+### 5.2 Conventions enforced across the surface
 
-// Inventory: declared DPU fleet.
-message Inventory { repeated DpuIdentity dpus = 1; }
+* **Package**: `dashcenter.v1` everywhere.
+* **Go package**: `github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1`.
+* **Multi-tenancy**: every spec carries a `namespace` field. Cross-namespace
+  references are rejected at validation time unless the target namespace
+  exports the object (dashd RBAC, out of scope for the proto).
+* **Optimistic concurrency**: every `Put*` and every
+  `AdvanceMigrationPhase` accepts an `expected_generation`. Mismatches
+  return `FAILED_PRECONDITION`.
+* **Streaming**: long-lived watches (`Get*`, `Watch*`, `Stream*`) use
+  server-side keepalives; clients must be prepared for re-subscription.
+* **Enums**: closed (`_UNSPECIFIED = 0`), additive — never reuse a number.
+* **Audit**: every mutating call emits one `AuditEntry` (defined in
+  `types.proto`), surfaced via `ObservabilityService.GetAuditLog`.
 
-// Logical policy types. These are higher-level than dashapi.v1; the
-// placement function turns each into one or more dashapi.v1.Objects on the
-// appropriate DPU(s).
+### 5.3 Coverage map vs. the production-gap audit
 
-message VnetSpec {
-  string name = 1;
-  uint32 vni  = 2;
-  repeated string peers = 3;              // peer VNET names
-  map<string,string> labels = 4;
-}
+The audit in
+[`docs/dash-sim-alignment-audit.md`](../../docs/dash-sim-alignment-audit.md)
+enumerated 21 production gaps (8 critical, 8 high, 5 medium). The proto
+surface above covers the API-visible portion of every gap. See the
+`Coverage map` table in
+[`proto/dashcenter/v1/README.md`](../../proto/dashcenter/v1/README.md) for
+the gap-to-RPC mapping. Server-side concerns (gNMI shim, RBAC enforcement,
+TLS / mTLS, namespace storage layout) are tracked in § 11, § 13, § 19, and
+the milestone schedule in § 24.
 
-message EniSpec {
-  string id            = 1;
-  string mac           = 2;               // "aa:bb:..." human form
-  string vnet          = 3;
-  string dpu_id        = 4;               // placement hint
-  repeated string addresses = 5;
-  string admin_state   = 6;               // ENABLED|DISABLED
-  string acl_in_group_v4   = 7;
-  string acl_out_group_v4  = 8;
-  // (future) optional per-stage bindings, qos_id, meter policy ids, ...
-}
+### 5.4 Codegen
 
-message VnetMappingSpec {
-  string vnet         = 1;
-  string overlay_ip   = 2;
-  string underlay_ip  = 3;
-  string mac          = 4;
-  uint32 vni          = 5;
-  string routing_type = 6;                // VNET | PRIVATELINK | ...
-}
+The `proto/` tree is auto-discovered by both pipelines, so no codegen
+configuration change is required when adding files in this directory:
 
-message AclPolicySpec {
-  string group_id  = 1;
-  string ip_version = 2;                  // IPV4 | IPV6
-  repeated AclRuleSpec rules = 3;
-}
-message AclRuleSpec {
-  uint32 num      = 1;
-  uint32 priority = 2;
-  string action   = 3;                    // PERMIT | DENY
-  bool terminating = 4;
-  repeated uint32 protocol = 5;
-  repeated string src_prefixes = 6;
-  repeated string dst_prefixes = 7;
-  repeated string src_ports = 8;          // "80" or "1000-2000"
-  repeated string dst_ports = 9;
-  repeated string src_tags = 10;
-  repeated string dst_tags = 11;
-}
+* **buf**: `src/impl-go/codegen/buf/buf.gen.yaml` reads
+  `inputs.directory: ../../../proto`.
+* **protoc fallback**: `src/impl-go/codegen/protoc/protoc.mk` globs
+  `*.proto` recursively under `proto/`.
 
-message RoutePolicySpec {
-  string group_id = 1;
-  repeated RouteSpec routes = 2;
-}
-message RouteSpec {
-  string prefix = 1;
-  string routing_type = 2;
-  string vnet = 3;
-  string next_hop_ip = 4;
-}
-
-// Service shape — control plane RPCs.
-service ControlPlane {
-  // Fleet inventory
-  rpc PutInventory (Inventory)         returns (Ack);
-  rpc GetInventory (google.protobuf.Empty) returns (Inventory);
-
-  // Policy CRUD — keyed by spec.name / id
-  rpc PutVnet         (VnetSpec)         returns (Ack);
-  rpc PutEni          (EniSpec)          returns (Ack);
-  rpc PutVnetMapping  (VnetMappingSpec)  returns (Ack);
-  rpc PutAclPolicy    (AclPolicySpec)    returns (Ack);
-  rpc PutRoutePolicy  (RoutePolicySpec)  returns (Ack);
-
-  rpc DeleteByName    (NameRef) returns (Ack);
-  rpc Get             (NameRef) returns (PolicyObject);
-  rpc List            (KindFilter) returns (stream PolicyObject);
-
-  // Observability
-  rpc DpuStatus       (DpuRef) returns (stream DpuStatusReport);
-  rpc Reconcile       (ReconcileRequest) returns (Ack);     // trigger manual sync
-}
-
-message Ack { string txn_id = 1; bool accepted = 2; string error = 3; }
-message NameRef { string kind = 1; string name = 2; }
-message KindFilter { string kind = 1; }
-message DpuRef { string id = 1; }
-message ReconcileRequest { repeated string dpu_ids = 1; }   // empty = all
-
-message PolicyObject {
-  string kind = 1;
-  string name = 2;
-  oneof spec {
-    VnetSpec         vnet          = 100;
-    EniSpec          eni           = 101;
-    VnetMappingSpec  vnet_mapping  = 102;
-    AclPolicySpec    acl_policy    = 103;
-    RoutePolicySpec  route_policy  = 104;
-    // ... add as we lift more dashapi types into policy form
-  }
-}
-
-message DpuStatusReport {
-  string  dpu_id    = 1;
-  enum Health { HEALTH_UNSPECIFIED=0; HEALTHY=1; DEGRADED=2; OFFLINE=3; }
-  Health  health    = 2;
-  int64   last_seen_ts_ns = 3;
-  int32   desired_objects = 4;
-  int32   observed_objects= 5;
-  int32   drift_objects   = 6;
-  repeated string recent_errors = 7;
-}
-```
+Generated Go output lives at `src/impl-go/gen/go/dashcenter/v1/`.
 
 > Note: `dashcenter.v1` is **distinct from** `dashapi.v1`. The latter is
 > the per-DPU object surface (vendored sonic-dash-api types). The former

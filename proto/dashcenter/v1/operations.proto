@@ -1,0 +1,128 @@
+// operations.proto — DashCenter northbound operational lifecycle API.
+//
+// This service models the operational primitives that bracket a DPU's
+// participation in the fleet: cordon (stop scheduling new placements),
+// uncordon (resume), and drain (rehome existing workloads off the DPU
+// through a controlled sequence of ENI live migrations).
+//
+// Workflow
+// --------
+// A typical maintenance window looks like:
+//
+//   1. CordonDpu   — DPU stops accepting NEW ENI placements.
+//   2. DrainDpu    — dashd plans + executes ENI migrations off the DPU
+//                    (uses MigrationService internally; see migration.proto).
+//                    Returns a server stream of DrainProgress.
+//   3. (operator performs the physical maintenance)
+//   4. UncordonDpu — DPU is eligible for new placements again.
+//
+// Cordon is idempotent. Drain is idempotent IF a drain is already in
+// progress (returns the in-flight stream); otherwise it kicks off a new one.
+//
+// Safety
+// ------
+// DrainDpu refuses to start if it cannot find candidate target DPUs with
+// sufficient capacity and matching capabilities for every ENI being rehomed.
+// The pre-flight result is surfaced in the first DrainProgress message with
+// phase = DRAIN_PHASE_PLANNING; clients should not assume success until
+// phase = DRAIN_PHASE_COMPLETE.
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+import "dashcenter/v1/types.proto";
+
+// -----------------------------------------------------------------------------
+// OperationsService
+// -----------------------------------------------------------------------------
+
+service OperationsService {
+  // Mark a DPU as ineligible for NEW placements. Existing workloads keep
+  // running. Idempotent. Returns immediately.
+  rpc CordonDpu(CordonRequest) returns (Ack);
+
+  // Remove the cordon. Idempotent. Returns immediately.
+  rpc UncordonDpu(CordonRequest) returns (Ack);
+
+  // Drain a DPU by rehoming all its ENIs to other capacity. Server-streaming:
+  // emits DrainProgress messages until the drain reaches a terminal phase
+  // (COMPLETE or FAILED). Implies CordonDpu for the duration; on FAILED the
+  // cordon is preserved so the operator can investigate.
+  rpc DrainDpu(DrainRequest) returns (stream DrainProgress);
+}
+
+// -----------------------------------------------------------------------------
+// Cordon
+// -----------------------------------------------------------------------------
+
+message CordonRequest {
+  string dpu_id = 1;
+  // Free-form reason recorded in the audit log (e.g. "firmware-upgrade",
+  // "rack-maintenance"). Optional but strongly recommended.
+  string reason = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Drain
+// -----------------------------------------------------------------------------
+
+message DrainRequest {
+  string dpu_id = 1;
+  // Maximum number of concurrent ENI migrations during the drain. dashd
+  // will stage migrations in batches of this size to bound traffic-impact.
+  // 0 = server default (typically 2).
+  int32 max_parallel_migrations = 2;
+  // Hard timeout for the whole drain. If the wall-clock elapses without
+  // reaching DRAIN_PHASE_COMPLETE, the drain enters DRAIN_PHASE_FAILED and
+  // dashd stops issuing new migrations (in-flight migrations continue).
+  // 0 = no timeout (block indefinitely).
+  int64 timeout_seconds = 3;
+  // If true, the drain will skip ENIs that fail pre-flight (no capacity, no
+  // capable target, etc.) and continue. If false (default), the drain fails
+  // fast on the first un-placeable ENI.
+  bool skip_unplaceable = 4;
+  // Free-form reason for the audit log.
+  string reason = 5;
+}
+
+// DrainProgress is one streamed update. Phases progress monotonically through
+// PLANNING -> MIGRATING -> DRAINING -> COMPLETE on success, or jump to FAILED
+// at any point. Clients should treat the LAST message as authoritative.
+message DrainProgress {
+  enum Phase {
+    DRAIN_PHASE_UNSPECIFIED = 0;
+    DRAIN_PHASE_PLANNING = 1;
+    DRAIN_PHASE_MIGRATING = 2;     // active ENI rehoming in progress
+    DRAIN_PHASE_DRAINING = 3;      // last flows aging out
+    DRAIN_PHASE_COMPLETE = 4;
+    DRAIN_PHASE_FAILED = 5;
+  }
+  string dpu_id = 1;
+  Phase phase = 2;
+  string txn_id = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  int32 enis_total = 5;
+  int32 enis_migrated = 6;
+  int32 enis_in_flight = 7;
+  int32 enis_failed = 8;
+  // For each ENI, the corresponding migration session id (see
+  // migration.proto). Useful for clients that want to drill down into a
+  // particular migration that's stuck.
+  repeated EniMigrationLink links = 9;
+  // Optional human-readable status line.
+  string message = 10;
+  // Populated only when phase = DRAIN_PHASE_FAILED.
+  string error = 11;
+}
+
+message EniMigrationLink {
+  string eni_name = 1;
+  string migration_session_id = 2;
+  // Mirrored MigrationPhase value (int32 to avoid circular import on
+  // migration.proto from clients that only want operations).
+  int32 migration_phase = 3;
+}
