@@ -1,22 +1,31 @@
-# `internal/` — dashd subsystems (scaffold)
+# `internal/` — dashd subsystems (Phase 1)
 
-Each subdirectory has a `doc.go` describing its purpose. Implementations land
-in this order (see [README](../README.md)):
+dashd is implemented as 11 internal packages plus the bootstrap in
+`cmd/dashd/main.go`. Full plan: [`../../specs/Impl-Plan/impl-plan-basic.md`](../../specs/Impl-Plan/impl-plan-basic.md).
 
-1. `store/`        — Redis client + key prefixes
-2. `ingest/`       — per-appliance gRPC workers
-3. `normalize/`    — protobuf → Redis schema
-4. `api/grpc/`     — front door (server)
-5. `api/rest/`     — REST gateway
-6. `read/`         — cache reads
-7. `write/`        — validate→stage→commit
-8. `events/`       — Redis Streams bus
-9. `invalidate/`   — compute-cache invalidator
-10. `compute/`     — ACL/route/trace
-11. `reconcile/`   — drift correction
-12. `inventory/`   — appliance discovery
-13. `telemetry/`   — OTel + Prom
-14. `cluster/`     — Raft + memberlist (Model 2)
-15. `api/ws/`      — WebSocket watch stream
+## Phase 1 packages
 
-`config/` is loaded by `cmd/dashd/main.go` once it stops being a stub.
+| Package | Purpose |
+|---|---|
+| `config/`     | YAML config loader + defaults + flag overrides |
+| `store/`      | `DesiredStore` interface |
+| `store/file/` | On-disk JSON backend |
+| `inventory/`  | DPU registry + liveness prober |
+| `model/`      | Domain types: `ObsCache`, `Diff`, `ObjectKey` |
+| `placement/`  | Pure function: fleet specs → per-DPU dashapi objects |
+| `subscribe/`  | Per-DPU Subscribe pump (observed state ingestion) |
+| `dispatch/`   | Per-DPU worker pool (Apply/Delete dispatch) |
+| `reconciler/` | Dirty-set manager + tick loop |
+| `server/grpc/` | gRPC server (ControlPlane + Observability) |
+| `server/rest/` | HTTP REST gateway |
+| `server/admin/` | Admin HTTP (health, drift, reconcile) |
+
+## Dependency rules
+- `placement/` must remain pure (no I/O, no goroutines, no global state)
+- `dispatch/` is the only package that owns `*dashapi.DashApiClient`
+- `server/*` packages depend on business packages but never the reverse
+
+## Phase 2 (not in Phase 1)
+`store/etcd/`, `ha/leader/`, `ha/orchestrator/`, `namespace/`, `capacity/`,
+`schema/`, `migration/`, `operations/`, `auth/`, `audit/`, `flow/`,
+`saga/`, `api/gnmi/`. See [`../../specs/Impl-Plan/impl-plan-advanced.md`](../../specs/Impl-Plan/impl-plan-advanced.md).

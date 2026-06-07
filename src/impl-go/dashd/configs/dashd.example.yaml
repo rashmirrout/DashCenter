@@ -1,30 +1,24 @@
-# dashd example configuration (referenced as DASHD_CONFIG=...).
-server:
-  rest_listen: ":8443"
-  grpc_listen: ":9443"
-  ws_listen:   ":8443"   # shares the REST port
+# dashd Phase 1 example configuration.
+listen:
+  grpc_addr:  ":9443"
+  rest_addr:  ":8443"
+  admin_addr: ":7443"
 
-redis:
-  addr: "localhost:6379"
-  db:   0
+storage:
+  backend: file         # file | etcd (etcd: Phase 2)
+  file:
+    state_dir: /var/lib/dashd
 
 inventory:
-  file: "configs/appliances.example.yaml"
-  register_listen: ":7443"  # phone-home gRPC service
+  source: file          # file | api
+  file: configs/inventory.example.yaml
 
-ingest:
-  poll_interval_ms: 1000
-  reconcile_interval_s: 60
-
-cluster:
-  enabled: false           # set true for Model 2
-  bind_addr: ":7946"
-  raft_dir: "/var/lib/dashd/raft"
-
-telemetry:
-  prometheus_listen: ":2112"
-  otlp_endpoint: ""
+reconcile:
+  tick_interval: 30s
+  per_dpu_inbox_size: 1
+  apply_rate_limit: 100         # ops/s per DPU
+  error_budget_per_min: 10
 
 log:
-  level: "info"
-  format: "json"
+  level:  info          # debug | info | warn | error
+  format: json          # json | text

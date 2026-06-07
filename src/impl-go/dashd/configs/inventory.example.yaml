@@ -1,0 +1,9 @@
+dpus:
+  - id: dpu-0
+    endpoint: localhost:50051
+    labels:
+      rack: A1
+  - id: dpu-1
+    endpoint: localhost:50052
+    labels:
+      rack: A1
