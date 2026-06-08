@@ -224,6 +224,282 @@ C:\Users\rashmirout\go-sdk\go\bin\go.exe vet -tags=integration ./test/integratio
 
 ---
 
+## 7. Phase 1B — What Was Shipped
+
+Phase 1B replaced three stub subsystems with real production code and added a live southbound path. Treat this as the "tour map" for everything that follows.
+
+### 7.1 Subsystems added or rewritten
+
+| Package | Before Phase 1B | After Phase 1B |
+|---------|------------------|----------------|
+| `internal/dpuclient` | (did not exist) | `DpuClient` interface (`Apply` / `Delete` / `Subscribe`) + real gRPC implementation + `MockClient` for tests (≥ 98 % coverage) |
+| `internal/subscribe/pump` | Empty loop, never called dash-sim | Real `dashapi.Subscribe` stream; snapshot-first ObsCache reset; exponential reconnect backoff (1 s → 30 s cap) |
+| `internal/dispatch/worker` | Logged `TODO` only | Real `reconcilePass`: `placement.LoadDesiredSpecs` → resolve placement → diff vs observed → `Apply` / `Delete` per DPU via cached client |
+| `internal/placement/load` | (did not exist) | Shared `LoadDesiredSpecs(ctx, store)` helper + 5 micro-benchmarks (`internal/placement/bench_test.go`) |
+| `internal/server/admin` | `/admin/drift` returned `[]` stub | Live `/admin/drift?dpu=<id>` (real declared-vs-observed delta) + brand-new `/admin/eni-placement` endpoint with `observed:true/false` flag |
+
+### 7.2 Bug fixes shipped with Phase 1B
+
+- gRPC `HandlerType` must be an interface pointer (not the concrete struct) — fixed in `internal/server/grpc/control_plane.go` and `internal/server/grpc/observability.go`. Without this, registering services panicked at runtime.
+- `go vet` "copies lock value" on proto `Event` struct copy in `internal/dpuclient/mock.go` — switched to field-by-field copy.
+
+### 7.3 Admin endpoints reference (port `:7443`)
+
+| Endpoint | Status in Phase 1B | What it returns |
+|----------|---------------------|------------------|
+| `GET  /admin/health` | unchanged | DPU health roll-up |
+| `GET  /admin/inventory` | unchanged | Registered DPUs |
+| `POST /admin/reconcile` | unchanged | Forces a reconcile pass; returns 200 |
+| `GET  /admin/desired?kind=<kind>` | unchanged | Desired specs by kind |
+| `GET  /admin/observed?dpu=<id>` | unchanged | Observed state snapshot for a DPU |
+| `GET  /admin/drift?dpu=<id>` | **upgraded — now live** | Real declared-vs-observed delta. `items:[]` means fully converged. Omit `?dpu=` for fleet-wide view. |
+| `GET  /admin/eni-placement?eni=<name>` | **new** | ENI → DPU assignment with `observed:true/false`. Omit `?eni=` to list all. |
+
+---
+
+## 8. Phase 1B Manual Integration Test (Setup → Deploy → Test → Explore)
+
+A guided tour through every Phase 1B capability using three terminals. Allow ~10 minutes end-to-end.
+
+### 8.1 Setup
+
+- Go 1.22+ at `C:\Users\rashmirout\go-sdk\go\bin\go.exe`
+- Working tree at `C:\WorkSpace\PS\PublicRepo\DashCenter`
+- Config file: `src/impl-go/dashd/configs/dashd.example.yaml` (default state dir survives restarts)
+
+**Port map (after dashd starts)**
+
+| Port | Surface |
+|------|---------|
+| 8443 | REST API |
+| 9443 | gRPC control plane |
+| 7443 | Admin (drift / placement / health / reconcile) |
+| 50051 | dash-sim gRPC |
+
+### 8.2 Deploy
+
+**Terminal 1 — dash-sim**
+```powershell
+cd C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dash-sim
+C:\Users\rashmirout\go-sdk\go\bin\go.exe run ./cmd/dash-sim
+# Expect: "dash-sim listening :50051"
+```
+
+**Terminal 2 — dashd**
+```powershell
+cd C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dashd
+C:\Users\rashmirout\go-sdk\go\bin\go.exe run ./cmd/dashd --config configs/dashd.example.yaml
+# Expect: "rest listening :8443", "grpc listening :9443", "admin listening :7443"
+```
+
+Leave both running. Use **Terminal 3** for everything below.
+
+### 8.3 Test sequence (Phase 1B happy path)
+
+Each step has an "expect" comment so you can spot regressions immediately.
+
+```powershell
+# Step 1 - health
+curl http://localhost:7443/admin/health
+# Expect: {"status":"ok",...}
+
+# Step 2 - register the DPU (without this nothing reconciles)
+curl -X PUT http://localhost:8443/v1/inventory -d "{\"dpus\":[{\"id\":\"dpu-0\",\"endpoint\":\"localhost:50051\"}]}"
+# Expect: 200; subscribe pump opens stream to dash-sim within ~1s
+
+# Step 3 - create a VNet (first thing reconcile will Apply on dash-sim)
+curl -X PUT http://localhost:8443/v1/vnets/vnet-1 -d "{\"name\":\"vnet-1\",\"vni\":100}"
+# Expect: 200
+
+# Step 4 - drift goes briefly non-empty, then converges
+curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+# Expect (within ~1s): {"items":[],"summary":{...}}  -- empty items == fully converged
+
+# Step 5 - create an ENI
+curl -X PUT http://localhost:8443/v1/enis/eni-1 -d "{\"name\":\"eni-1\",\"vnet_name\":\"vnet-1\",\"mac_address\":\"aa:bb:cc:dd:ee:01\",\"underlay_ip\":\"10.1.1.1\"}"
+# Expect: 200
+
+# Step 6 - watch placement.observed flip true once subscribe pump confirms CREATED
+curl "http://localhost:7443/admin/eni-placement?eni=eni-1"
+# Expect (within ~1s): {"items":[{"eni":"eni-1","dpu":"dpu-0","observed":true}],"count":1}
+
+# Step 7 - drift is empty again
+curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+# Expect: {"items":[],...}
+
+# Step 8 - mutate the ENI (change MAC) -> triggers an UPDATE Apply
+curl -X PUT http://localhost:8443/v1/enis/eni-1 -d "{\"name\":\"eni-1\",\"vnet_name\":\"vnet-1\",\"mac_address\":\"aa:bb:cc:dd:ee:99\",\"underlay_ip\":\"10.1.1.1\"}"
+curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+# Expect: items[] briefly contains the update, then empty after reconverge
+
+# Step 9 - delete the ENI -> triggers Delete RPC
+curl -X DELETE http://localhost:8443/v1/enis/eni-1
+curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+# Expect: {"items":[],...}
+curl "http://localhost:7443/admin/eni-placement"
+# Expect: {"items":[],"count":0}
+```
+
+### 8.4 Explore — introspection endpoints
+
+```powershell
+# What dashd thinks should exist
+curl "http://localhost:7443/admin/desired?kind=vnet"
+curl "http://localhost:7443/admin/desired?kind=eni"
+curl "http://localhost:7443/admin/desired?kind=acl_policy"
+
+# What each DPU actually reported (via the Subscribe stream)
+curl "http://localhost:7443/admin/observed?dpu=dpu-0"
+
+# Inventory
+curl http://localhost:7443/admin/inventory
+
+# Force a reconcile (useful after editing state files out-of-band)
+curl -X POST http://localhost:7443/admin/reconcile
+
+# Fleet-wide drift (no ?dpu=)
+curl http://localhost:7443/admin/drift
+
+# All placements
+curl http://localhost:7443/admin/eni-placement
+```
+
+### 8.5 Fault injection — reconnect / backoff
+
+Proves the new exponential backoff loop and snapshot-first cache reset.
+
+1. With dash-sim and dashd both running and an ENI applied, **Ctrl+C the dash-sim terminal**.
+2. In the dashd log you should see repeated `subscribe reconnect attempt` messages with delays growing 1 s → 2 s → 4 s → 8 s → 16 s → 30 s (cap).
+3. During this window, `/admin/drift?dpu=dpu-0` may show stale items (last-known observed). That is expected.
+4. Restart dash-sim (`go run ./cmd/dash-sim` again in Terminal 1).
+5. dashd reconnects, the pump clears ObsCache, replays the SNAPSHOT, dispatch reconciles, and:
+   ```powershell
+   curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+   # Expect: {"items":[],...} within a few seconds
+   curl "http://localhost:7443/admin/eni-placement?eni=eni-1"
+   # Expect: observed:true again
+   ```
+
+This is the most revealing single experiment in Phase 1B — it exercises pump reconnect, snapshot replay, ObsCache reset, dispatch diff, Apply RPC, and the live drift endpoint, end-to-end.
+
+### 8.6 Restart persistence
+
+Proves desired state survives a dashd restart.
+
+```powershell
+# Put some specs (steps 3-6 above), then:
+# Ctrl+C dashd in Terminal 2
+
+# Restart it
+C:\Users\rashmirout\go-sdk\go\bin\go.exe run ./cmd/dashd --config configs/dashd.example.yaml
+
+# Specs are still there
+curl http://localhost:8443/v1/vnets
+curl http://localhost:8443/v1/enis
+
+# Drift auto-reconverges to empty
+curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+```
+
+---
+
+## 9. Phase 1B Manual Integration Test with Docker Sim
+
+Same flow as Section 8 but with two dash-sim containers, so per-DPU drift and per-DPU eni-placement views become meaningful.
+
+### 9.1 Build & launch
+
+```powershell
+# Build dash-sim image once
+cd C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dash-sim
+docker build -t dash-sim:phase1b .
+
+# Two sim containers on different host ports
+docker run -d --name sim0 -p 50051:50051 dash-sim:phase1b
+docker run -d --name sim1 -p 50052:50051 dash-sim:phase1b
+
+# Confirm both are up
+docker ps --filter name=sim
+docker logs sim0 --tail 5
+docker logs sim1 --tail 5
+
+# dashd on host
+cd C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dashd
+C:\Users\rashmirout\go-sdk\go\bin\go.exe run ./cmd/dashd --config configs/dashd.example.yaml
+```
+
+### 9.2 Register both DPUs
+
+```powershell
+curl -X PUT http://localhost:8443/v1/inventory -d "{\"dpus\":[{\"id\":\"dpu-0\",\"endpoint\":\"localhost:50051\"},{\"id\":\"dpu-1\",\"endpoint\":\"localhost:50052\"}]}"
+
+curl http://localhost:7443/admin/inventory
+# Expect: both dpu-0 and dpu-1 listed
+```
+
+### 9.3 Drive specs and watch per-DPU drift
+
+```powershell
+# Shared VNet (gets replicated to both DPUs by reconcile)
+curl -X PUT http://localhost:8443/v1/vnets/vnet-1 -d "{\"name\":\"vnet-1\",\"vni\":100}"
+
+# ENI #1 - placement will put this on one of the DPUs
+curl -X PUT http://localhost:8443/v1/enis/eni-1 -d "{\"name\":\"eni-1\",\"vnet_name\":\"vnet-1\",\"mac_address\":\"aa:bb:cc:dd:ee:01\",\"underlay_ip\":\"10.1.1.1\"}"
+
+# ENI #2
+curl -X PUT http://localhost:8443/v1/enis/eni-2 -d "{\"name\":\"eni-2\",\"vnet_name\":\"vnet-1\",\"mac_address\":\"aa:bb:cc:dd:ee:02\",\"underlay_ip\":\"10.1.1.2\"}"
+
+# Per-DPU drift - observe convergence on each side
+curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+curl "http://localhost:7443/admin/drift?dpu=dpu-1"
+
+# Fleet-wide drift
+curl http://localhost:7443/admin/drift
+
+# Placement view - which DPU got which ENI, plus observed flag
+curl http://localhost:7443/admin/eni-placement
+# Expect: items[] lists eni-1 and eni-2 with their assigned dpu and observed:true
+```
+
+### 9.4 Fault injection in Docker
+
+```powershell
+# Kill one sim
+docker stop sim0
+
+# dashd logs should show backoff for dpu-0; dpu-1 keeps working
+docker logs sim0 --tail 5
+curl "http://localhost:7443/admin/drift?dpu=dpu-1"
+# Expect: still {"items":[],...}
+
+# Bring sim0 back
+docker start sim0
+
+# dpu-0 reconverges
+curl "http://localhost:7443/admin/drift?dpu=dpu-0"
+# Expect: {"items":[],...} within a few seconds
+```
+
+### 9.5 Cleanup
+
+```powershell
+docker rm -f sim0 sim1
+
+# Optional: nuke the state dir to start from scratch next run
+# Remove-Item -Recurse -Force <state_dir from configs/dashd.example.yaml>
+```
+
+### 9.6 Common Docker debugging commands
+
+```powershell
+docker logs -f sim0                # live tail
+docker exec sim0 ss -ltn           # confirm sim is listening
+docker inspect sim0 --format '{{.NetworkSettings.IPAddress}}'
+docker network ls
+```
+
+---
+
 ## Phase 1B Gate Verification Checklist
 
 | Gate | Command | Expected |
