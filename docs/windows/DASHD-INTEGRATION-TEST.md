@@ -173,7 +173,54 @@ C:\Users\rashmirout\go-sdk\go\bin\go.exe vet ./...
 # Coverage report
 C:\Users\rashmirout\go-sdk\go\bin\go.exe test -coverprofile=coverage.out ./...
 C:\Users\rashmirout\go-sdk\go\bin\go.exe tool cover -func=coverage.out
+
+# Placement benchmarks (CPU/allocs across small/medium/large fleets)
+C:\Users\rashmirout\go-sdk\go\bin\go.exe test -bench=. -benchmem ./internal/placement/...
 ```
+
+---
+
+## 6. Automated Integration Suite
+
+The `test/integration/` package contains a Go-test harness that spins up
+its own `dashd` + `dash-sim` pair per scenario on dynamically chosen
+ports, registers the DPU, runs an assertion, and tears everything down.
+Per-test stdout/stderr is captured to a log file under `t.TempDir()` so
+failures are easy to triage.
+
+```powershell
+cd C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dashd
+
+# Run the full integration suite (builds dashd + dash-sim on demand)
+C:\Users\rashmirout\go-sdk\go\bin\go.exe test -tags=integration -v -timeout 5m ./test/integration/...
+
+# Run a single scenario for focused debugging
+C:\Users\rashmirout\go-sdk\go\bin\go.exe test -tags=integration -v -run TestIntegration_PutEni_Converges_REST -timeout 2m ./test/integration/...
+
+# Vet the integration package without running it
+C:\Users\rashmirout\go-sdk\go\bin\go.exe vet -tags=integration ./test/integration/...
+```
+
+### Scenarios shipped (all REST today; gRPC harness is plug-in ready)
+
+| # | Test | What it proves |
+|---|------|----------------|
+| 1 | `TestIntegration_DaemonStartsClean` | dashd + dash-sim come up; first reconcile converges with empty store |
+| 2 | `TestIntegration_PutVnet_Converges_REST` | PUT vnet via REST → drift goes to zero → GET round-trips |
+| 3 | `TestIntegration_PutEni_Converges_REST` | PUT eni → `/admin/eni-placement` reports `observed:true` once subscribe pump catches the CREATED event |
+| 4 | `TestIntegration_EditEni_Reconverges` | Mutating an ENI MAC triggers an UPDATE Apply and the system converges again |
+| 5 | `TestIntegration_DeleteEni_Reconciles` | DELETE eni → subsequent GET returns 404 and dispatch issues Delete on the sim |
+| 6 | `TestIntegration_RestartPersistsState` | Kill dashd → restart with the same state dir → previously-applied specs survive |
+| 7 | `TestIntegration_ForceReconcile_OK` | `POST /admin/reconcile` returns 200 |
+| 8 | `TestIntegration_DriftEnvelope_Shape` | `/admin/drift` returns a JSON envelope with `items` and `summary` |
+| 9 | `TestIntegration_EniPlacement_EmptyStore` | `/admin/eni-placement` returns `count:0` on an empty store |
+
+### Developer-friendly tips for manual exploration
+
+- Every scenario writes its harness log to `<TestTempDir>/{dashd,dash-sim}.log`.
+  When a scenario fails, the test logger prints the path; `cat` (or `Get-Content`) those files for the full child-process output.
+- Need to repro a failure by hand? Each scenario uses fresh random ports; the harness prints them at the top of `dashd.log`. Use the same `--config` and `go run` command from the log to re-launch identical processes.
+- Want to keep dashd running after a scenario? Wrap the offending test in `t.Skip(...)` and use the standalone "Section 1" commands above with a fixed port set you control.
 
 ---
 
@@ -183,8 +230,14 @@ C:\Users\rashmirout\go-sdk\go\bin\go.exe tool cover -func=coverage.out
 |------|---------|----------|
 | P1B-G1 Build | `go build ./...` | Zero errors |
 | P1B-G2 Vet | `go vet ./...` | Zero warnings |
+| P1B-G4 Coverage | `go test -cover ./...` | New packages ≥ 90% |
 | P1B-G5 Service layer | Both REST+gRPC use `service.NewControlPlane` | Verified in main.go |
 | P1B-G6 gRPC server | gRPC listens on :9443 | Verified via log output |
 | P1B-G7 REST parity | All 7 spec kinds have PUT routes | Verified in router() |
 | P1B-G8 Dry-run | `go run ./cmd/dashd --dry-run` | Exits 0 |
-| P1B-G11 REST E2E | PutVnet via REST → convergence | Manual test above |
+| P1B-G9 Integration | `go test -tags=integration ./test/integration/...` | All scenarios pass |
+| P1B-G11 Southbound wiring | Subscribe pump + dispatch worker call Apply/Delete | Verified via `/admin/eni-placement?eni=…` observed flag |
+| P1B-G12 DpuClient | `go test -cover ./internal/dpuclient/...` | ≥ 98% |
+| P1B-G14 Restart | `TestIntegration_RestartPersistsState` | Passes |
+| P1B-G15 Drift live | `/admin/drift` returns real items, not `[]` stub | Passes after `PutVnet` |
+| P1B-G16 Bench | `go test -bench=. ./internal/placement/...` | Establishes baseline |

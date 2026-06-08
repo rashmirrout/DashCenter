@@ -48,6 +48,13 @@ func (x *DriftResponse) Reset()         {}
 func (x *DriftResponse) String() string { return "DriftResponse" }
 func (x *DriftResponse) ProtoMessage()  {}
 
+// observabilityServer is the interface gRPC validates against; must
+// be an interface so RegisterService doesn't panic on a struct type.
+type observabilityServer interface {
+GetDpuStatus(context.Context, *DpuStatusRequest) (*DpuStatusResponse, error)
+GetDrift(context.Context, *DriftRequest) (*DriftResponse, error)
+}
+
 // --- Observability handler ---
 
 type observabilityHandler struct {
@@ -98,7 +105,7 @@ return nil, status.Errorf(codes.Unimplemented, "not yet implemented")
 
 var observabilityServiceDesc = grpc.ServiceDesc{
 ServiceName: "dashcenter.v1.ObservabilityService",
-HandlerType: (*observabilityHandler)(nil),
+HandlerType: (*observabilityServer)(nil), // MUST be an interface pointer.
 Methods: []grpc.MethodDesc{
 {MethodName: "GetDpuStatus", Handler: wrapUnary[DpuStatusRequest, DpuStatusResponse](func(h any, ctx context.Context, req *DpuStatusRequest) (*DpuStatusResponse, error) {
 return h.(*observabilityHandler).GetDpuStatus(ctx, req)

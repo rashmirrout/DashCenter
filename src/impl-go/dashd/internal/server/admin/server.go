@@ -1,5 +1,9 @@
-// Package admin implements the admin HTTP server for health, drift, and
-// force-reconcile endpoints.
+// Package admin implements the admin HTTP server for health, drift,
+// ENI placement, and force-reconcile endpoints. Everything here is
+// read-only except the explicit POST /admin/reconcile.
+//
+// All operator-facing data shaping lives here so the placement and
+// dispatch packages remain pure / IO-free.
 package admin
 
 import (
@@ -8,11 +12,14 @@ import (
 "errors"
 "log/slog"
 "net/http"
+"sort"
 "time"
 
+dashapiv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashapi/v1"
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/placement"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 )
@@ -32,6 +39,7 @@ mux.HandleFunc("GET /admin/inventory", h.inventoryList)
 mux.HandleFunc("GET /admin/desired", h.desired)
 mux.HandleFunc("GET /admin/observed", h.observed)
 mux.HandleFunc("GET /admin/drift", h.drift)
+mux.HandleFunc("GET /admin/eni-placement", h.eniPlacement)
 mux.HandleFunc("POST /admin/reconcile", h.reconcile)
 return &Server{srv: &http.Server{
 Handler:           mux,
@@ -141,10 +149,148 @@ items = append(items, map[string]any{
 writeJSON(w, 200, map[string]any{"items": items})
 }
 
+// drift computes the live declared-vs-observed delta for every DPU
+// (or the single ?dpu= query parameter, if supplied) and returns one
+// JSON item per (dpu, op, kind, key) triple. Op is "add", "update",
+// or "remove" — matching the worker's vocabulary.
+//
+// This endpoint is read-only: it does NOT mutate state, and it does
+// NOT trigger a reconcile.
 func (h *handler) drift(w http.ResponseWriter, r *http.Request) {
-// Phase 1 stub: drift computation requires full placement + diff.
-// For now, returns empty items.
-writeJSON(w, 200, map[string]any{"items": []any{}})
+specs, err := placement.LoadDesiredSpecs(r.Context(), h.store)
+if err != nil {
+writeErr(w, 500, "load desired: "+err.Error())
+return
+}
+
+// Filter to one DPU if requested; otherwise scan all.
+dpuFilter := r.URL.Query().Get("dpu")
+dpuIDs := h.dpuList(dpuFilter)
+
+type driftItem struct {
+DpuID string   `json:"dpu_id"`
+Op    string   `json:"op"`
+Kind  string   `json:"kind"`
+Key   []string `json:"key"`
+}
+
+var items []driftItem
+for _, id := range dpuIDs {
+desired := placement.Resolve(id, specs, h.inv)
+diff := h.obs.Diff(id, desired)
+
+appendOps := func(op string, objs []*dashapiv1.Object) {
+for _, o := range objs {
+items = append(items, driftItem{
+DpuID: id, Op: op,
+Kind: o.GetKind().String(),
+Key:  o.GetKey(),
+})
+}
+}
+appendOps("add", diff.Add)
+appendOps("update", diff.Update)
+appendOps("remove", diff.Remove)
+}
+
+// Stable order: (dpu, op, kind, joined-key) for reproducible output.
+sort.SliceStable(items, func(i, j int) bool {
+if items[i].DpuID != items[j].DpuID {
+return items[i].DpuID < items[j].DpuID
+}
+if items[i].Op != items[j].Op {
+return items[i].Op < items[j].Op
+}
+if items[i].Kind != items[j].Kind {
+return items[i].Kind < items[j].Kind
+}
+return joinKey(items[i].Key) < joinKey(items[j].Key)
+})
+
+writeJSON(w, 200, map[string]any{
+"items": items,
+"summary": map[string]int{
+"total":  len(items),
+"dpus":   len(dpuIDs),
+},
+})
+}
+
+// eniPlacement returns one item per ENI showing which DPUs it is
+// placed on (the placement hint) and whether each DPU agrees the ENI
+// is observed. This is the "where does my ENI live?" diagnostic.
+//
+// Query parameters:
+//   - ?vnet=<name>  — restrict to ENIs in this VNET.
+//   - ?eni=<name>   — restrict to a single ENI.
+func (h *handler) eniPlacement(w http.ResponseWriter, r *http.Request) {
+specs, err := placement.LoadDesiredSpecs(r.Context(), h.store)
+if err != nil {
+writeErr(w, 500, "load desired: "+err.Error())
+return
+}
+
+vnetFilter := r.URL.Query().Get("vnet")
+eniFilter := r.URL.Query().Get("eni")
+
+type dpuPlacement struct {
+DpuID    string `json:"dpu_id"`
+Observed bool   `json:"observed"`
+}
+
+type eniItem struct {
+Name      string         `json:"name"`
+VnetName  string         `json:"vnet_name"`
+MAC       string         `json:"mac_address,omitempty"`
+UnderlayIp string        `json:"underlay_ip,omitempty"`
+AdminState string        `json:"admin_state,omitempty"`
+Placements []dpuPlacement `json:"placements"`
+}
+
+var items []eniItem
+names := make([]string, 0, len(specs.Enis))
+for n := range specs.Enis {
+names = append(names, n)
+}
+sort.Strings(names)
+
+for _, name := range names {
+eni := specs.Enis[name]
+if eniFilter != "" && name != eniFilter {
+continue
+}
+if vnetFilter != "" && eni.GetVnetName() != vnetFilter {
+continue
+}
+
+placements := make([]dpuPlacement, 0, len(eni.GetPlacementHintDpuIds()))
+for _, dpuID := range eni.GetPlacementHintDpuIds() {
+observed := h.obs.GetDpu(dpuID)
+hit := false
+for _, obj := range observed {
+if obj.GetKind() == dashapiv1.ObjectKind_OBJECT_KIND_ENI &&
+len(obj.GetKey()) == 1 && obj.GetKey()[0] == name {
+hit = true
+break
+}
+}
+placements = append(placements, dpuPlacement{DpuID: dpuID, Observed: hit})
+}
+
+items = append(items, eniItem{
+Name:       name,
+VnetName:   eni.GetVnetName(),
+MAC:        eni.GetMacAddress(),
+UnderlayIp: eni.GetUnderlayIp(),
+AdminState: eni.GetAdminState(),
+Placements: placements,
+})
+}
+
+writeJSON(w, 200, map[string]any{
+"items": items,
+"count": len(items),
+})
 }
 
 func (h *handler) reconcile(w http.ResponseWriter, r *http.Request) {
@@ -154,14 +300,47 @@ h.rec.ForceReconcile()
 writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// dpuList returns the DPU IDs to scan: a single-element slice if
+// `filter` is non-empty (and the DPU exists), otherwise every DPU.
+func (h *handler) dpuList(filter string) []string {
+all := h.inv.List()
+if filter != "" {
+for _, e := range all {
+if e.ID == filter {
+return []string{filter}
+}
+}
+return nil
+}
+ids := make([]string, len(all))
+for i, e := range all {
+ids[i] = e.ID
+}
+sort.Strings(ids)
+return ids
+}
+
+// joinKey is local to admin so we don't have to export model.innerKey.
+// Same semantics: ":"-joined string, stable for sort.
+func joinKey(parts []string) string {
+out := ""
+for i, p := range parts {
+if i > 0 {
+out += ":"
+}
+out += p
+}
+return out
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 w.Header().Set("Content-Type", "application/json")
 w.WriteHeader(status)
-json.NewEncoder(w).Encode(v)
+_ = json.NewEncoder(w).Encode(v)
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 w.Header().Set("Content-Type", "application/json")
 w.WriteHeader(status)
-json.NewEncoder(w).Encode(map[string]string{"error": msg})
+_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

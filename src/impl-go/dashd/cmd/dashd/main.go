@@ -15,6 +15,7 @@ import (
 
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
@@ -68,10 +69,12 @@ slog.Warn("inventory load failed", "path", cfg.Inventory.File, "error", err)
 // 5. Create ObsCache.
 obs := model.NewObsCache()
 
-// 6. Create dispatch Manager.
+// 6. Create dispatch Manager — wire the production DpuClient factory
+// so each worker can Apply/Delete via the southbound dashapi.v1 RPCs.
 mgr := dispatch.New(obs, &cfg.Reconcile)
 mgr.SetStore(st)
 mgr.SetInventory(inv)
+mgr.SetClientFactory(dpuclient.DefaultFactory)
 
 // 7. Create reconciler.
 rec := reconciler.New(st, mgr, cfg.Reconcile.TickInterval)
@@ -113,8 +116,9 @@ restSrv := restserver.New(cpService, obsService)
 grpcSrv := grpcserver.New(cpService, obsService)
 adminSrv := adminserver.New(inv, st, obs, rec)
 
-// 10. Create subscribe PumpSet.
-pumpSet := subscribe.NewSet(obs, mgr.DirtyC())
+// 10. Create subscribe PumpSet — wired with the production DpuClient
+// factory so each Pump can open real Subscribe streams.
+pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 
 // 11. Create root context with signal handling.
 rootCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

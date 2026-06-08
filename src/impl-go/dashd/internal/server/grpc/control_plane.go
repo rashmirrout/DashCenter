@@ -11,7 +11,27 @@ dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1
 "google.golang.org/grpc/status"
 )
 
-// controlPlaneHandler implements the ControlPlane gRPC service.
+// controlPlaneServer is the interface that the gRPC framework validates
+// the handler implements via reflect.Type.Implements. It MUST be an
+// interface type (gRPC panics on a struct HandlerType).
+type controlPlaneServer interface {
+PutVnet(context.Context, *dashcenterv1.VnetSpec) (*dashcenterv1.Ack, error)
+PutEni(context.Context, *dashcenterv1.EniSpec) (*dashcenterv1.Ack, error)
+PutVnetMapping(context.Context, *dashcenterv1.VnetMappingSpec) (*dashcenterv1.Ack, error)
+PutAclPolicy(context.Context, *dashcenterv1.AclPolicySpec) (*dashcenterv1.Ack, error)
+PutRoutePolicy(context.Context, *dashcenterv1.RoutePolicySpec) (*dashcenterv1.Ack, error)
+PutHaSet(context.Context, *dashcenterv1.HaSetSpec) (*dashcenterv1.Ack, error)
+PutServiceTunnel(context.Context, *dashcenterv1.ServiceTunnelSpec) (*dashcenterv1.Ack, error)
+Delete(context.Context, *dashcenterv1.NameRef) (*dashcenterv1.Ack, error)
+Get(context.Context, *dashcenterv1.NameRef) (*dashcenterv1.PolicyObject, error)
+Reconcile(context.Context, *dashcenterv1.ReconcileRequest) (*dashcenterv1.Ack, error)
+PutInventory(context.Context, *dashcenterv1.PutInventoryRequest) (*dashcenterv1.Ack, error)
+RegisterDpu(context.Context, *dashcenterv1.DpuRegistration) (*dashcenterv1.Ack, error)
+DeregisterDpu(context.Context, *dashcenterv1.NameRef) (*dashcenterv1.Ack, error)
+SimulateApply(context.Context, *dashcenterv1.PolicyApplyRequest) (*dashcenterv1.SimulateApplyResult, error)
+}
+
+// controlPlaneHandler implements controlPlaneServer.
 type controlPlaneHandler struct {
 cp service.ControlPlaneService
 }
@@ -187,7 +207,7 @@ return po, nil
 
 var controlPlaneServiceDesc = grpc.ServiceDesc{
 ServiceName: "dashcenter.v1.ControlPlane",
-HandlerType: (*controlPlaneHandler)(nil),
+HandlerType: (*controlPlaneServer)(nil), // MUST be an interface pointer.
 Methods: []grpc.MethodDesc{
 {MethodName: "PutVnet", Handler: wrapUnary[dashcenterv1.VnetSpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.VnetSpec) (*dashcenterv1.Ack, error) {
 return h.(*controlPlaneHandler).PutVnet(ctx, req)

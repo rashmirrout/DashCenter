@@ -8,6 +8,7 @@ import (
 "sync"
 
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
@@ -16,11 +17,12 @@ import (
 // Manager owns per-DPU worker goroutines and the dirty channel shared
 // with subscribe.Pump and reconciler.
 type Manager struct {
-cfg   *config.ReconcileConfig
-obs   *model.ObsCache
-st    store.DesiredStore
-inv   *inventory.Inventory
-dirty chan string
+cfg     *config.ReconcileConfig
+obs     *model.ObsCache
+st      store.DesiredStore
+inv     *inventory.Inventory
+factory dpuclient.ClientFactory
+dirty   chan string
 
 mu      sync.Mutex
 workers map[string]*worker
@@ -46,6 +48,11 @@ func (m *Manager) SetStore(s store.DesiredStore) { m.st = s }
 
 // SetInventory wires the inventory (called once at startup).
 func (m *Manager) SetInventory(inv *inventory.Inventory) { m.inv = inv }
+
+// SetClientFactory wires the southbound DpuClient factory. Tests inject
+// a mock factory; main.go injects dpuclient.DefaultFactory. If unset,
+// every worker falls back to DefaultFactory at first reconcile time.
+func (m *Manager) SetClientFactory(f dpuclient.ClientFactory) { m.factory = f }
 
 // DirtyC returns the writable side for subscribe.Pump.
 func (m *Manager) DirtyC() chan<- string { return m.dirty }
@@ -95,6 +102,8 @@ inbox:    make(chan struct{}, inboxSize),
 obs:      m.obs,
 st:       m.st,
 inv:      m.inv,
+factory:  m.factory,
+limiter:  newLimiter(rateLimit),
 budget:   budget,
 rateOps:  rateLimit,
 cancel:   cancel,
