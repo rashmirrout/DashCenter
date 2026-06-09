@@ -42,46 +42,46 @@ const (
 // Config is the on-disk schema persisted to ~/.config/dashctl/config (or
 // %APPDATA%\dashctl\config on Windows).
 type Config struct {
-	APIVersion     string                  `yaml:"apiVersion"`
-	Kind           string                  `yaml:"kind"`
-	CurrentContext string                  `yaml:"current-context"`
-	Contexts       map[string]ContextEntry `yaml:"contexts"`
-	Preferences    Preferences             `yaml:"preferences"`
+	APIVersion     string                  `yaml:"apiVersion"      json:"apiVersion"`
+	Kind           string                  `yaml:"kind"            json:"kind"`
+	CurrentContext string                  `yaml:"current-context" json:"current-context"`
+	Contexts       map[string]ContextEntry `yaml:"contexts"        json:"contexts"`
+	Preferences    Preferences             `yaml:"preferences"     json:"preferences"`
 }
 
 // ContextEntry is one named cluster/context.
 type ContextEntry struct {
-	Endpoint      string     `yaml:"endpoint"`
-	AdminEndpoint string     `yaml:"admin-endpoint,omitempty"`
-	Transport     Transport  `yaml:"transport"`
-	Namespace     string     `yaml:"namespace"`
-	Auth          AuthConfig `yaml:"auth,omitempty"`
-	TLS           TLSConfig  `yaml:"tls,omitempty"`
-	Timeout       string     `yaml:"timeout,omitempty"` // duration string; "" → default
+	Endpoint      string     `yaml:"endpoint"                  json:"endpoint"`
+	AdminEndpoint string     `yaml:"admin-endpoint,omitempty"  json:"admin-endpoint,omitempty"`
+	Transport     Transport  `yaml:"transport"                 json:"transport"`
+	Namespace     string     `yaml:"namespace"                 json:"namespace"`
+	Auth          AuthConfig `yaml:"auth,omitempty"            json:"auth,omitempty"`
+	TLS           TLSConfig  `yaml:"tls,omitempty"             json:"tls,omitempty"`
+	Timeout       string     `yaml:"timeout,omitempty"         json:"timeout,omitempty"` // duration string; "" → default
 }
 
 // AuthConfig — see specs/LLD/dashctl-lld.md §11.
 type AuthConfig struct {
-	Mode      string `yaml:"mode,omitempty"`       // "none" | "token" | "mtls"
-	Token     string `yaml:"token,omitempty"`      // discouraged; use TokenEnv
-	TokenEnv  string `yaml:"token-env,omitempty"`
-	TokenFile string `yaml:"token-file,omitempty"`
+	Mode      string `yaml:"mode,omitempty"        json:"mode,omitempty"`       // "none" | "token" | "mtls"
+	Token     string `yaml:"token,omitempty"       json:"token,omitempty"`      // discouraged; use TokenEnv
+	TokenEnv  string `yaml:"token-env,omitempty"   json:"token-env,omitempty"`
+	TokenFile string `yaml:"token-file,omitempty"  json:"token-file,omitempty"`
 }
 
 // TLSConfig holds optional TLS material.
 type TLSConfig struct {
-	CAFile             string `yaml:"ca-file,omitempty"`
-	CertFile           string `yaml:"cert-file,omitempty"`
-	KeyFile            string `yaml:"key-file,omitempty"`
-	Insecure           bool   `yaml:"insecure,omitempty"`
-	InsecureSkipVerify bool   `yaml:"insecure-skip-verify,omitempty"`
+	CAFile             string `yaml:"ca-file,omitempty"               json:"ca-file,omitempty"`
+	CertFile           string `yaml:"cert-file,omitempty"             json:"cert-file,omitempty"`
+	KeyFile            string `yaml:"key-file,omitempty"              json:"key-file,omitempty"`
+	Insecure           bool   `yaml:"insecure,omitempty"              json:"insecure,omitempty"`
+	InsecureSkipVerify bool   `yaml:"insecure-skip-verify,omitempty" json:"insecure-skip-verify,omitempty"`
 }
 
 // Preferences are user-level defaults; lower priority than per-context.
 type Preferences struct {
-	Output   string `yaml:"output,omitempty"`
-	Color    string `yaml:"color,omitempty"` // "auto" | "always" | "never"
-	PageSize int    `yaml:"page-size,omitempty"`
+	Output   string `yaml:"output,omitempty"     json:"output,omitempty"`
+	Color    string `yaml:"color,omitempty"      json:"color,omitempty"` // "auto" | "always" | "never"
+	PageSize int    `yaml:"page-size,omitempty" json:"page-size,omitempty"`
 }
 
 // ResolvedConfig is the merged-and-validated view returned to commands.
@@ -213,6 +213,7 @@ type Env struct {
 	Output        string // DASHCTL_OUTPUT
 	Timeout       string // DASHCTL_TIMEOUT
 	Token         string // DASHCTL_TOKEN
+	Insecure      bool   // DASHCTL_INSECURE (truthy: 1/true/yes)
 	NoColor       bool   // NO_COLOR
 }
 
@@ -225,10 +226,20 @@ func ReadEnv() Env {
 		Transport:     os.Getenv("DASHCTL_TRANSPORT"),
 		Namespace:     os.Getenv("DASHCTL_NAMESPACE"),
 		Output:        os.Getenv("DASHCTL_OUTPUT"),
-		Timeout:       os.Getenv("DASHCTL_TIMEOUT"),
+		Timeout:        os.Getenv("DASHCTL_TIMEOUT"),
 		Token:         os.Getenv("DASHCTL_TOKEN"),
+		Insecure:      truthyEnv(os.Getenv("DASHCTL_INSECURE")),
 		NoColor:       os.Getenv("NO_COLOR") != "",
 	}
+}
+
+// truthyEnv recognises 1, true, yes (case-insensitive) as true.
+func truthyEnv(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	}
+	return false
 }
 
 // Resolve merges flags, env, the active context, and built-in defaults
@@ -349,6 +360,11 @@ func (c *Config) Resolve(flags Flags, env Env) (*ResolvedConfig, error) {
 	}
 	if flags.InsecureSet {
 		rc.TLS.Insecure = flags.Insecure
+	} else if env.Insecure {
+		// Env-supplied DASHCTL_INSECURE=true is honoured when no explicit
+		// flag was set, so containers and CI can opt-in without injecting
+		// --insecure on every invocation.
+		rc.TLS.Insecure = true
 	}
 	if flags.SkipTLSSet {
 		rc.TLS.InsecureSkipVerify = flags.SkipTLSVerify

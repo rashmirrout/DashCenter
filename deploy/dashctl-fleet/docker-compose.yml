@@ -96,6 +96,17 @@ services:
     restart: unless-stopped
 
   # ── Control plane ────────────────────────────────────────────────
+  # The named-volume init pre-chowns /var/lib/dashd to the nonroot UID
+  # (65532) used by distroless/static. Without this, dashd's first
+  # store.Put fails with EACCES and the REST handler returns 500.
+  dashd-init:
+    image: alpine:3.20
+    container_name: dc-ctl-dashd-init
+    command: ["sh", "-c", "chown -R 65532:65532 /var/lib/dashd"]
+    volumes:
+      - dashd-state-ctl-fleet:/var/lib/dashd
+    restart: "no"
+
   dashd:
     build:
       context: ../..
@@ -103,6 +114,8 @@ services:
     image: dashcenter/dashd:dev
     container_name: dc-ctl-dashd
     depends_on:
+      dashd-init:
+        condition: service_completed_successfully
       dash-sim-1: { condition: service_started }
       dash-sim-2: { condition: service_started }
       dash-sim-3: { condition: service_started }
@@ -141,4 +154,8 @@ services:
       DASHCTL_ENDPOINT:        http://dashd:8443
       DASHCTL_ADMIN_ENDPOINT:  http://dashd:7443
       DASHCTL_OUTPUT:          table
+      # In-network endpoint is `dashd:` not localhost, so we opt-in to
+      # plaintext explicitly. Operators on the host with a localhost-
+      # forwarded endpoint do not need this.
+      DASHCTL_INSECURE:        "true"
     entrypoint: ["/usr/local/bin/dashctl"]

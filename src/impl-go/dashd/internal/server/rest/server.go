@@ -380,7 +380,24 @@ if err != nil {
 handleServiceErr(w, err)
 return
 }
-writeJSON(w, 200, map[string]any{"dpus": statuses})
+// Serialize DpuState as its enum NAME (e.g. "DPU_STATE_UP") so REST
+// clients don't have to know the proto enum number. Mirrors the shape
+// used by /admin/inventory and /admin/health.
+type dpuOut struct {
+ID       string            `json:"id"`
+Endpoint string            `json:"endpoint,omitempty"`
+State    string            `json:"state"`
+Labels   map[string]string `json:"labels,omitempty"`
+}
+out := make([]dpuOut, 0, len(statuses))
+for _, s := range statuses {
+out = append(out, dpuOut{
+ID: s.ID, Endpoint: s.Endpoint,
+State:  s.State.String(),
+Labels: s.Labels,
+})
+}
+writeJSON(w, 200, map[string]any{"dpus": out})
 }
 
 // --- Reconcile ---
@@ -418,13 +435,26 @@ return true
 func handleServiceErr(w http.ResponseWriter, err error) {
 if errors.Is(err, store.ErrNotFound) {
 writeErr(w, 404, errors.New("not found"))
-} else if errors.Is(err, store.ErrGenerationMismatch) {
-writeErr(w, 409, errors.New("generation mismatch"))
-} else if errors.Is(err, service.ErrInvalidArgument) {
-writeErr(w, 400, err)
-} else {
-writeErr(w, 500, errors.New("internal"))
+return
 }
+if errors.Is(err, store.ErrGenerationMismatch) {
+writeErr(w, 409, errors.New("generation mismatch"))
+return
+}
+if errors.Is(err, service.ErrInvalidArgument) {
+writeErr(w, 400, err)
+return
+}
+// Unclassified errors are still 500, but log the underlying reason
+// (so operators have a fighting chance to diagnose), and include a
+// truncated copy of the message in the response body. This avoids the
+// silent "internal" response that hid the real cause.
+slog.Error("rest: internal error returned to client", "error", err.Error())
+msg := err.Error()
+if len(msg) > 240 {
+msg = msg[:240] + "…"
+}
+writeErr(w, 500, errors.New("internal: "+msg))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

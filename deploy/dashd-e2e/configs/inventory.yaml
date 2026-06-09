@@ -1,3 +1,4 @@
+git push
 # Single-DPU inventory for the dashd-e2e demo.
 #
 # The endpoint uses the docker compose service hostname `dash-sim-1`,

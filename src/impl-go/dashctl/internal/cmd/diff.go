@@ -91,6 +91,11 @@ type fieldDiff struct {
 // current (server-side) spec JSON and the proposed (client-side) spec map.
 // Phase 1 keeps it simple: top-level field comparison, JSON-equality on
 // values, deletions detected by missing keys on the proposed side.
+//
+// Both sides have the metadata-projected fields (`name`, `namespace`,
+// `expected_generation`, `labels`) stripped before comparison — dashd
+// embeds those in the stored spec, but they are *not* user-controlled
+// values for diff purposes (the user controls them via metadata).
 func compareSpecs(currentJSON []byte, proposed map[string]any) []fieldDiff {
 	var current map[string]any
 	if len(currentJSON) > 0 {
@@ -99,20 +104,12 @@ func compareSpecs(currentJSON []byte, proposed map[string]any) []fieldDiff {
 	if current == nil {
 		current = map[string]any{}
 	}
-	// Strip projected fields that the SpecJSON encoder adds (so they don't
-	// show as bogus diffs).
-	prop := make(map[string]any, len(proposed))
-	for k, v := range proposed {
-		switch k {
-		case "name", "namespace", "expected_generation":
-			continue
-		}
-		prop[k] = v
-	}
-	keys := uniqueKeys(current, prop)
+	cur := pruneProjected(current)
+	prop := pruneProjected(proposed)
+	keys := uniqueKeys(cur, prop)
 	out := make([]fieldDiff, 0, len(keys))
 	for _, k := range keys {
-		ov, oPresent := current[k]
+		ov, oPresent := cur[k]
 		nv, nPresent := prop[k]
 		if !oPresent {
 			out = append(out, fieldDiff{Field: k, Old: nil, New: nv})
@@ -125,6 +122,21 @@ func compareSpecs(currentJSON []byte, proposed map[string]any) []fieldDiff {
 		if !jsonEqual(ov, nv) {
 			out = append(out, fieldDiff{Field: k, Old: ov, New: nv})
 		}
+	}
+	return out
+}
+
+// pruneProjected returns a copy of m with the metadata-projected fields
+// stripped. dashd embeds them in stored specs, but they belong in the
+// envelope's metadata block, not the user-controlled spec body.
+func pruneProjected(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		switch k {
+		case "name", "namespace", "expected_generation", "labels":
+			continue
+		}
+		out[k] = v
 	}
 	return out
 }
