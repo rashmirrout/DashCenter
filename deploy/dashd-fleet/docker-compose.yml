@@ -1,0 +1,118 @@
+# DashCenter — dashd + 5 dash-sim fleet (end-to-end, self-contained).
+#
+# Build images and start everything:
+#   docker compose -f deploy/dashd-fleet/docker-compose.yml up -d --build
+#
+# Verify (after ~5–10s):
+#   curl http://localhost:7443/admin/health
+#   curl http://localhost:7443/admin/inventory | jq '.dpus[].state'   # expect 5 × DPU_STATE_UP (=2)
+#
+# Push a vnet across the fleet:
+#   ./deploy/dashd-fleet/push-vnet.sh                 # Linux/macOS/WSL/Git-Bash
+#   pwsh -File deploy/dashd-fleet/push-vnet.ps1       # Windows
+#
+# Tear down (keep the dashd state volume):
+#   docker compose -f deploy/dashd-fleet/docker-compose.yml down
+#
+# Tear down AND wipe state:
+#   docker compose -f deploy/dashd-fleet/docker-compose.yml down -v
+
+name: dashd-fleet
+
+networks:
+  dc-fleet:
+    driver: bridge
+
+volumes:
+  dashd-state-fleet:
+    name: dashd-state-fleet
+
+services:
+  # ── DPU simulators ────────────────────────────────────────────────
+  # All five sims listen on :50051 (gRPC) and :8080 (admin) inside the
+  # network namespace. There is no port collision because each runs in
+  # its own container. We only expose the admin HTTP on the host for
+  # operator debugging; gRPC stays internal.
+  dash-sim-1:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-fleet-sim-1
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-01"]
+    networks: [dc-fleet]
+    ports: ["8081:8080"]
+    restart: unless-stopped
+
+  dash-sim-2:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-fleet-sim-2
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-02"]
+    networks: [dc-fleet]
+    ports: ["8082:8080"]
+    restart: unless-stopped
+
+  dash-sim-3:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-fleet-sim-3
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-03"]
+    networks: [dc-fleet]
+    ports: ["8083:8080"]
+    restart: unless-stopped
+
+  dash-sim-4:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-fleet-sim-4
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-04"]
+    networks: [dc-fleet]
+    ports: ["8084:8080"]
+    restart: unless-stopped
+
+  dash-sim-5:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-fleet-sim-5
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-05"]
+    networks: [dc-fleet]
+    ports: ["8085:8080"]
+    restart: unless-stopped
+
+  # ── Control plane ────────────────────────────────────────────────
+  # dashd starts after all sims are running. depends_on uses
+  # `service_started` (not `service_healthy`) because the distroless
+  # image has no shell for a curl-based healthcheck. The prober
+  # retries every 5s anyway, so the fleet converges within ~10s of
+  # all sims being up.
+  dashd:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dashd/Dockerfile
+    image: dashcenter/dashd:dev
+    container_name: dc-fleet-dashd
+    depends_on:
+      dash-sim-1: { condition: service_started }
+      dash-sim-2: { condition: service_started }
+      dash-sim-3: { condition: service_started }
+      dash-sim-4: { condition: service_started }
+      dash-sim-5: { condition: service_started }
+    volumes:
+      - ./configs/dashd.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+      - dashd-state-fleet:/var/lib/dashd
+    networks: [dc-fleet]
+    ports:
+      - "8443:8443"   # REST API
+      - "9443:9443"   # gRPC API
+      - "7443:7443"   # Admin HTTP
+    restart: unless-stopped
