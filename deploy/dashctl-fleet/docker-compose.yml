@@ -1,0 +1,144 @@
+# DashCenter — dashctl + dashd + 5 dash-sim fleet (end-to-end CLI demo).
+#
+# Same topology as deploy/dashd-fleet/, plus a built dashctl image that
+# can be invoked one-shot via:
+#   docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl get vnet
+#
+# Bring up:
+#   docker compose -f deploy/dashctl-fleet/docker-compose.yml up -d --build
+#
+# Verify (after ~5–10s):
+#   curl http://localhost:7443/admin/health
+#
+# Run the full dashctl end-to-end walkthrough:
+#   ./deploy/dashctl-fleet/dashctl-e2e.sh           # Linux/macOS/WSL/Git-Bash
+#   pwsh -File deploy/dashctl-fleet/dashctl-e2e.ps1 # Windows
+#
+# Run dashctl from the HOST against the live fleet (after building bin/dashctl):
+#   ./bin/dashctl --endpoint http://localhost:8443 \
+#                 --admin-endpoint http://localhost:7443 \
+#                 dpu list
+#
+# Tear down (keep state):
+#   docker compose -f deploy/dashctl-fleet/docker-compose.yml down
+#
+# Tear down AND wipe state:
+#   docker compose -f deploy/dashctl-fleet/docker-compose.yml down -v
+
+name: dashctl-fleet
+
+networks:
+  dc-ctl-fleet:
+    driver: bridge
+
+volumes:
+  dashd-state-ctl-fleet:
+    name: dashd-state-ctl-fleet
+
+services:
+  # ── DPU simulators (five) ────────────────────────────────────────
+  # Each sim listens on :50051 (gRPC) and :8080 (admin) inside the
+  # network. Only the admin HTTP is exposed to the host for operator
+  # debugging; the southbound gRPC stays internal.
+  dash-sim-1:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-ctl-sim-1
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-01"]
+    networks: [dc-ctl-fleet]
+    ports: ["8181:8080"]
+    restart: unless-stopped
+
+  dash-sim-2:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-ctl-sim-2
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-02"]
+    networks: [dc-ctl-fleet]
+    ports: ["8182:8080"]
+    restart: unless-stopped
+
+  dash-sim-3:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-ctl-sim-3
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-03"]
+    networks: [dc-ctl-fleet]
+    ports: ["8183:8080"]
+    restart: unless-stopped
+
+  dash-sim-4:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-ctl-sim-4
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-04"]
+    networks: [dc-ctl-fleet]
+    ports: ["8184:8080"]
+    restart: unless-stopped
+
+  dash-sim-5:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-ctl-sim-5
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-05"]
+    networks: [dc-ctl-fleet]
+    ports: ["8185:8080"]
+    restart: unless-stopped
+
+  # ── Control plane ────────────────────────────────────────────────
+  dashd:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dashd/Dockerfile
+    image: dashcenter/dashd:dev
+    container_name: dc-ctl-dashd
+    depends_on:
+      dash-sim-1: { condition: service_started }
+      dash-sim-2: { condition: service_started }
+      dash-sim-3: { condition: service_started }
+      dash-sim-4: { condition: service_started }
+      dash-sim-5: { condition: service_started }
+    volumes:
+      - ./configs/dashd.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+      - dashd-state-ctl-fleet:/var/lib/dashd
+    networks: [dc-ctl-fleet]
+    ports:
+      - "8443:8443"   # REST
+      - "9443:9443"   # gRPC (Phase 2)
+      - "7443:7443"   # Admin
+    restart: unless-stopped
+
+  # ── Operator CLI (one-shot) ──────────────────────────────────────
+  # Profile-gated so `docker compose up` does NOT start it. Use:
+  #   docker compose -f deploy/dashctl-fleet/docker-compose.yml \
+  #     run --rm dashctl version
+  #   docker compose ... run --rm dashctl get vnet
+  #   docker compose ... run --rm -v $PWD/deploy/dashctl-fleet/manifests:/work \
+  #     dashctl apply -f /work/00-vnet.yaml
+  #
+  # Environment defaults point at the in-network dashd; override
+  # --endpoint / --admin-endpoint to talk to a different cluster.
+  dashctl:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dashctl/Dockerfile
+    image: dashcenter/dashctl:dev
+    container_name: dc-ctl-dashctl
+    profiles: [cli]
+    networks: [dc-ctl-fleet]
+    environment:
+      DASHCTL_ENDPOINT:        http://dashd:8443
+      DASHCTL_ADMIN_ENDPOINT:  http://dashd:7443
+      DASHCTL_OUTPUT:          table
+    entrypoint: ["/usr/local/bin/dashctl"]

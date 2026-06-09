@@ -1,0 +1,26 @@
+# dashctl manifest set for the dashctl-fleet end-to-end walkthrough.
+#
+# Applied in lexicographic order by `dashctl apply -f <dir>`:
+#   00-vnets.yaml
+#   10-enis.yaml
+#
+# The 5-DPU fleet has no placement hint by default; the dashctl ENI
+# spec carries `placement_hint_dpu_ids` to demonstrate per-ENI pinning.
+
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata:
+  name: vnet-app
+  namespace: default
+  labels: { tier: app }
+spec:
+  vni: 1001
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata:
+  name: vnet-db
+  namespace: default
+  labels: { tier: db }
+spec:
+  vni: 1002

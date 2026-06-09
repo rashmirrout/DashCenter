@@ -23,7 +23,7 @@
 
 | Phase | Objective | Status | Gates Passed |
 |---|---|---|---|
-| **Phase 1** — REST backend (operator-ready CLI) | Cobra command tree + REST SDK against dashd `:8443`/`:7443`; all write & read verbs for the spec kinds shipped today; production-grade UX (contexts, output formats, tests). | ⏳ Code complete; 9 / 12 gates green | 9 / 12 |
+| **Phase 1** — REST backend (operator-ready CLI) | Cobra command tree + REST SDK against dashd `:8443`/`:7443`; all write & read verbs for the spec kinds shipped today; production-grade UX (contexts, output formats, tests). | ⏳ Code + image + Makefile + container walkthrough complete; 10 / 12 gates green | 10 / 12 |
 | **Phase 2** — gRPC backend (full fidelity) | gRPC SDK against dashd `:9443`; native streaming; `ApplyBatch`; Operations / HA / Migration / Diagnostics commands as dashd's Phase 2 milestones land. | ❌ Not started | 0 / 10 |
 
 > **Dependency**: Phase 1 of dashctl can ship today against dashd Phase 1B
@@ -110,11 +110,9 @@ no native streaming, no `ApplyBatch`.
 | 23 | `internal/cmd/events.go` | SSE consumer (when dashd supports) or long-poll fallback. | ⚬ Stub returns Unimplemented — dashd Phase 1B has no SSE/Watch yet |
 | 24 | `internal/cmd/version.go` | Client + server version; survives unreachable server. | ✅ | unit (incl. unreachable path) |
 | 25 | `internal/cmd/completion.go` | Cobra-generated bash/zsh/fish/pwsh. | ✅ | unit (all 4 shells) |
-| 26 | `Dockerfile` | Distroless multi-stage; `linux/{amd64,arm64}`. | ❌ **Open** (text-in-LLD; not committed) |
-| 27 | `Makefile` + `scripts/build-dashctl.ps1` | Reproducible builds; release artifacts. | ❌ **Open** |
-| 28 | `test/integration/` (`//go:build integration`) | E2E suite against live dashd + dash-sim from `deploy/compose/`. | ❌ **Open** — all 12 scenarios still TODO |
-
-**Code-status summary**: 23 steps shipped, 5 explicitly open (3 ❌ packaging/CI gates + 2 ⚬ deferred to Phase 2 for legitimate dependency reasons).
+| 26 | `Dockerfile` | Distroless multi-stage; CGO-free static binary; link-time version/commit/build-date stamping. | ✅ [`src/impl-go/dashctl/Dockerfile`](../../src/impl-go/dashctl/Dockerfile) |
+| 27 | `Makefile` | Reproducible builds; cross-compile matrix (linux/darwin/windows × amd64/arm64); `image`, `test-cover`, `tidy`, `clean` targets. | ✅ [`src/impl-go/dashctl/Makefile`](../../src/impl-go/dashctl/Makefile) |
+| 28 | `deploy/dashctl-fleet/` (compose walkthrough) | 5-DPU fleet + one-shot dashctl container; 13-step e2e script (POSIX shell + PowerShell) running both from host and inside container. *Hosts the integration-suite scenarios in shell form. Go-based `test/integration/` with `//go:build integration` is still TODO under C1-G12.* | ⏳ walkthrough shipped; Go automation pending |
 
 ### Phase 1 quality gates
 
@@ -130,16 +128,21 @@ no native streaming, no `ApplyBatch`.
 | C1-G8 | Context isolation | `--context dev` and `--context prod` never bleed | ✅ Unit (`TestResolveContextSelection`) |
 | C1-G9 | Error mapping | every entry in LLD §10.3 has a test | ✅ Unit (`TestFromHTTPStatusTable`) |
 | C1-G10 | Streaming Ctrl-C | `events --watch` cancels within 250 ms of SIGINT | ⚬ Deferred to Phase 2 — `events` is a clean Unimplemented stub in Phase 1 |
-| C1-G11 | Cross-platform build | `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, `windows/amd64` | ❌ **Open** — only Win/amd64 verified locally; matrix build not wired |
-| C1-G12 | Integration suite | 12 scenarios pass via `go test -tags=integration` | ❌ **Open** — fake-client harness covers business logic; live dashd+dash-sim suite not yet authored |
+| C1-G11 | Cross-platform build | `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, `windows/amd64` | ✅ [`make -C src/impl-go/dashctl build-all`](../../src/impl-go/dashctl/Makefile) covers all 5 platforms |
+| C1-G12 | Integration suite | 12 scenarios pass via `go test -tags=integration` | ⏳ **Shell-form complete** — [`deploy/dashctl-fleet/dashctl-e2e.{sh,ps1}`](../../deploy/dashctl-fleet/dashctl-e2e.sh) runs 13 scenarios end-to-end (container + host parity). Go-built `test/integration/` package still pending. |
 
 ### Honest open items ("production tag" checklist)
 
-Three items separate today's code from a `dashctl-phase1-complete` release tag:
+One item separates today's code from a `dashctl-phase1-complete` release tag:
 
-1. **C1-G11 — Cross-platform build matrix**: GitHub Actions / local script that builds linux\{amd64,arm64}, darwin\{amd64,arm64}, windows/amd64; verifies `--help` runs on each. **Mitigation:** the code uses no GOOS-specific paths; this is purely packaging.
-2. **C1-G12 — Integration suite (`test/integration/`)**: 12 scenarios from the LLD against a live dashd + dash-sim. The unit suite uses an in-memory `fakeClient`; wire bytes against dashd are not yet automated. **Mitigation:** docs/DASHCTL_INTEGRATION_TEST.md documents every command + expected output; the harness scaffolding can be lifted from dashd's existing `test/integration/` package.
-3. **Dockerfile + Makefile** (steps 26/27): drop-in Dockerfile body is published in [docs/DASHCTL_INTEGRATION_TEST.md §2.3](../../docs/DASHCTL_INTEGRATION_TEST.md#23-dashctl-dockerfile-drop-in) but not committed under `src/impl-go/dashctl/Dockerfile`.
+1. **C1-G12 — Go-built integration suite (`src/impl-go/dashctl/test/integration/`)**: The 13-scenario shell walkthrough at [`deploy/dashctl-fleet/dashctl-e2e.sh`](../../deploy/dashctl-fleet/dashctl-e2e.sh) covers every Phase 1 verb against a live dashd + 5 dash-sim fleet, both from inside the dashctl container and (optionally) from the host. Wiring the same scenarios behind `//go:build integration` so CI can run them via `go test -tags=integration` is a follow-up. **Mitigation**: the harness pattern is in [`src/impl-go/dashd/test/integration/`](../../src/impl-go/dashd/test/integration/suite_test.go).
+
+Closed since the previous tracker update:
+
+- **C1-G11** Cross-platform matrix — `make build-all` builds linux/{amd64,arm64}, darwin/{amd64,arm64}, windows/amd64 (LDFLAGS-stamped).
+- **Step 26 Dockerfile** — distroless multi-stage; static CGO-free binary; build-arg version stamping.
+- **Step 27 Makefile** — `build`, `build-all`, `test`, `test-cover`, `vet`, `tidy`, `image`, `clean`.
+- **`deploy/dashctl-fleet/`** — docker-compose, configs, manifests, README, and the 13-step e2e script (POSIX + PowerShell). Exercises dashctl from both inside the container and the host against the same fleet.
 
 Non-blocking but worth tracking:
 
@@ -275,3 +278,4 @@ per context; both REST and gRPC remain first-class.
 |---|---|---|
 | 2026-06-09 | bootstrap | Initial tracker created. dashctl scaffold (today) is a single `main.go` printing version; this plan turns it into a kubectl-grade CLI. |
 | 2026-06-09 | Phase 1 implementation | All 23 Phase 1 code steps shipped. Cobra command tree (apply/get/describe/delete/edit/replace/diff/reconcile/dpu/inventory/events/version/config/completion/explain + typed kind groups + Phase-2 stubs). REST backend with full route table, TLS/mTLS/token auth, status-code classifier. Manifest envelope codec (multi-doc YAML, stdin, dirs, CAS via metadata.generation). Render engine with 7 output formats and per-kind columns. Coverage: 8/9 packages ≥ 87%, 4 packages ≥ 95%. Build + vet clean. **Status: 9/12 gates green; 3 open (C1-G11 cross-platform matrix, C1-G12 integration suite, Dockerfile/Makefile under steps 26-27); 1 deferred (C1-G10 streaming-cancel waits on Phase 2 events).** |
+| 2026-06-09 | Phase 1 packaging | Closed Dockerfile (distroless static), Makefile (cross-compile matrix), and `deploy/dashctl-fleet/` (5-DPU compose + 13-step shell+pwsh walkthrough running dashctl both inside the container and from the host). Cross-platform build gate C1-G11 satisfied via `make build-all`. **Status advances 9/12 → 10/12; only the Go-built `test/integration/` package remains under C1-G12.** |
