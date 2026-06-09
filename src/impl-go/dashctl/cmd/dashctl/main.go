@@ -1,22 +1,29 @@
 // Command dashctl is the DashCenter operator CLI.
 //
-// Scaffold — Cobra wiring lives in internal/cmd and will be added as
-// dashd's API surface stabilizes.
+// Build with:
+//
+//	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w \
+//	  -X main.version=$VERSION -X main.commit=$GIT_SHA -X main.buildDate=$DATE" \
+//	  -o bin/dashctl ./cmd/dashctl
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashctl/internal/cmd"
 )
 
-const version = "0.0.0-dev"
+// Linker-set build info. Defaults are populated for `go run` / unstamped builds.
+var (
+	version   = "0.1.0-dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
 
 func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
-		fmt.Println("dashctl", version)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "dashctl %s (scaffold)\n", version)
-	fmt.Fprintln(os.Stderr, "not yet implemented — see internal/cmd packages")
-	os.Exit(0)
+	os.Exit(cmd.Execute(cmd.BuildInfo{
+		Version: version,
+		Commit:  commit,
+		Date:    buildDate,
+	}))
 }
