@@ -121,10 +121,16 @@ h.writeConfig(t, restPort, grpcPort, adminPort)
 h.startSim(t)
 h.startDashd(t)
 
-if err := waitHTTP(h.adminURL+"/admin/health", 30*time.Second); err != nil {
+// 60s is generous but necessary on Windows: `go run` cold-compiles dashd
+// (which includes the freshly-regenerated dashcenter/v1 proto stubs +
+// gRPC reflection registry) on the first invocation per cache state, and
+// the suite is run-as-a-suite during CI. Subsequent invocations complete
+// in <2s thanks to the go build cache. Keep this generous to avoid
+// flaky failures that look like dashd bugs but are really compile lag.
+if err := waitHTTP(h.adminURL+"/admin/health", 60*time.Second); err != nil {
 t.Fatalf("dashd admin not healthy: %v", err)
 }
-if err := waitTCP(h.simAddr, 30*time.Second); err != nil {
+if err := waitTCP(h.simAddr, 60*time.Second); err != nil {
 t.Fatalf("dash-sim grpc not accepting: %v", err)
 }
 
@@ -154,7 +160,7 @@ reconcile:
   apply_rate_limit: 200
   error_budget_per_min: 10
 inventory:
-  source: "static"
+  source: "api"
 `, rest, grpc, admin, escapeYaml(h.stateDir))
 
 path := filepath.Join(t.TempDir(), "dashd.yaml")
@@ -212,16 +218,33 @@ h.dashd = cmd
 func (h *harness) shutdown() {
 killProc(h.dashd)
 killProc(h.sim)
+// Close our log-file handles first so the only remaining holders are the
+// (now-killed) child processes.
 for _, fn := range h.cleanupFn {
 fn()
 }
+// Windows: even after Process.Wait returns, the OS may still take a tick
+// to release the killed children's stdout/stderr file handles. Without this
+// pause, t.TempDir RemoveAll races the OS and fails with
+//   "The process cannot access the file because it is being used by another process"
+// which the test framework then surfaces as a spurious test failure.
+time.Sleep(200 * time.Millisecond)
 }
 
 func killProc(c *exec.Cmd) {
 if c == nil || c.Process == nil {
 return
 }
+// On Windows, `exec.Command("go", "run", ...)` launches a *child* binary
+// underneath the go.exe parent. Killing only the parent leaves the child
+// alive, holding the test's log-file handles and racing t.TempDir cleanup.
+// `taskkill /T /F` kills the whole process tree.
+if runtime.GOOS == "windows" {
+pid := fmt.Sprintf("%d", c.Process.Pid)
+_ = exec.Command("taskkill", "/T", "/F", "/PID", pid).Run()
+} else {
 _ = c.Process.Kill()
+}
 // Reap; ignore errors (exit status from kill is expected).
 _ = c.Wait()
 }

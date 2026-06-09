@@ -109,6 +109,35 @@ Write-Host "protoc $($argList.Count) args, $($protoFiles.Count) files" -Foregrou
 & protoc @argList
 if ($LASTEXITCODE -ne 0) { throw "protoc failed with exit $LASTEXITCODE" }
 
+# -----------------------------------------------------------------------------
+# dashcenter/v1 protos (northbound DashCenter API)
+# -----------------------------------------------------------------------------
+# These protos carry their own go_package option so we don't need an M-map.
+# proto_path is the parent (proto/) so that `import "dashcenter/v1/types.proto"`
+# in control_plane.proto resolves correctly.
+$dcProtoRoot = Join-Path $repoRoot "proto"
+$dcV1Dir     = Join-Path $repoRoot "proto/dashcenter/v1"
+$dcFiles     = @()
+Get-ChildItem -Path $dcV1Dir -Filter "*.proto" | ForEach-Object {
+  $dcFiles += $_.FullName
+}
+if ($dcFiles.Count -eq 0) {
+  throw "No dashcenter/v1 proto files found under $dcV1Dir"
+}
+
+$dcArgList = @(
+  "--proto_path=$dcProtoRoot",
+  "--go_out=$stage",
+  "--go-grpc_out=$stage",
+  "--go_opt=paths=import",
+  "--go-grpc_opt=paths=import",
+  "--go-grpc_opt=require_unimplemented_servers=false"
+) + $dcFiles
+
+Write-Host "protoc dashcenter/v1: $($dcFiles.Count) files" -ForegroundColor Cyan
+& protoc @dcArgList
+if ($LASTEXITCODE -ne 0) { throw "protoc dashcenter/v1 failed with exit $LASTEXITCODE" }
+
 # Flatten: stage\<modPrefix>\* -> outDir\*
 $flatten = Join-Path $stage ($modPrefix -replace "/", "\")
 if (-not (Test-Path $flatten)) {

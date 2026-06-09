@@ -1,280 +1,201 @@
+// Package grpcserver: ControlPlane RPC adapter.
+//
+// This file is a thin adapter layer that translates between the wire-level
+// generated gRPC ControlPlane service (gen/go/dashcenter/v1) and the
+// transport-agnostic ControlPlaneService in internal/service. All business
+// logic, validation, and persistence lives in the service layer; this file
+// only does request demux, error→status code mapping, and result envelope
+// construction.
 package grpcserver
 
 import (
-"context"
-"encoding/json"
+	"context"
+	"encoding/json"
+	"fmt"
 
-dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
-"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
-"google.golang.org/grpc"
-"google.golang.org/grpc/codes"
-"google.golang.org/grpc/status"
+	dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// controlPlaneServer is the interface that the gRPC framework validates
-// the handler implements via reflect.Type.Implements. It MUST be an
-// interface type (gRPC panics on a struct HandlerType).
-type controlPlaneServer interface {
-PutVnet(context.Context, *dashcenterv1.VnetSpec) (*dashcenterv1.Ack, error)
-PutEni(context.Context, *dashcenterv1.EniSpec) (*dashcenterv1.Ack, error)
-PutVnetMapping(context.Context, *dashcenterv1.VnetMappingSpec) (*dashcenterv1.Ack, error)
-PutAclPolicy(context.Context, *dashcenterv1.AclPolicySpec) (*dashcenterv1.Ack, error)
-PutRoutePolicy(context.Context, *dashcenterv1.RoutePolicySpec) (*dashcenterv1.Ack, error)
-PutHaSet(context.Context, *dashcenterv1.HaSetSpec) (*dashcenterv1.Ack, error)
-PutServiceTunnel(context.Context, *dashcenterv1.ServiceTunnelSpec) (*dashcenterv1.Ack, error)
-Delete(context.Context, *dashcenterv1.NameRef) (*dashcenterv1.Ack, error)
-Get(context.Context, *dashcenterv1.NameRef) (*dashcenterv1.PolicyObject, error)
-Reconcile(context.Context, *dashcenterv1.ReconcileRequest) (*dashcenterv1.Ack, error)
-PutInventory(context.Context, *dashcenterv1.PutInventoryRequest) (*dashcenterv1.Ack, error)
-RegisterDpu(context.Context, *dashcenterv1.DpuRegistration) (*dashcenterv1.Ack, error)
-DeregisterDpu(context.Context, *dashcenterv1.NameRef) (*dashcenterv1.Ack, error)
-SimulateApply(context.Context, *dashcenterv1.PolicyApplyRequest) (*dashcenterv1.SimulateApplyResult, error)
-}
-
-// controlPlaneHandler implements controlPlaneServer.
+// controlPlaneHandler implements the generated ControlPlaneServer interface.
+// It embeds UnimplementedControlPlaneServer so streaming RPCs and Phase 2
+// methods automatically return codes.Unimplemented; we only override the
+// methods that have real Phase 1 backing logic.
 type controlPlaneHandler struct {
-cp service.ControlPlaneService
+	dashcenterv1.UnimplementedControlPlaneServer
+	cp service.ControlPlaneService
 }
 
+// registerControlPlane installs the handler on the gRPC server using the
+// generated RegisterControlPlaneServer entry point. This is the supported
+// path — it wires up the proper proto-v2 codec and the validated
+// ControlPlane_ServiceDesc from control_plane_grpc.pb.go.
 func registerControlPlane(gs *grpc.Server, cp service.ControlPlaneService) {
-h := &controlPlaneHandler{cp: cp}
-gs.RegisterService(&controlPlaneServiceDesc, h)
+	dashcenterv1.RegisterControlPlaneServer(gs, &controlPlaneHandler{cp: cp})
 }
 
-// --- RPC Handlers ---
+// ackFor produces a uniform Ack envelope for successful Put operations.
+// The generated Ack message does not have Accepted/Generation fields (those
+// were Phase 1 shortcuts in the previous hand-written stubs); the canonical
+// success carrier is TxnId, which we populate from the store generation so
+// clients can correlate Put → Get round-trips.
+func ackFor(res *service.PutResult) *dashcenterv1.Ack {
+	if res == nil {
+		return &dashcenterv1.Ack{}
+	}
+	return &dashcenterv1.Ack{TxnId: fmt.Sprintf("g%d", res.Generation)}
+}
+
+// --- Per-kind Put handlers -----------------------------------------------------
+// Each handler extracts the namespace from the spec (the proto carries it as a
+// first-class field on every Put), delegates to the service layer, and maps
+// errors to gRPC status codes.
 
 func (h *controlPlaneHandler) PutVnet(ctx context.Context, spec *dashcenterv1.VnetSpec) (*dashcenterv1.Ack, error) {
-ns := spec.Namespace
-res, err := h.cp.PutVnet(ctx, ns, spec)
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true, Generation: res.Generation}, nil
+	res, err := h.cp.PutVnet(ctx, spec.GetNamespace(), spec)
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return ackFor(res), nil
 }
 
 func (h *controlPlaneHandler) PutEni(ctx context.Context, spec *dashcenterv1.EniSpec) (*dashcenterv1.Ack, error) {
-ns := spec.Namespace
-res, err := h.cp.PutEni(ctx, ns, spec)
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true, Generation: res.Generation}, nil
+	res, err := h.cp.PutEni(ctx, spec.GetNamespace(), spec)
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return ackFor(res), nil
 }
 
 func (h *controlPlaneHandler) PutVnetMapping(ctx context.Context, spec *dashcenterv1.VnetMappingSpec) (*dashcenterv1.Ack, error) {
-ns := spec.Namespace
-res, err := h.cp.PutVnetMapping(ctx, ns, spec)
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true, Generation: res.Generation}, nil
+	res, err := h.cp.PutVnetMapping(ctx, spec.GetNamespace(), spec)
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return ackFor(res), nil
 }
 
 func (h *controlPlaneHandler) PutAclPolicy(ctx context.Context, spec *dashcenterv1.AclPolicySpec) (*dashcenterv1.Ack, error) {
-ns := spec.Namespace
-res, err := h.cp.PutAclPolicy(ctx, ns, spec)
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true, Generation: res.Generation}, nil
+	res, err := h.cp.PutAclPolicy(ctx, spec.GetNamespace(), spec)
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return ackFor(res), nil
 }
 
 func (h *controlPlaneHandler) PutRoutePolicy(ctx context.Context, spec *dashcenterv1.RoutePolicySpec) (*dashcenterv1.Ack, error) {
-ns := spec.Namespace
-res, err := h.cp.PutRoutePolicy(ctx, ns, spec)
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true, Generation: res.Generation}, nil
+	res, err := h.cp.PutRoutePolicy(ctx, spec.GetNamespace(), spec)
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return ackFor(res), nil
 }
 
 func (h *controlPlaneHandler) PutHaSet(ctx context.Context, spec *dashcenterv1.HaSetSpec) (*dashcenterv1.Ack, error) {
-ns := spec.Namespace
-res, err := h.cp.PutHaSet(ctx, ns, spec)
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true, Generation: res.Generation}, nil
+	res, err := h.cp.PutHaSet(ctx, spec.GetNamespace(), spec)
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return ackFor(res), nil
 }
 
 func (h *controlPlaneHandler) PutServiceTunnel(ctx context.Context, spec *dashcenterv1.ServiceTunnelSpec) (*dashcenterv1.Ack, error) {
-ns := spec.Namespace
-res, err := h.cp.PutServiceTunnel(ctx, ns, spec)
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true, Generation: res.Generation}, nil
+	res, err := h.cp.PutServiceTunnel(ctx, spec.GetNamespace(), spec)
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return ackFor(res), nil
 }
 
+// --- Get / Delete / Reconcile --------------------------------------------------
+
 func (h *controlPlaneHandler) Delete(ctx context.Context, ref *dashcenterv1.NameRef) (*dashcenterv1.Ack, error) {
-err := h.cp.Delete(ctx, ref.GetNamespace(), ref.GetKind(), ref.GetName())
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true}, nil
+	if err := h.cp.Delete(ctx, ref.GetNamespace(), ref.GetKind(), ref.GetName()); err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return &dashcenterv1.Ack{}, nil
 }
 
 func (h *controlPlaneHandler) Get(ctx context.Context, ref *dashcenterv1.NameRef) (*dashcenterv1.PolicyObject, error) {
-item, err := h.cp.Get(ctx, ref.GetNamespace(), ref.GetKind(), ref.GetName())
-if err != nil {
-return nil, serviceErrToStatus(err)
-}
-return storedItemToPolicyObject(item)
-}
-
-func (h *controlPlaneHandler) Reconcile(ctx context.Context, req *dashcenterv1.ReconcileRequest) (*dashcenterv1.Ack, error) {
-if err := h.cp.Reconcile(ctx); err != nil {
-return nil, serviceErrToStatus(err)
-}
-return &dashcenterv1.Ack{Accepted: true}, nil
+	item, err := h.cp.Get(ctx, ref.GetNamespace(), ref.GetKind(), ref.GetName())
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return storedItemToPolicyObject(item)
 }
 
-// Stubs for Phase 2 RPCs.
-func (h *controlPlaneHandler) PutInventory(ctx context.Context, req *dashcenterv1.PutInventoryRequest) (*dashcenterv1.Ack, error) {
-return nil, status.Errorf(codes.Unimplemented, "PutInventory via gRPC not yet implemented; use REST PUT /v1/inventory")
+func (h *controlPlaneHandler) Reconcile(ctx context.Context, _ *dashcenterv1.ReconcileRequest) (*dashcenterv1.Ack, error) {
+	if err := h.cp.Reconcile(ctx); err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return &dashcenterv1.Ack{}, nil
 }
 
-func (h *controlPlaneHandler) RegisterDpu(ctx context.Context, req *dashcenterv1.DpuRegistration) (*dashcenterv1.Ack, error) {
-return nil, status.Errorf(codes.Unimplemented, "RegisterDpu not yet implemented")
-}
-
-func (h *controlPlaneHandler) DeregisterDpu(ctx context.Context, ref *dashcenterv1.NameRef) (*dashcenterv1.Ack, error) {
-return nil, status.Errorf(codes.Unimplemented, "DeregisterDpu not yet implemented")
-}
-
-func (h *controlPlaneHandler) SimulateApply(ctx context.Context, req *dashcenterv1.PolicyApplyRequest) (*dashcenterv1.SimulateApplyResult, error) {
-return nil, status.Errorf(codes.Unimplemented, "SimulateApply not yet implemented")
-}
-
-// storedItemToPolicyObject converts a service.StoredItem to a PolicyObject.
+// storedItemToPolicyObject converts a service.StoredItem (transport-agnostic)
+// into a wire PolicyObject. The generated PolicyObject has an `object` oneof
+// across the 7 kinds, so we use the typed PolicyObject_* setters rather than
+// flat field assignment. Unknown kinds return Internal (the service layer
+// should never produce one — it validates kinds at Put time).
 func storedItemToPolicyObject(item *service.StoredItem) (*dashcenterv1.PolicyObject, error) {
-po := &dashcenterv1.PolicyObject{
-Generation: uint64(item.Generation),
-}
-// Deserialize the spec based on kind using flat struct fields.
-switch item.Kind {
-case "vnet":
-spec := &dashcenterv1.VnetSpec{}
-if err := json.Unmarshal(item.Spec, spec); err != nil {
-return nil, status.Errorf(codes.Internal, "unmarshal vnet: %v", err)
-}
-po.Vnet = spec
-case "eni":
-spec := &dashcenterv1.EniSpec{}
-if err := json.Unmarshal(item.Spec, spec); err != nil {
-return nil, status.Errorf(codes.Internal, "unmarshal eni: %v", err)
-}
-po.Eni = spec
-case "acl_policy":
-spec := &dashcenterv1.AclPolicySpec{}
-if err := json.Unmarshal(item.Spec, spec); err != nil {
-return nil, status.Errorf(codes.Internal, "unmarshal acl_policy: %v", err)
-}
-po.AclPolicy = spec
-case "route_policy":
-spec := &dashcenterv1.RoutePolicySpec{}
-if err := json.Unmarshal(item.Spec, spec); err != nil {
-return nil, status.Errorf(codes.Internal, "unmarshal route_policy: %v", err)
-}
-po.RoutePolicy = spec
-case "vnet_mapping":
-spec := &dashcenterv1.VnetMappingSpec{}
-if err := json.Unmarshal(item.Spec, spec); err != nil {
-return nil, status.Errorf(codes.Internal, "unmarshal vnet_mapping: %v", err)
-}
-po.VnetMapping = spec
-case "ha_set":
-spec := &dashcenterv1.HaSetSpec{}
-if err := json.Unmarshal(item.Spec, spec); err != nil {
-return nil, status.Errorf(codes.Internal, "unmarshal ha_set: %v", err)
-}
-po.HaSet = spec
-case "service_tunnel":
-spec := &dashcenterv1.ServiceTunnelSpec{}
-if err := json.Unmarshal(item.Spec, spec); err != nil {
-return nil, status.Errorf(codes.Internal, "unmarshal service_tunnel: %v", err)
-}
-po.ServiceTunnel = spec
-default:
-return nil, status.Errorf(codes.Internal, "unknown kind: %s", item.Kind)
-}
-return po, nil
-}
-
-// --- Hand-written gRPC Service Descriptor ---
-// This replaces the generated control_plane_grpc.pb.go that protoc-gen-go-grpc
-// would produce. It registers all unary ControlPlane RPCs.
-
-var controlPlaneServiceDesc = grpc.ServiceDesc{
-ServiceName: "dashcenter.v1.ControlPlane",
-HandlerType: (*controlPlaneServer)(nil), // MUST be an interface pointer.
-Methods: []grpc.MethodDesc{
-{MethodName: "PutVnet", Handler: wrapUnary[dashcenterv1.VnetSpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.VnetSpec) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutVnet(ctx, req)
-})},
-{MethodName: "PutEni", Handler: wrapUnary[dashcenterv1.EniSpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.EniSpec) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutEni(ctx, req)
-})},
-{MethodName: "PutVnetMapping", Handler: wrapUnary[dashcenterv1.VnetMappingSpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.VnetMappingSpec) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutVnetMapping(ctx, req)
-})},
-{MethodName: "PutAclPolicy", Handler: wrapUnary[dashcenterv1.AclPolicySpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.AclPolicySpec) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutAclPolicy(ctx, req)
-})},
-{MethodName: "PutRoutePolicy", Handler: wrapUnary[dashcenterv1.RoutePolicySpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.RoutePolicySpec) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutRoutePolicy(ctx, req)
-})},
-{MethodName: "PutHaSet", Handler: wrapUnary[dashcenterv1.HaSetSpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.HaSetSpec) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutHaSet(ctx, req)
-})},
-{MethodName: "PutServiceTunnel", Handler: wrapUnary[dashcenterv1.ServiceTunnelSpec, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.ServiceTunnelSpec) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutServiceTunnel(ctx, req)
-})},
-{MethodName: "Delete", Handler: wrapUnary[dashcenterv1.NameRef, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.NameRef) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).Delete(ctx, req)
-})},
-{MethodName: "Get", Handler: wrapUnary[dashcenterv1.NameRef, dashcenterv1.PolicyObject](func(h any, ctx context.Context, req *dashcenterv1.NameRef) (*dashcenterv1.PolicyObject, error) {
-return h.(*controlPlaneHandler).Get(ctx, req)
-})},
-{MethodName: "Reconcile", Handler: wrapUnary[dashcenterv1.ReconcileRequest, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.ReconcileRequest) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).Reconcile(ctx, req)
-})},
-{MethodName: "PutInventory", Handler: wrapUnary[dashcenterv1.PutInventoryRequest, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.PutInventoryRequest) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).PutInventory(ctx, req)
-})},
-{MethodName: "RegisterDpu", Handler: wrapUnary[dashcenterv1.DpuRegistration, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.DpuRegistration) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).RegisterDpu(ctx, req)
-})},
-{MethodName: "DeregisterDpu", Handler: wrapUnary[dashcenterv1.NameRef, dashcenterv1.Ack](func(h any, ctx context.Context, req *dashcenterv1.NameRef) (*dashcenterv1.Ack, error) {
-return h.(*controlPlaneHandler).DeregisterDpu(ctx, req)
-})},
-{MethodName: "SimulateApply", Handler: wrapUnary[dashcenterv1.PolicyApplyRequest, dashcenterv1.SimulateApplyResult](func(h any, ctx context.Context, req *dashcenterv1.PolicyApplyRequest) (*dashcenterv1.SimulateApplyResult, error) {
-return h.(*controlPlaneHandler).SimulateApply(ctx, req)
-})},
-},
-Streams:  []grpc.StreamDesc{},
-Metadata: "dashcenter/v1/control_plane.proto",
+	if item == nil {
+		return nil, status.Errorf(codes.Internal, "nil stored item")
+	}
+	po := &dashcenterv1.PolicyObject{
+		Generation: uint64(item.Generation),
+	}
+	switch item.Kind {
+	case "vnet":
+		spec := &dashcenterv1.VnetSpec{}
+		if err := json.Unmarshal(item.Spec, spec); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal vnet: %v", err)
+		}
+		po.Object = &dashcenterv1.PolicyObject_Vnet{Vnet: spec}
+	case "eni":
+		spec := &dashcenterv1.EniSpec{}
+		if err := json.Unmarshal(item.Spec, spec); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal eni: %v", err)
+		}
+		po.Object = &dashcenterv1.PolicyObject_Eni{Eni: spec}
+	case "vnet_mapping":
+		spec := &dashcenterv1.VnetMappingSpec{}
+		if err := json.Unmarshal(item.Spec, spec); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal vnet_mapping: %v", err)
+		}
+		po.Object = &dashcenterv1.PolicyObject_VnetMapping{VnetMapping: spec}
+	case "acl_policy":
+		spec := &dashcenterv1.AclPolicySpec{}
+		if err := json.Unmarshal(item.Spec, spec); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal acl_policy: %v", err)
+		}
+		po.Object = &dashcenterv1.PolicyObject_AclPolicy{AclPolicy: spec}
+	case "route_policy":
+		spec := &dashcenterv1.RoutePolicySpec{}
+		if err := json.Unmarshal(item.Spec, spec); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal route_policy: %v", err)
+		}
+		po.Object = &dashcenterv1.PolicyObject_RoutePolicy{RoutePolicy: spec}
+	case "ha_set":
+		spec := &dashcenterv1.HaSetSpec{}
+		if err := json.Unmarshal(item.Spec, spec); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal ha_set: %v", err)
+		}
+		po.Object = &dashcenterv1.PolicyObject_HaSet{HaSet: spec}
+	case "service_tunnel":
+		spec := &dashcenterv1.ServiceTunnelSpec{}
+		if err := json.Unmarshal(item.Spec, spec); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal service_tunnel: %v", err)
+		}
+		po.Object = &dashcenterv1.PolicyObject_ServiceTunnel{ServiceTunnel: spec}
+	default:
+		return nil, status.Errorf(codes.Internal, "unknown kind: %s", item.Kind)
+	}
+	return po, nil
 }
 
-// wrapUnary produces a grpc.methodHandler that decodes the request, calls the
-// typed handler function, and returns the response. This is the pattern used
-// by protoc-gen-go-grpc generated code.
-func wrapUnary[Req any, Resp any](fn func(srv any, ctx context.Context, req *Req) (*Resp, error)) func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-return func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-in := new(Req)
-if err := dec(in); err != nil {
-return nil, err
-}
-if interceptor == nil {
-return fn(srv, ctx, in)
-}
-info := &grpc.UnaryServerInfo{
-Server:     srv,
-FullMethod: "", // filled by grpc framework
-}
-handler := func(ctx context.Context, req any) (any, error) {
-return fn(srv, ctx, req.(*Req))
-}
-return interceptor(ctx, in, info, handler)
-}
-}
+// PutInventory / RegisterDpu / DeregisterDpu / SimulateApply are NOT overridden
+// here — the embedded UnimplementedControlPlaneServer returns codes.Unimplemented
+// for them automatically, which is the correct Phase 1 behavior. They are wired
+// to Phase 2 milestones (PB capacity gating, PC operations).

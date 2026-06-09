@@ -154,18 +154,7 @@ t.Errorf("err=%v want %v", err, boom)
 }
 }
 
-// 7. marshalJSON works for primitive and struct values.
-func TestMarshalJSON_RoundTrip(t *testing.T) {
-b, err := marshalJSON(map[string]int{"a": 1})
-if err != nil {
-t.Fatalf("err=%v", err)
-}
-if string(b) != `{"a":1}` {
-t.Errorf("got=%s", b)
-}
-}
-
-// 8. Server.Stop returns cleanly without ever calling Serve.
+// 7. Server.Stop returns cleanly without ever calling Serve.
 func TestServer_StopWithoutServe_NoPanic(t *testing.T) {
 s := newTestServer()
 done := make(chan struct{})

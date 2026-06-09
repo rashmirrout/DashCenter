@@ -4,7 +4,6 @@ package grpcserver
 
 import (
 "context"
-"encoding/json"
 "errors"
 "fmt"
 "log/slog"
@@ -99,7 +98,3 @@ return status.Errorf(codes.InvalidArgument, "%v", err)
 return status.Errorf(codes.Internal, "internal error")
 }
 
-// marshalJSON is a helper to marshal any value to JSON bytes.
-func marshalJSON(v any) ([]byte, error) {
-return json.Marshal(v)
-}

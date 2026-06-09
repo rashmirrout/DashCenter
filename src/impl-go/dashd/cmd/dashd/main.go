@@ -8,10 +8,12 @@ import (
 "flag"
 "fmt"
 "log/slog"
+"net"
 "os"
 "os/signal"
 "sync"
 "syscall"
+"time"
 
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
@@ -26,6 +28,27 @@ restserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/
 filstore "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store/file"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/subscribe"
 )
+
+// probeInterval is the cadence at which the inventory prober checks DPU
+// reachability. 5s is the production-grade default: fast enough to detect
+// transient DPU loss within 15s (3 missed probes → UNREACHABLE) without
+// flooding the southbound.
+const probeInterval = 5 * time.Second
+
+// probeViaTCP is the production ProbeFunc: a short-timeout TCP dial to the
+// DPU's gRPC endpoint. We deliberately do NOT open a gRPC stream here
+// (the dispatch + subscribe paths own that responsibility); a plain TCP
+// connect is sufficient evidence the DPU is reachable and is cheap enough
+// to run every probeInterval against the whole fleet.
+func probeViaTCP(ctx context.Context, endpoint string) error {
+d := net.Dialer{Timeout: 3 * time.Second}
+conn, err := d.DialContext(ctx, "tcp", endpoint)
+if err != nil {
+return err
+}
+_ = conn.Close()
+return nil
+}
 
 const version = "0.2.0-phase1b"
 
@@ -78,6 +101,12 @@ mgr.SetClientFactory(dpuclient.DefaultFactory)
 
 // 7. Create reconciler.
 rec := reconciler.New(st, mgr, cfg.Reconcile.TickInterval)
+
+// 7a. Create prober — watches DPU reachability and advances the inventory
+// state machine (REGISTERING → UP, UP → UNREACHABLE after 3 misses).
+// Without this wired the inventory state never advances past REGISTERING
+// and the GetDpuStatus / GetHealth observability surfaces are dishonest.
+prober := inventory.NewProber(inv, probeInterval, probeViaTCP)
 
 // 8. Create shared service layer (Phase 1B).
 cpService := service.NewControlPlane(st, inv, rec)
@@ -183,6 +212,14 @@ if err := rec.Run(rootCtx); err != nil {
 slog.Error("reconciler failed", "error", err)
 cancel()
 }
+}()
+
+// Prober goroutine. Run blocks until rootCtx is cancelled; it manages its
+// own per-DPU probe goroutines internally.
+wg.Add(1)
+go func() {
+defer wg.Done()
+prober.Run(rootCtx)
 }()
 
 slog.Info("dashd ready",
