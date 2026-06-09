@@ -1,37 +1,37 @@
 # `dashd` — DashCenter daemon
 
-The long-running process that aggregates DPU state into Redis Stack, serves
-the operator API, and (in Model 2) participates in the Raft/SWIM cluster.
+The long-running process that orchestrates DASH DPU fleets. dashd accepts
+northbound `dashcenter.v1` API calls (gRPC + REST), persists desired state,
+discovers DPUs from inventory, and reconciles declared state onto each DPU
+via the southbound `dashapi.v1` API.
+
+## Architecture
+
+See the implementation plans for full details:
+
+- **Phase 1 (basic):** [`specs/Impl-Plan/impl-plan-basic.md`](../../specs/Impl-Plan/impl-plan-basic.md)
+- **Phase 2 (advanced):** [`specs/Impl-Plan/impl-plan-advanced.md`](../../specs/Impl-Plan/impl-plan-advanced.md)
+- **HLD:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md)
+- **LLD:** [`specs/LLD/dashd-lld.md`](../../specs/LLD/dashd-lld.md)
 
 ## Build
 
-```powershell
-# From src/impl-go/
-make all                # builds bin/dashd
-./bin/dashd --help
+```bash
+cd src/impl-go/dashd
+go build ./cmd/dashd
+```
+
+## Run
+
+```bash
+./dashd --config configs/dashd.example.yaml
 ```
 
 ## Internal packages
 
-```
-internal/
-├── api/{rest,grpc,ws}/      External API surface (operator-facing)
-├── inventory/               appliances.yaml loader + Register service
-├── ingest/                  Per-appliance worker pool (gRPC/gNMI clients)
-├── normalize/               Protobuf -> Redis schema translation
-├── store/                   go-redis wrapper + key prefixes + indexes
-├── read/                    Read Engine (cache + --live bypass)
-├── write/                   Write Engine (validate -> stage -> commit)
-├── compute/                 ACL match / route resolve / trace
-├── reconcile/               Periodic drift correction
-├── events/                  Redis Streams event bus
-├── invalidate/              compute:* invalidator
-├── cluster/                 Raft + memberlist (build tag: cluster)
-├── telemetry/               OTel + Prometheus
-└── config/                  Viper config + signal handling
-```
+See [`internal/README.md`](internal/README.md) for the full package table.
 
 ## Config
 
-See [configs/dashd.example.yaml](configs/dashd.example.yaml) and
-[configs/appliances.example.yaml](configs/appliances.example.yaml).
+- [`configs/dashd.example.yaml`](configs/dashd.example.yaml) — daemon configuration
+- [`configs/inventory.example.yaml`](configs/inventory.example.yaml) — DPU inventory

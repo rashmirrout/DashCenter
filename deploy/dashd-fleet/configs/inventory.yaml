@@ -1,0 +1,34 @@
+# Static DPU inventory for the 5-DPU Docker fleet.
+#
+# Endpoints use Docker Compose service hostnames on the `dc-fleet`
+# bridge network, so dashd reaches each sim by container DNS — no
+# host port binding is needed for southbound gRPC traffic.
+#
+# Schema: see internal/inventory/inventory.go (inventoryYAML).
+
+dpus:
+  - id: dpu-sim-01
+    endpoint: dash-sim-1:50051
+    labels:
+      rack: sim
+      slot: "1"
+  - id: dpu-sim-02
+    endpoint: dash-sim-2:50051
+    labels:
+      rack: sim
+      slot: "2"
+  - id: dpu-sim-03
+    endpoint: dash-sim-3:50051
+    labels:
+      rack: sim
+      slot: "3"
+  - id: dpu-sim-04
+    endpoint: dash-sim-4:50051
+    labels:
+      rack: sim
+      slot: "4"
+  - id: dpu-sim-05
+    endpoint: dash-sim-5:50051
+    labels:
+      rack: sim
+      slot: "5"

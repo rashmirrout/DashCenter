@@ -1,0 +1,33 @@
+# dashd configuration for the 5-DPU Docker fleet.
+#
+# This file is mounted into the dashd container at /etc/dashd/dashd.yaml.
+# Paths inside this file are container-side, NOT host paths.
+
+listen:
+  rest_addr:  ":8443"
+  grpc_addr:  ":9443"
+  admin_addr: ":7443"
+
+storage:
+  backend: file
+  file:
+    # Backed by the `dashd-state-fleet` named Docker volume.
+    state_dir: /var/lib/dashd
+
+inventory:
+  # `file` mode preloads the inventory at startup, then the prober
+  # (every 5s) advances each DPU through REGISTERING -> UP based on
+  # TCP reachability of the gRPC endpoint. No external registration
+  # step is needed for this fleet.
+  source: file
+  file:   /etc/dashd/inventory.yaml
+
+reconcile:
+  tick_interval:        30s
+  per_dpu_inbox_size:   1
+  apply_rate_limit:     100      # ops/s per DPU
+  error_budget_per_min: 10
+
+log:
+  level:  info
+  format: json

@@ -1,0 +1,14 @@
+git push
+# Single-DPU inventory for the dashd-e2e demo.
+#
+# The endpoint uses the docker compose service hostname `dash-sim-1`,
+# resolved on the `dc-e2e` bridge network.
+#
+# Schema: see internal/inventory/inventory.go (inventoryYAML).
+
+dpus:
+  - id: dpu-sim-01
+    endpoint: dash-sim-1:50051
+    labels:
+      rack: e2e
+      role: edge

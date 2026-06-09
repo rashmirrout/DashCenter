@@ -1,0 +1,84 @@
+# DashCenter — dashd + 1 dash-sim end-to-end demo.
+#
+# This is the simplest possible self-contained dashd setup. Use this to
+# learn the full control-plane → DPU data path before scaling to the
+# 5-DPU fleet in ../dashd-fleet/.
+#
+# Bring up:
+#   docker compose -f deploy/dashd-e2e/docker-compose.yml up -d --build
+#
+# Run the end-to-end verification:
+#   ./deploy/dashd-e2e/e2e.sh                       # Linux/macOS/WSL/Git-Bash
+#   pwsh -File deploy/dashd-e2e/e2e.ps1             # Windows
+#
+# Optional: drive the SIM DIRECTLY with the CLI client (bypassing dashd).
+# This is occasionally useful when you want to confirm the sim is healthy
+# in isolation:
+#   docker compose -f deploy/dashd-e2e/docker-compose.yml run --rm cli ping
+#
+# Tear down:
+#   docker compose -f deploy/dashd-e2e/docker-compose.yml down
+#   docker compose -f deploy/dashd-e2e/docker-compose.yml down -v   # also wipe state
+
+name: dashd-e2e
+
+networks:
+  dc-e2e:
+    driver: bridge
+
+volumes:
+  dashd-state-e2e:
+    name: dashd-state-e2e
+
+services:
+  # ── DPU simulator (single instance) ──────────────────────────────
+  dash-sim-1:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    image: dashcenter/dash-sim:dev
+    container_name: dc-e2e-sim-1
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-01"]
+    networks: [dc-e2e]
+    ports:
+      - "50051:50051"   # gRPC (exposed so the cli profile can talk to it directly)
+      - "8081:8080"     # admin HTTP (debug)
+    restart: unless-stopped
+
+  # ── Control plane ────────────────────────────────────────────────
+  # Starts after the sim and reads inventory.yaml.
+  dashd:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dashd/Dockerfile
+    image: dashcenter/dashd:dev
+    container_name: dc-e2e-dashd
+    depends_on:
+      dash-sim-1: { condition: service_started }
+    volumes:
+      - ./configs/dashd.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+      - dashd-state-e2e:/var/lib/dashd
+    networks: [dc-e2e]
+    ports:
+      - "8443:8443"   # REST API
+      - "9443:9443"   # gRPC API
+      - "7443:7443"   # Admin HTTP
+    restart: unless-stopped
+
+  # ── One-shot CLI (optional, on the `cli` profile) ────────────────
+  # Useful for debugging the sim in isolation. Default target points at
+  # the in-network dash-sim-1; override on the command line to talk to
+  # any other host.
+  #   docker compose -f deploy/dashd-e2e/docker-compose.yml \
+  #     run --rm cli ping
+  #   docker compose -f deploy/dashd-e2e/docker-compose.yml \
+  #     run --rm cli apply --kind vnet --key direct --value '{"vni":2}'
+  cli:
+    build:
+      context: ../..
+      dockerfile: src/impl-go/dash-sim-client/Dockerfile
+    image: dashcenter/dash-sim-client:dev
+    profiles: [cli]
+    networks: [dc-e2e]
+    entrypoint: ["/usr/local/bin/dash-sim-client", "--target", "dash-sim-1:50051"]
