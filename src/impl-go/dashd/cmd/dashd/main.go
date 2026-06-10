@@ -22,6 +22,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/leader"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/orchestrator"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/migration"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
@@ -164,8 +165,28 @@ opsMgr := operations.New(inv)
 // scope dispatch against the sim.
 haOrch := orchestrator.New(&orchestrator.NoOpPusher{})
 
+// 7f. Migration coordinator (PC-G4..G6). Persistent 10-phase
+// sessions in the desired store (kind=migration_session) so a
+// dashd restart resumes in-flight migrations from etcd (PC-G6).
+// Effect interface is the southbound seam — LivePutEffect rewrites
+// each ENI's placement_hint via the service-layer PutEni at CUTOVER
+// so capacity + schema + cordon admission fire on the destination.
+// The Rehomer is filled in below (we need the service before we can
+// build the LivePutEffect, but the coordinator needs the effect at
+// construction; we use a late-binding shim).
+migEffect := &migration.LivePutEffect{}
+migCoord, err := migration.New(rootStoreCtx(), st, migEffect)
+if err != nil {
+	slog.Error("migration: coordinator init failed", "error", err)
+	os.Exit(1)
+}
+
 // 8. Create shared service layer (Phase 1B).
 cpService := service.NewControlPlane(st, inv, rec, capTracker, capGate, opsMgr, haOrch)
+// Late-bind the migration cutover Rehomer now that the service
+// exists — LivePutEffect.Cutover delegates to it.
+migEffect.Rehomer = &service.ServiceEniRehomer{Svc: cpService, Store: st}
+migService := service.NewMigration(migCoord)
 obsService := service.NewObservability(inv, st, obs)
 
 // --- Dry-run mode ---
@@ -197,8 +218,8 @@ os.Exit(0)
 }
 
 // 9. Create servers.
-restSrv := restserver.New(cpService, obsService, service.NewHa(haOrch))
-grpcSrv := grpcserver.New(cpService, obsService, service.NewHa(haOrch))
+restSrv := restserver.New(cpService, obsService, service.NewHa(haOrch), migService)
+grpcSrv := grpcserver.New(cpService, obsService, service.NewHa(haOrch), migService)
 adminSrv := adminserver.New(inv, st, obs, rec)
 
 // 10. Create subscribe PumpSet — wired with the production DpuClient

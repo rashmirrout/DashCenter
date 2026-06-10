@@ -71,7 +71,7 @@ func (stubControlPlane) DrainDpu(_ context.Context, dpu string, _ operations.Dra
 // newTestServer builds a New(...) instance with stub services so calls
 // to gRPC RegisterService never see a nil interface inside the desc.
 func newTestServer() *Server {
-return New(stubControlPlane{}, service.NewObservability(nil, nil, model.NewObsCache()), nil)
+return New(stubControlPlane{}, service.NewObservability(nil, nil, model.NewObsCache()), nil, nil)
 }
 
 // 1. serviceErrToStatus maps each known error to the right gRPC code.

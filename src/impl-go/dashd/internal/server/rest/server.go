@@ -23,11 +23,11 @@ type Server struct {
 srv *http.Server
 }
 
-// New creates a REST server wired to the shared service layer. ha may
-// be nil — in that case the /v1/ha/* routes return 503; existing
-// callers wire it explicitly post-PC-G1.
-func New(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService) *Server {
-h := &handler{cp: cp, obs: obs, ha: ha}
+// New creates a REST server wired to the shared service layer. ha and
+// mig may be nil — in that case the /v1/ha/* and /v1/migrations/*
+// routes return 503.
+func New(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService) *Server {
+h := &handler{cp: cp, obs: obs, ha: ha, mig: mig}
 return &Server{srv: &http.Server{
 Handler:           h.router(),
 ReadHeaderTimeout: 5 * time.Second,
@@ -56,6 +56,7 @@ type handler struct {
 cp  service.ControlPlaneService
 obs service.ObservabilityService
 ha  service.HaService // may be nil; /v1/ha/* returns 503 when so
+mig service.MigrationService // may be nil; /v1/migrations/* returns 503 when so
 }
 
 // urlKindToStoreKind maps plural URL path segments to singular store kind names.
@@ -142,6 +143,18 @@ mux.HandleFunc("POST /v1/ha/{ns}/{name}/switchover", h.haSwitchover)
 mux.HandleFunc("POST /v1/ha/{ns}/{name}/failover", h.haFailover)
 mux.HandleFunc("GET /v1/ha/events", h.haWatchEvents)
 mux.HandleFunc("GET /v1/ha/flow-sync-stats", h.haFlowSyncStats)
+
+// Migration sessions (PC-G4..G6).
+mux.HandleFunc("POST /v1/migrations/plans", h.migCreatePlan)
+mux.HandleFunc("POST /v1/migrations/plans/validate", h.migValidatePlan)
+mux.HandleFunc("POST /v1/migrations/sessions", h.migStartSession)
+mux.HandleFunc("GET /v1/migrations/sessions", h.migListSessions)
+mux.HandleFunc("GET /v1/migrations/sessions/{id}", h.migGetSession)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/advance", h.migAdvance)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/rollback", h.migRollback)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/abort", h.migAbort)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/commit", h.migCommit)
+mux.HandleFunc("GET /v1/migrations/sessions/{id}/stream", h.migStreamSession)
 
 return mux
 }
