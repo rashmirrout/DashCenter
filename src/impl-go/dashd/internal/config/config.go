@@ -13,11 +13,31 @@ import (
 
 // Config is the top-level dashd configuration.
 type Config struct {
+	// NodeID identifies THIS dashd process within its cluster. Defaults to
+	// the OS hostname when empty. Used as the etcd-lease key in controller
+	// mode (PA-3) and the raft node id in controllerless mode (PF).
+	NodeID string `yaml:"node_id"`
+
+	// Mode selects the deployment-topology personality. Either
+	// "controller" (default) or "controllerless" (PF; parsed but rejected
+	// at startup until PF-3). See internal/config/mode.go for the full
+	// rationale.
+	Mode string `yaml:"mode"`
+
 	Listen    ListenConfig    `yaml:"listen"`
 	Storage   StorageConfig   `yaml:"storage"`
 	Inventory InventoryConfig `yaml:"inventory"`
 	Reconcile ReconcileConfig `yaml:"reconcile"`
 	Log       LogConfig       `yaml:"log"`
+
+	// Auth is the auth posture (none|token|mtls). Mode"none" is the
+	// default and matches today's plaintext behaviour exactly. PD will
+	// activate "token" and "mtls" semantics. See internal/config/auth.go.
+	Auth AuthConfig `yaml:"auth"`
+
+	// HA is the mode-specific HA block. Only the sub-block matching Mode
+	// may be populated. See internal/config/ha.go.
+	HA HAConfig `yaml:"ha"`
 }
 
 // ListenConfig holds network listener addresses.
@@ -28,14 +48,33 @@ type ListenConfig struct {
 }
 
 // StorageConfig selects and configures the desired-state backend.
+//
+// `file` is the today-default, single-node-friendly backend. `etcd`
+// (PA-1b) is the controller-mode production backend backed by an etcd
+// cluster. `raft` (PF) is the controllerless backend that reuses
+// HA.Controllerless.Raft for transport.
 type StorageConfig struct {
-	Backend string          `yaml:"backend"` // "file" only in Phase 1
-	File    FileStoreConfig `yaml:"file"`
+	Backend string             `yaml:"backend"` // file | etcd | raft
+	File    FileStoreConfig    `yaml:"file"`
+	Etcd    EtcdStorageConfig  `yaml:"etcd"`
 }
 
 // FileStoreConfig holds settings for the file-based store backend.
 type FileStoreConfig struct {
 	StateDir string `yaml:"state_dir"`
+}
+
+// EtcdStorageConfig holds settings for the etcd-backed store. Used when
+// Storage.Backend == "etcd" under Mode == "controller". Validation rejects
+// any combination outside this scope.
+//
+// All keys land under KeyPrefix; default "/dashd/state/". The store
+// derives per-spec keys as "<KeyPrefix><namespace>/<kind>/<name>".
+type EtcdStorageConfig struct {
+	Endpoints   []string      `yaml:"endpoints"`
+	KeyPrefix   string        `yaml:"key_prefix"`   // default "/dashd/state/"
+	DialTimeout time.Duration `yaml:"dial_timeout"` // default 5s
+	TLS         TLSConfig     `yaml:"tls"`
 }
 
 // InventoryConfig selects and configures the DPU inventory source.
@@ -61,6 +100,8 @@ type LogConfig struct {
 // Default returns a Config with all production defaults filled in.
 func Default() *Config {
 	return &Config{
+		NodeID: defaultNodeID(),
+		Mode:   defaultMode,
 		Listen: ListenConfig{
 			GRPCAddr:  ":9443",
 			RESTAddr:  ":8443",
@@ -83,6 +124,8 @@ Source: "api",
 			Level:  "info",
 			Format: "json",
 		},
+		Auth: defaultAuthConfig(),
+		HA:   defaultHAConfig(),
 	}
 }
 
@@ -111,16 +154,45 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() error {
 	var errs []error
 
-	// Storage
+	// Mode + node identity (locked: K1..K5).
+	if err := validateMode(c.Mode, c.NodeID); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Storage backend selection.
+	// PA-1 keeps the file backend as today's default. The etcd backend
+	// (planned PA-1b/PA-2) parses but is rejected with a clean
+	// "not yet implemented" message until its real implementation lands.
 	switch c.Storage.Backend {
 	case "file":
 		if c.Storage.File.StateDir == "" {
 			errs = append(errs, errors.New("storage.file.state_dir is required when backend=file"))
 		}
 	case "etcd":
-		errs = append(errs, errors.New("storage.backend=etcd is not supported in Phase 1"))
+		if c.Mode == ModeControllerless {
+			errs = append(errs, errors.New(`storage.backend="etcd" is for controller mode; use "raft" when mode="controllerless"`))
+		}
+		if len(c.Storage.Etcd.Endpoints) == 0 {
+			errs = append(errs, errors.New(`storage.backend="etcd" requires storage.etcd.endpoints`))
+		}
+		for i, ep := range c.Storage.Etcd.Endpoints {
+			if ep == "" {
+				errs = append(errs, fmt.Errorf("storage.etcd.endpoints[%d] is empty", i))
+			}
+		}
+		if c.Storage.Etcd.DialTimeout < 0 {
+			errs = append(errs, errors.New("storage.etcd.dial_timeout must be >= 0"))
+		}
+		if (c.Storage.Etcd.TLS.CertFile == "") != (c.Storage.Etcd.TLS.KeyFile == "") {
+			errs = append(errs, errors.New("storage.etcd.tls.cert_file and storage.etcd.tls.key_file must be set together"))
+		}
+	case "raft":
+		errs = append(errs, errors.New(`storage.backend="raft" is not yet implemented (planned for Phase 2 PF); use "file" until then`))
+		if c.Mode == ModeController {
+			errs = append(errs, errors.New(`storage.backend="raft" is for controllerless mode; use "file" or "etcd" when mode="controller"`))
+		}
 	default:
-		errs = append(errs, fmt.Errorf("storage.backend: unsupported value %q (allowed: file)", c.Storage.Backend))
+		errs = append(errs, fmt.Errorf("storage.backend: unsupported value %q (allowed: file, etcd, raft)", c.Storage.Backend))
 	}
 
 	// Inventory
@@ -163,12 +235,23 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("log.format: unsupported value %q (allowed: json, text)", c.Log.Format))
 	}
 
+	// Auth + HA (locked: D11..D15, K6..K8).
+	if err := validateAuth(c.Auth); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateHA(c.Mode, c.HA); err != nil {
+		errs = append(errs, err)
+	}
+
 	return errors.Join(errs...)
 }
 
 // applyDefaults fills in zero-value fields from the production defaults.
 func applyDefaults(c *Config) {
 	d := Default()
+	applyModeDefaults(c)
+	applyAuthDefaults(&c.Auth)
+	applyHADefaults(c)
 	if c.Listen.GRPCAddr == "" {
 		c.Listen.GRPCAddr = d.Listen.GRPCAddr
 	}
@@ -183,6 +266,14 @@ func applyDefaults(c *Config) {
 	}
 	if c.Storage.Backend == "file" && c.Storage.File.StateDir == "" {
 		c.Storage.File.StateDir = d.Storage.File.StateDir
+	}
+	if c.Storage.Backend == "etcd" {
+		if c.Storage.Etcd.KeyPrefix == "" {
+			c.Storage.Etcd.KeyPrefix = "/dashd/state/"
+		}
+		if c.Storage.Etcd.DialTimeout == 0 {
+			c.Storage.Etcd.DialTimeout = 5 * time.Second
+		}
 	}
 	if c.Inventory.Source == "" {
 		c.Inventory.Source = d.Inventory.Source

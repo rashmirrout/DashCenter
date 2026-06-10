@@ -73,7 +73,22 @@ cfg = config.Default()
 
 // 2. Initialize logging.
 initLogging(cfg.Log.Level, cfg.Log.Format)
-slog.Info("dashd starting", "version", version)
+slog.Info("dashd starting",
+	"version", version,
+	"node_id", cfg.NodeID,
+	"mode", cfg.Mode,
+	"auth_mode", cfg.Auth.Mode,
+	"storage_backend", cfg.Storage.Backend,
+)
+
+// 2a. One-time startup banner when auth is disabled (D15 locked).
+// Logged at WARN so it shows up under any reasonable log filter, but
+// only once per process so it doesn't clutter steady-state logs.
+if cfg.Auth.Mode == "" || cfg.Auth.Mode == "none" {
+	slog.Warn("auth disabled — DO NOT use in production",
+		"hint", "set auth.mode to token or mtls before exposing dashd outside a trusted network",
+	)
+}
 
 // 3. Open store.
 st, err := filstore.Open(cfg.Storage.File.StateDir)

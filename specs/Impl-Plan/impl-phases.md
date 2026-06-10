@@ -23,7 +23,7 @@
 |-------|-----------|--------|--------------|
 | **Phase 1A** — Core Implementation | Single-node reconciliation loop with file store | ✅ Complete | 3 / 3 |
 | **Phase 1B** — Production Hardening | Shared service layer, dual REST+gRPC, coverage, integration tests, dry-run | ✅ Complete | 15 / 16 (only G10 goleak deferred) |
-| **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ⏳ In progress (PA-0 scaffolding) | 0 / 6 |
+| **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ⏳ In progress (PA-0 ✅, PA-1a ✅, PA-1b next) | 0 / 6 |
 | **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ❌ Not started (unblocks once PA tagged) | 0 / 4 |
 | **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ❌ Not started (unblocks once PA tagged, runs ∥ with PB) | 0 / 8 |
 | **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
@@ -66,6 +66,218 @@ PA  ─────────────────────────�
 | D10 | Release tags | `dashd-2.0.0-alpha` after PA, `…-beta` after PC, `2.0.0-rc1` after PE, `2.0.0` after PD |
 
 **Implication of deferring PD**: through alpha/beta/rc1, all listeners stay plaintext (the existing `DASHCTL_INSECURE` env var is the operator escape hatch), `GetAuditLog`/`GetCounters` continue returning `UNIMPLEMENTED`, and no audit trail is written for migrations/failovers performed during PE testing. dashd's structured JSON log already records every mutating action with the same fields, so forensic reconstruction via `jq` is possible until PD lands. Accepted as part of the deferral decision.
+
+---
+
+## Configuration & forward-compatibility contract (across PA / PB / PC / PE / PF)
+
+Three runtime axes evolve across Phase 2: **deployment mode** (controller vs controllerless), **auth posture** (none / token / mtls), and **storage backend** (file / etcd / raft). All three are exposed as a single `dashd.yaml` knob set frozen below. Auth ships in PD and controllerless ships in PF, but **every PR in PA / PB / PC / PE must respect the contract** so the late milestones land without rework. Enforced by reviewer checklist (and a CI lint added in PA-1) — no scaffolding milestone needed.
+
+### Frozen knob — full `dashd.yaml` shape (decided 2026-06-10)
+
+```yaml
+# Identity of THIS dashd process within its cluster.
+# Used as etcd-lease key (controller mode) and raft node id (controllerless mode).
+# MUST be unique per process in a cluster.
+node_id: "dashd-1"                # default: hostname
+
+# Deployment topology.
+mode: controller                  # controller | controllerless     (default: controller)
+
+# Auth posture (locked by D11..D15).
+auth:
+  mode: none                      # none | token | mtls            (default: none)
+  tls:
+    cert_file: ""
+    key_file:  ""
+    ca_file:   ""                 # required when mode = mtls
+    require_client_cert: false    # forced true when mode = mtls
+  tokens: []                      # used only when mode = token
+    # - token: "<bearer>"
+    #   role:  admin              # admin | operator | viewer
+    #   name:  "alice (ops)"
+  roles: {}                       # optional override of built-in defaults
+
+# Mode-specific HA blocks. dashd rejects startup if the populated block
+# does not match `mode:`.
+ha:
+  controller:                     # used only when mode = controller
+    elector:
+      backend: etcd               # etcd | none    (default: none for single-node dev)
+      endpoints: ["http://etcd-0:2379"]
+      lease_ttl: 15s              # D3 locked
+      leader_key: /dashd/leader
+      dial_timeout: 5s
+      tls: { cert_file: "", key_file: "", ca_file: "" }
+
+  controllerless:                 # used only when mode = controllerless (PF)
+    bind_addr: "0.0.0.0"
+    advertise_addr: ""            # default: bind_addr; required if behind NAT
+    gossip:
+      port: 7946
+      seeds: ["dpu-1:7946"]
+      encryption_key_file: ""     # 32-byte key file; required in prod
+      probe_interval: 1s
+    raft:
+      port: 7947
+      data_dir: /var/lib/dashd/raft
+      snapshot_interval: 120s
+      snapshot_threshold: 8192
+      heartbeat_timeout: 1s
+      election_timeout: 1s
+
+# Storage backend.
+storage:
+  backend: file                   # file | etcd | raft             (default: file)
+  file:
+    state_dir: ./var/dashd
+  etcd:                           # used when backend = etcd (controller mode only)
+    endpoints: ["http://etcd-0:2379"]
+    key_prefix: /dashd/state/
+    dial_timeout: 5s
+    tls: { cert_file: "", key_file: "", ca_file: "" }
+  raft:                           # used when backend = raft (controllerless mode only)
+    # no fields — raft transport is in ha.controllerless.raft
+    # key_prefix is implicit "/dashd/state/" for tooling wire-compat with etcd
+```
+
+### Validation rules (enforced at startup, before any listener is opened)
+
+| Rule | Violation → exit 1 with message |
+|---|---|
+| `mode in {controller, controllerless}` | `invalid mode %q; want controller or controllerless` |
+| `mode = controller` AND `ha.controllerless != zero` | `ha.controllerless set but mode=controller; clear one` |
+| `mode = controllerless` AND `ha.controller != zero` | `ha.controller set but mode=controllerless; clear one` |
+| `mode = controllerless` (until PF-3 lands) | `mode=controllerless requires PF (not yet implemented); use mode=controller` |
+| `storage.backend = etcd` AND `mode = controllerless` | `storage.backend=etcd is for controller mode; use raft` |
+| `storage.backend = raft` AND `mode = controller` | `storage.backend=raft is for controllerless mode; use file or etcd` |
+| `auth.mode = mtls` AND `auth.tls.ca_file = ""` | `auth.mode=mtls requires auth.tls.ca_file` |
+| `auth.mode = token` AND `len(auth.tokens) = 0` | `auth.mode=token requires at least one entry in auth.tokens` |
+| Unknown top-level / nested key (typo guard) | `unknown config key %q; did you mean %q?` |
+
+### Override precedence (kubectl-style)
+
+```
+1. CLI flag         — --mode=controller, --auth-mode=token, ...
+2. Env var          — DASHD_MODE, DASHD_AUTH_MODE, DASHD_NODE_ID, ...
+3. YAML file        — --config configs/dashd.yaml
+4. Built-in default — mode=controller, auth.mode=none, storage.backend=file
+```
+
+Implemented once in `internal/config/`; every Phase-2 PR that adds a new field inherits this precedence for free.
+
+### What lights up when
+
+| Field | Lands in | Behaviour today (post-PA-1) |
+|---|---|---|
+| `node_id` | PA-1 | parsed; defaults to hostname; no behaviour change |
+| `mode: controller` | PA-1 | parsed; default; matches today's single-dashd semantics |
+| `mode: controllerless` | PA-1 (parse), **PF-3** (activate) | parsed; rejected at startup with clean error until PF-3 |
+| `auth.mode: none` | PA-1 | parsed; default; identical to today |
+| `auth.mode: token` / `mtls` | PA-1 (parse), **PD** (activate) | parsed; rejected at startup with `not yet implemented` error until PD |
+| `storage.backend: file` | PA-1 | parsed; default; identical to today |
+| `storage.backend: etcd` | **PA-1/PA-2** | active |
+| `storage.backend: raft` | PA-1 (parse), **PF** (activate) | parsed; rejected until PF |
+| `ha.controller.elector.backend: none` | PA-1 | default for dev/single-node; matches NoneElector from PA-0 |
+| `ha.controller.elector.backend: etcd` | **PA-3** | active |
+| `ha.controllerless.*` | PA-1 (parse), **PF** (activate) | parsed; rejected until PF |
+
+> **Backwards compat**: every existing `dashd.example.yaml` keeps working unchanged. PA-1 ships `configs/dashd.controller-3node.yaml` and `configs/dashd.dev.yaml` as new optional references; nothing existing renames.
+
+### Frozen knob decisions (locked 2026-06-10)
+
+| # | Decision | Locked value |
+|---|---|---|
+| K1 | Top-level field name | `mode` (alternatives `topology`/`cluster.mode` rejected for brevity) |
+| K2 | Allowed values | `controller`, `controllerless` (no third `single-node` mode; controller + `elector.backend: none` IS single-node) |
+| K3 | Default | `controller` |
+| K4 | Env-var prefix | `DASHD_*` (e.g. `DASHD_MODE`, `DASHD_AUTH_MODE`, `DASHD_NODE_ID`) |
+| K5 | `mode` and `node_id` placement | top-level (not nested under `cluster:`) — they're the two values an operator looks for first |
+| K6 | Mode-specific HA blocks | nested under `ha.{controller,controllerless}` — only one populated per mode |
+| K7 | Storage backend split | `storage.backend: file\|etcd\|raft`; `raft` reuses `ha.controllerless.raft` transport (no duplicate config) |
+| K8 | Unknown-key handling | hard reject at startup with "did you mean?" suggestion (typo guard) |
+
+---
+
+### Auth contract — locked target for PD
+
+```yaml
+auth:
+  mode: none                       # none | token | mtls    (default: none)
+  tls:
+    cert_file: /etc/dashd/tls/server.crt
+    key_file:  /etc/dashd/tls/server.key
+    ca_file:   /etc/dashd/tls/ca.crt        # required when mode=mtls
+    require_client_cert: false              # forced true when mode=mtls
+  tokens:                                    # used only when mode=token
+    - token: "<bearer>"
+      role:  admin                           # admin | operator | viewer
+      name:  "alice (ops)"                   # human label for audit
+  roles:                                     # override defaults if desired
+    viewer:    [Get, List, GetDpuStatus, GetDrift, GetHealth]
+    operator:  ["*"]
+    admin:     ["*"]
+```
+
+| `mode` | Listeners | Bearer required | mTLS | Behaviour |
+|---|---|---|---|---|
+| `none` (**default forever**) | plaintext HTTP | no | no | interceptors no-op; identical to today |
+| `token` | TLS optional | yes | no | RBAC enforced; missing≡bad bearer → `UNAUTHENTICATED` |
+| `mtls` | TLS required | optional | yes | client cert CN → role mapping; unmapped CN → `PERMISSION_DENIED` |
+
+**Locked auth decisions** (taken now so PD has no design debate):
+
+| # | Decision | Locked value |
+|---|---|---|
+| D11 | Auth disable knob name + default | `auth.mode: none\|token\|mtls`, default `none` |
+| D12 | `auth.mode: none` semantics | every interceptor no-op; integration suite + tutorial unchanged |
+| D13 | `auth.mode: token` + missing-vs-bad bearer | both return `UNAUTHENTICATED` (no token-existence leakage) |
+| D14 | `auth.mode: mtls` + client CN unmapped | `PERMISSION_DENIED` (explicit-allow only) |
+| D15 | Startup banner when `auth.mode=none` | one-time `WARN: auth disabled — DO NOT use in production` |
+
+### Forward-compatibility rules — auth (AC-1..AC-10)
+
+| # | Rule | Why it prevents rework on PD-day |
+|---|---|---|
+| AC-1 | **Every new RPC handler takes `ctx context.Context` as the first parameter.** Never look up an actor from globals; future RBAC + audit interceptors inject `auth.Subject` via `context.WithValue`. | PD interceptor reads `auth.Subject` from `ctx`; handlers already accept it |
+| AC-2 | **Every new RPC is registered in the central role-permission map** (`internal/auth/roles.go`, a stub created in PA-1). Adding the RPC name + a permission-tier comment is enough until PD wires it. | Avoids PD-day audit of all Phase-2 handlers to discover unmapped RPCs |
+| AC-3 | **All listener-creation code paths go through `internal/auth/listener.go`** (a PA-1 stub that returns `net.Listen` today). Never call `net.Listen` directly. | PD-day TLS rollout is a one-file change |
+| AC-4 | **Every new gRPC server registration goes through the shared interceptor chain** in `internal/server/grpc/server.go`. Never construct a `grpc.NewServer(...)` with hard-coded interceptors elsewhere. | PD's auth + audit + ratelimit interceptors slot into one chain |
+| AC-5 | **Every new REST handler is wrapped by the shared middleware chain** in `internal/server/rest/server.go`. Never register a raw `http.HandlerFunc` outside the chain. | PD's auth middleware applies once, in one place |
+| AC-6 | **No new env var or config field encodes credentials in plaintext that PD's secrets-via-env override couldn't replace later.** Use placeholders; document the eventual secrets path. | PD-late won't need to rewrite earlier config plumbing |
+| AC-7 | **Integration tests written in PA/PB/PC/PE run with `auth.mode: none`** (the default). Don't depend on a special "unauthenticated" mode. | When PD adds `//go:build integration_auth`, existing tests don't change |
+| AC-8 | **Every mutating action logs via `slog` with a stable field set**: `actor`, `namespace`, `kind`, `name`, `op`, `result`. | PD-late audit writer copies the same `slog` records into JSONL — no handler changes |
+| AC-9 | **`internal/auth/` package skeleton exists** with empty `Subject`, `Authorizer`, `RoleMap` stubs. PRs add one-line entries to `roles.go` for their new RPCs. | PD lands behind an interface that's already imported everywhere |
+| AC-10 | **PR checklist published in `docs/CONTRIBUTING.md`** lists AC-1..AC-9 with a one-line summary per rule. | Self-enforcing as new contributors join |
+
+### Forward-compatibility rules — controllerless mode (MC-1..MC-5)
+
+Controllerless mode itself ships in **PF** (a new post-PD milestone running embedded on each DPU with gossip + raft + a request-proxy). Until then, every PA/PB/PC/PE/PD PR satisfies these rules so PF lands without a controller-vs-controllerless refactor.
+
+| # | Rule | Why it prevents rework on PF-day |
+|---|---|---|
+| MC-1 | **No PR calls `etcd.Client` directly** outside `internal/store/etcd/` or `internal/ha/leader/etcd.go`. Use `store.DesiredStore` and `leader.Elector`. | `RaftElector` and `RaftStore` (PF) plug into the same interfaces; no caller changes |
+| MC-2 | **No PR assumes single-writer semantics outside the leader-only goroutines** (reconciler, dispatch, subscribe). REST/gRPC/admin handlers can run on followers. | Controllerless followers serve reads from local raft replica; controller followers from etcd — identical pattern |
+| MC-3 | **Every new RPC declares its read-vs-write nature in `roles.go`.** Write RPCs the PF proxy must forward; reads answered locally. | PF-4 proxy needs this metadata to know what to forward |
+| MC-4 | **No PR persists process-local state on disk outside `<state_dir>/`.** All durable state flows through the store. | Controllerless raft replication requires all state through the FSM |
+| MC-5 | **Every new long-lived goroutine that mutates state is started inside `leaderLoop`**; pure-read goroutines outside. | One rule for both modes; `RaftElector` reuses the exact same `leaderLoop` from PA-0 |
+
+### What lands as part of PA-1 to enable both contracts
+
+No behaviour change, all defaults preserved — just the seams PD and PF plug into:
+
+1. **`internal/auth/` package** created with:
+   - `auth.go` — `Subject{Name, Role, Namespace}` struct + `FromContext(ctx)` / `WithSubject(ctx, s)` helpers (return an `"anonymous"` Subject when auth is off)
+   - `roles.go` — `RoleMap` type + empty defaults + `// PD: populate with full RPC list` marker; every RPC tagged as `read` or `write` (consumed by PF-4 proxy)
+   - `listener.go` — `NewListener(addr string, ac AuthConfig) (net.Listener, error)` returning plain `net.Listen` today; PD swaps to TLS
+   - `interceptor.go` — no-op gRPC unary + stream interceptors; no-op HTTP middleware
+2. **`internal/config/auth.go`** — `AuthConfig{Mode string, TLS TLSConfig, Tokens []TokenEntry, Roles map[string][]string}` with `Mode: "none"` default; validation rejects unknown modes; `token`/`mtls` fail at startup with `not yet implemented` (until PD)
+3. **`internal/config/mode.go`** — top-level `Mode` (default `"controller"`) and `NodeID` (default hostname); validation rejects unknown values; `"controllerless"` fails at startup with `not yet implemented` (until PF-3)
+4. **`internal/config/ha.go`** — `HAConfig{Controller ControllerHAConfig, Controllerless ControllerlessHAConfig}` with the two-block validation rule (only the one matching `mode:` may be populated)
+5. **`cmd/dashd/main.go`** — reads `cfg.Mode`, `cfg.NodeID`, `cfg.Auth`; prints `WARN: auth disabled` banner when `auth.mode=none`; threads `cfg.Auth` to `auth.NewListener` and `auth.NewInterceptor` (both no-ops today)
+6. **`docs/CONTRIBUTING.md`** — reviewer checklist amendment listing AC-1..AC-9 and MC-1..MC-5 with one-line summaries
+
+~350 LOC of structural plumbing, no behavioural change, all existing tests + fleets keep passing. Folded into PA-1.
 
 ---
 
@@ -341,7 +553,8 @@ This milestone is the foundation for every other Phase 2 capability. No Phase 2 
 | PR | Scope | Touches | Gates | Status |
 |---|---|---|---|---|
 | **PA-0** | Refactor `cmd/dashd/main.go` so reconciler+dispatch+subscribe launch inside `leaderLoop(ctx, elector)` using `NoneElector` (always-leader). No behaviour change; lets PA-3/PA-4 be small. | `internal/ha/leader/`, `cmd/dashd/main.go` | none yet — proves regression-free | ✅ 2026-06-10 — `internal/ha/leader/{leader.go,none.go,none_test.go}` (10 tests, all pass); main.go refactored; `go build`+`go vet`+`go test ./...` all green; live fleet e2e: 16 specs applied, all 5 DPUs report 0 drift; dashd logs `leaderLoop: assumed leadership leader_id=dashd-local` |
-| PA-1 | etcd store backend implementing `store.DesiredStore`; in-process etcd test harness | `internal/store/etcd/`, `internal/config/` | PA-G1, PA-G2 | ❌ |
+| PA-1a | **Config-knob + auth/HA contract scaffolding** (split from PA-1 for reviewability). `internal/config/{mode,auth,ha}.go` with `mode: controller` default + `auth.mode: none` default + two-block HA validation; `internal/auth/{auth,roles,listener,interceptor}.go` no-op stubs with read/write role tagging for PF-4 proxy; startup banner when `auth.mode=none`; `docs/CONTRIBUTING.md` with AC-1..AC-10 + MC-1..MC-5 checklist. `controllerless`/`token`/`mtls`/`raft`/`etcd` all parse cleanly but reject at startup with `not yet implemented`. Behaviour identical to today; just the seams. | `internal/config/`, `internal/auth/`, `cmd/dashd/main.go`, `docs/CONTRIBUTING.md` | (config + auth tests) | ✅ 2026-06-10 — 24 config tests + 15 auth tests; **config 92.4% cov, auth 100% cov**; all 16 dashd packages green; live fleet e2e: 16 specs applied, all 5 DPUs report 0 drift; dashd boot logs `auth disabled — DO NOT use in production` once, then `dashd ready node_id=… mode=controller auth_mode=none storage_backend=file leader_id=…` |
+| PA-1b | etcd store backend implementing `store.DesiredStore`; in-process etcd test harness; replaces "not yet implemented" rejection for `storage.backend: etcd` | `internal/store/etcd/` | PA-G1, PA-G2 | ❌ Next |
 | PA-2 | Compaction recovery on `Watch`; re-sync from latest snapshot on `ErrCompacted` | `internal/store/etcd/compaction.go` | PA-G1 (extends) | ❌ |
 | PA-3 | EtcdElector implementation (etcd-lease leader election) | `internal/ha/leader/etcd.go` | PA-G3, PA-G4 | ❌ |
 | PA-4 | Wire `EtcdElector` into `main.go` via the PA-0 `leaderLoop`; follower mode for read RPCs | `cmd/dashd/main.go` | PA-G3 | ❌ |
@@ -349,6 +562,8 @@ This milestone is the foundation for every other Phase 2 capability. No Phase 2 
 | PA-6 | Integration suite expansion: 3-node etcd cluster, kill-leader scenarios | `test/integration/etcd_*.go` (`//go:build integration_ha`) | PA-G3 (proven) | ❌ |
 
 ---
+
+## Phase 2 · Milestone PA — Infrastructure: detail
 
 ### P2-M1 — etcd Store Backend (`internal/store/etcd/`)
 
