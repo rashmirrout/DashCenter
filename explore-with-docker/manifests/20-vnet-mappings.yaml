@@ -1,0 +1,53 @@
+# VnetMappings — overlay→underlay rewrites for a handful of overlay IPs in each VNet.
+# action=vnet_encap means encapsulate to the listed underlay_ip + mac_address.
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: map-app-10
+  namespace: default
+  labels: { tier: app }
+spec:
+  vnet_name: vnet-app
+  ip_address: "10.10.0.10"
+  underlay_ip: "10.0.5.11"
+  mac_address: "00:11:22:00:00:01"
+  action: "vnet_encap"
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: map-app-11
+  namespace: default
+  labels: { tier: app }
+spec:
+  vnet_name: vnet-app
+  ip_address: "10.10.0.11"
+  underlay_ip: "10.0.5.12"
+  mac_address: "00:11:22:00:00:02"
+  action: "vnet_encap"
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: map-db-20
+  namespace: default
+  labels: { tier: db }
+spec:
+  vnet_name: vnet-db
+  ip_address: "10.20.0.10"
+  underlay_ip: "10.0.6.11"
+  mac_address: "00:11:22:00:00:03"
+  action: "vnet_encap"
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: map-db-21
+  namespace: default
+  labels: { tier: db }
+spec:
+  vnet_name: vnet-db
+  ip_address: "10.20.0.11"
+  underlay_ip: "10.0.6.12"
+  mac_address: "00:11:22:00:00:04"
+  action: "vnet_encap"

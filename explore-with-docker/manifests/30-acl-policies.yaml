@@ -1,0 +1,65 @@
+# ACL policies — one inbound + one outbound per tier, bound to the right ENIs.
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-app-in
+  namespace: default
+  labels: { tier: app, dir: in }
+spec:
+  stage: "inbound"
+  eni_names: ["eni-app-01", "eni-app-02"]
+  rules:
+    - priority: 100
+      action: "allow"
+      src_prefixes: ["10.20.0.0/16"]   # allow from db tier overlays
+      dst_ports:    ["80", "443"]
+      protocols:    ["tcp"]
+      description:  "permit web from db tier"
+    - priority: 200
+      action: "deny"
+      src_prefixes: ["0.0.0.0/0"]
+      description:  "default deny"
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-app-out
+  namespace: default
+  labels: { tier: app, dir: out }
+spec:
+  stage: "outbound"
+  eni_names: ["eni-app-01", "eni-app-02"]
+  rules:
+    - priority: 100
+      action: "allow"
+      dst_prefixes: ["10.20.0.0/16"]   # talk to db tier
+      dst_ports:    ["5432"]
+      protocols:    ["tcp"]
+      description:  "allow postgres egress"
+    - priority: 200
+      action: "allow_and_continue"
+      dst_prefixes: ["0.0.0.0/0"]
+      dst_ports:    ["53"]
+      protocols:    ["udp"]
+      description:  "allow DNS"
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-db-in
+  namespace: default
+  labels: { tier: db, dir: in }
+spec:
+  stage: "inbound"
+  eni_names: ["eni-db-01", "eni-db-02", "eni-db-03"]
+  rules:
+    - priority: 100
+      action: "allow"
+      src_prefixes: ["10.10.0.0/16"]   # only app tier overlays
+      dst_ports:    ["5432"]
+      protocols:    ["tcp"]
+      description:  "postgres in"
+    - priority: 200
+      action: "deny"
+      src_prefixes: ["0.0.0.0/0"]
+      description:  "default deny"
