@@ -105,6 +105,10 @@ return nil, nil
 }
 func (s *richControlPlaneStub) Reconcile(_ context.Context) error { return s.reconcileErr }
 
+func (s *richControlPlaneStub) SimulateApply(_ context.Context, _ []service.SimulateOp) (*service.SimulateResult, error) {
+	return &service.SimulateResult{WouldSucceed: true}, nil
+}
+
 // richObservabilityStub implements service.ObservabilityService.
 type richObservabilityStub struct {
 statuses []service.DpuStatus

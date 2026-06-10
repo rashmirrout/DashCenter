@@ -195,7 +195,88 @@ func storedItemToPolicyObject(item *service.StoredItem) (*dashcenterv1.PolicyObj
 	return po, nil
 }
 
-// PutInventory / RegisterDpu / DeregisterDpu / SimulateApply are NOT overridden
-// here — the embedded UnimplementedControlPlaneServer returns codes.Unimplemented
-// for them automatically, which is the correct Phase 1 behavior. They are wired
-// to Phase 2 milestones (PB capacity gating, PC operations).
+// PutInventory / RegisterDpu / DeregisterDpu are NOT overridden here —
+// the embedded UnimplementedControlPlaneServer returns codes.Unimplemented
+// for them automatically, which is the correct Phase 1 behavior. They are
+// wired to Phase 2 milestones (PB capacity gating, PC operations).
+
+// SimulateApply (PB-2) is the gRPC dry-run admission endpoint. The proto
+// is unary single-op (one PolicyApplyRequest carrying one PolicyObject),
+// so we translate to a one-element service.SimulateOp batch and project
+// the result back onto the wire SimulateApplyResult shape. For
+// multi-op batches, clients should use the REST POST /v1/simulate
+// endpoint which carries an ops[] array.
+func (h *controlPlaneHandler) SimulateApply(ctx context.Context, req *dashcenterv1.PolicyApplyRequest) (*dashcenterv1.SimulateApplyResult, error) {
+	if req == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "request is nil")
+	}
+	op, err := simulateOpFromProto(req)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	res, err := h.cp.SimulateApply(ctx, []service.SimulateOp{op})
+	if err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	out := &dashcenterv1.SimulateApplyResult{
+		WouldSucceed:     res.WouldSucceed,
+		ValidationErrors: res.ValidationErrors,
+	}
+	for _, row := range res.PerDpuImpact {
+		out.PerDpuImpact = append(out.PerDpuImpact, &dashcenterv1.SimulatedDpuImpact{
+			DpuId:                 row.DpuID,
+			DeltaEnis:             row.DeltaEnis,
+			DeltaVnetMappings:     row.DeltaVnetMappings,
+			DeltaAclRules:         row.DeltaAclRules,
+			ExceedsCapacity:       row.ExceedsCapacity,
+			CapacityFailureReason: row.Reason,
+		})
+	}
+	return out, nil
+}
+
+// simulateOpFromProto translates a PolicyApplyRequest into the
+// service-layer SimulateOp representation. PB-2 supports
+// eni/vnet_mapping/acl_policy only; other kinds (vnet/route/ha/tunnel)
+// return InvalidArgument until PB-3 broadens admission gating.
+func simulateOpFromProto(req *dashcenterv1.PolicyApplyRequest) (service.SimulateOp, error) {
+	op := service.SimulateOp{}
+	switch req.GetAction() {
+	case dashcenterv1.PolicyApplyRequest_ACTION_PUT:
+		op.Action = "put"
+	case dashcenterv1.PolicyApplyRequest_ACTION_DELETE:
+		op.Action = "delete"
+	default:
+		return op, fmt.Errorf("action must be ACTION_PUT or ACTION_DELETE")
+	}
+	obj := req.GetObject()
+	if obj == nil {
+		return op, fmt.Errorf("object is nil")
+	}
+	switch x := obj.GetObject().(type) {
+	case *dashcenterv1.PolicyObject_Eni:
+		op.Kind = "eni"
+		op.EniSpec = x.Eni
+		op.Namespace = x.Eni.GetNamespace()
+		op.Name = x.Eni.GetName()
+	case *dashcenterv1.PolicyObject_VnetMapping:
+		op.Kind = "vnet_mapping"
+		op.VnetMappingSpec = x.VnetMapping
+		op.Namespace = x.VnetMapping.GetNamespace()
+		if op.Action == "delete" {
+			name := x.VnetMapping.GetVnetName()
+			if ip := x.VnetMapping.GetIpAddress(); ip != "" {
+				name = name + "-" + ip
+			}
+			op.Name = name
+		}
+	case *dashcenterv1.PolicyObject_AclPolicy:
+		op.Kind = "acl_policy"
+		op.AclPolicySpec = x.AclPolicy
+		op.Namespace = x.AclPolicy.GetNamespace()
+		op.Name = x.AclPolicy.GetName()
+	default:
+		return op, fmt.Errorf("PB-2 SimulateApply supports eni|vnet_mapping|acl_policy only")
+	}
+	return op, nil
+}

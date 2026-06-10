@@ -656,3 +656,383 @@ func contains(s []string, v string) bool {
 func unmarshalSpec(data []byte, dst any) error {
 	return json.Unmarshal(data, dst)
 }
+
+// -- PB-2: SimulateApply support --------------------------------------
+//
+// Simulate runs the same admission math that CheckEni / CheckVnetMapping /
+// CheckAclPolicy would run, but for a *batch* of proposed operations
+// and WITHOUT mutating tracker state. It returns one PerDPUDelta entry
+// per affected DPU plus a flat list of validation errors. The service
+// layer turns this into a SimulateApplyResult on the wire.
+//
+// The implementation works against a transient overlay over the live
+// counters so the order of operations within the batch is honoured (a
+// Put-Put-Delete sequence on the same key cancels out, etc.). Live
+// counters are read under RLock once at the start; the overlay is local
+// to the call.
+
+// SimOp is one proposed operation in a Simulate batch.
+type SimOp struct {
+	Action    string // "put" | "delete"
+	Namespace string
+	Kind      string // eni | vnet_mapping | acl_policy
+	// Spec is the proto spec for "put"; ignored for "delete".
+	Spec any
+	// Name is required for "delete"; for "put" it is derived from the spec.
+	Name string
+}
+
+// SimError is one validation/admission failure produced by Simulate.
+// Strings only — this is operator-facing dry-run output and must not
+// leak internal structs.
+type SimError struct {
+	Op     int    // index in the input []SimOp
+	Reason string // human-readable, includes (dpu, dimension, limit, current, requested)
+}
+
+// PerDPUDelta is the net change in usage counters for a DPU after
+// applying the entire batch. Negative deltas mean "frees capacity".
+type PerDPUDelta struct {
+	DpuID             string
+	DeltaEnis         int64
+	DeltaVnetMappings int64
+	DeltaAclRules     int64
+	// ExceedsCapacity is true if applying the batch would push at least
+	// one dimension on this DPU past its advertised limit. Reason
+	// carries the first such breach (operator can iterate one fix at a
+	// time).
+	ExceedsCapacity bool
+	Reason          string
+}
+
+// SimulateResult is the full output of Simulate.
+type SimulateResult struct {
+	WouldSucceed bool
+	Errors       []SimError
+	PerDPU       []PerDPUDelta
+}
+
+// Simulate runs a batch of proposed operations against an overlay and
+// returns the per-DPU deltas + admission verdict. Does not mutate the
+// tracker. Safe to call concurrently with live admission traffic.
+func (t *Tracker) Simulate(ops []SimOp) SimulateResult {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	// Overlay state: deep-copy only the slices we'll mutate.
+	type overlayUsage struct{ enis, aclRules, vnetMappings int64 }
+	overlay := map[string]*overlayUsage{}
+	for id, u := range t.byDPU {
+		overlay[id] = &overlayUsage{u.enis, u.aclRules, u.vnetMappings}
+	}
+	// Make sure every DPU known to the inventory appears in the overlay
+	// (so a fresh DPU with zero usage gets a row in PerDPU).
+	for _, d := range t.inv.List() {
+		if _, ok := overlay[d.ID]; !ok {
+			overlay[d.ID] = &overlayUsage{}
+		}
+	}
+	// eniDPUs overlay: shallow-copy the per-ns maps then deep-copy the
+	// per-name slice when we touch it.
+	overlayEni := map[string]map[string][]string{}
+	for ns, m := range t.eniDPUs {
+		dst := make(map[string][]string, len(m))
+		for k, v := range m {
+			cp := make([]string, len(v))
+			copy(cp, v)
+			dst[k] = cp
+		}
+		overlayEni[ns] = dst
+	}
+	// vnetMapping presence overlay.
+	overlayMap := map[string]map[string]struct{}{}
+	for ns, m := range t.vnetMappingPresence {
+		dst := make(map[string]struct{}, len(m))
+		for k := range m {
+			dst[k] = struct{}{}
+		}
+		overlayMap[ns] = dst
+	}
+	// Acl rule counts overlay (per ns/name → rules currently charged).
+	// Recount doesn't keep this map; we rebuild it lazily as we see ACL
+	// ops within the batch. Live values are derived from byDPU which is
+	// already in `overlay`.
+	overlayAclRules := map[string]map[string]int64{}
+	currentAclRules := func(ns, name string) int64 {
+		if m, ok := overlayAclRules[ns]; ok {
+			if v, ok := m[name]; ok {
+				return v
+			}
+		}
+		// Live tracker doesn't keep per-policy rule counts, so for ops
+		// against a live policy the caller must pass the previous count
+		// via an explicit DELETE-then-PUT pair in the batch. This is
+		// how dashctl's --diff flow will be wired (PB-3).
+		return 0
+	}
+	setAclRules := func(ns, name string, v int64) {
+		if overlayAclRules[ns] == nil {
+			overlayAclRules[ns] = map[string]int64{}
+		}
+		overlayAclRules[ns][name] = v
+	}
+
+	dpus := t.inv.List()
+	dpuByID := make(map[string]inventory.DpuEntry, len(dpus))
+	for _, d := range dpus {
+		dpuByID[d.ID] = d
+	}
+
+	var errs []SimError
+	for i, op := range ops {
+		switch op.Action {
+		case "put":
+			switch op.Kind {
+			case "eni":
+				spec, ok := op.Spec.(*dashcenterv1.EniSpec)
+				if !ok || spec == nil {
+					errs = append(errs, SimError{Op: i, Reason: "put eni: spec is nil or wrong type"})
+					continue
+				}
+				ns := op.Namespace
+				targets := t.placementForEni(spec, dpus)
+				prev := overlayEni[ns][spec.GetName()]
+				// Capacity check: count net new placements only.
+				for _, dpuID := range targets {
+					entry, ok := dpuByID[dpuID]
+					if !ok {
+						errs = append(errs, SimError{Op: i, Reason: fmt.Sprintf("put eni %q: placement target %q is not a registered DPU", spec.GetName(), dpuID)})
+						continue
+					}
+					if entry.Limits == nil || entry.Limits.MaxEnis <= 0 {
+						continue
+					}
+					if contains(prev, dpuID) {
+						continue
+					}
+					u := overlay[dpuID]
+					if u.enis+1 > entry.Limits.MaxEnis {
+						errs = append(errs, SimError{
+							Op: i,
+							Reason: fmt.Sprintf("dpu=%s dimension=max_enis limit=%d current=%d requested=+1",
+								dpuID, entry.Limits.MaxEnis, u.enis),
+						})
+						continue
+					}
+				}
+				// Apply to overlay.
+				for _, p := range prev {
+					if !contains(targets, p) {
+						if u := overlay[p]; u != nil && u.enis > 0 {
+							u.enis--
+						}
+					}
+				}
+				for _, n := range targets {
+					if !contains(prev, n) {
+						if overlay[n] == nil {
+							overlay[n] = &overlayUsage{}
+						}
+						overlay[n].enis++
+					}
+				}
+				if overlayEni[ns] == nil {
+					overlayEni[ns] = map[string][]string{}
+				}
+				overlayEni[ns][spec.GetName()] = append([]string{}, targets...)
+
+			case "vnet_mapping":
+				spec, ok := op.Spec.(*dashcenterv1.VnetMappingSpec)
+				if !ok || spec == nil {
+					errs = append(errs, SimError{Op: i, Reason: "put vnet_mapping: spec is nil or wrong type"})
+					continue
+				}
+				ns := op.Namespace
+				key := mappingNameOf(spec)
+				if key == "" {
+					errs = append(errs, SimError{Op: i, Reason: "put vnet_mapping: empty key (vnet_name + ip_address)"})
+					continue
+				}
+				exists := false
+				if m, ok := overlayMap[ns]; ok {
+					_, exists = m[key]
+				}
+				if !exists {
+					// Admission: charge against every DPU.
+					for _, d := range dpus {
+						if d.Limits == nil || d.Limits.MaxVnetMappings <= 0 {
+							continue
+						}
+						u := overlay[d.ID]
+						if u.vnetMappings+1 > d.Limits.MaxVnetMappings {
+							errs = append(errs, SimError{
+								Op: i,
+								Reason: fmt.Sprintf("dpu=%s dimension=max_vnet_mappings limit=%d current=%d requested=+1",
+									d.ID, d.Limits.MaxVnetMappings, u.vnetMappings),
+							})
+						}
+					}
+					if overlayMap[ns] == nil {
+						overlayMap[ns] = map[string]struct{}{}
+					}
+					overlayMap[ns][key] = struct{}{}
+					for _, d := range dpus {
+						if overlay[d.ID] == nil {
+							overlay[d.ID] = &overlayUsage{}
+						}
+						overlay[d.ID].vnetMappings++
+					}
+				}
+
+			case "acl_policy":
+				spec, ok := op.Spec.(*dashcenterv1.AclPolicySpec)
+				if !ok || spec == nil {
+					errs = append(errs, SimError{Op: i, Reason: "put acl_policy: spec is nil or wrong type"})
+					continue
+				}
+				ns := op.Namespace
+				newRules := int64(len(spec.GetRules()))
+				oldRules := currentAclRules(ns, spec.GetName())
+				delta := newRules - oldRules
+				// Resolve DPU set from referenced ENIs (use overlay).
+				dpuSet := map[string]struct{}{}
+				for _, eni := range spec.GetEniNames() {
+					if hosts, ok := overlayEni[ns][eni]; ok {
+						for _, d := range hosts {
+							dpuSet[d] = struct{}{}
+						}
+					}
+				}
+				if delta > 0 {
+					for dpuID := range dpuSet {
+						entry, ok := dpuByID[dpuID]
+						if !ok {
+							continue
+						}
+						if entry.Limits == nil || entry.Limits.MaxAclRulesPerGroup <= 0 {
+							continue
+						}
+						u := overlay[dpuID]
+						if u.aclRules+delta > entry.Limits.MaxAclRulesPerGroup {
+							errs = append(errs, SimError{
+								Op: i,
+								Reason: fmt.Sprintf("dpu=%s dimension=max_acl_rules_per_group limit=%d current=%d requested=+%d",
+									dpuID, entry.Limits.MaxAclRulesPerGroup, u.aclRules, delta),
+							})
+						}
+					}
+				}
+				// Apply delta to overlay regardless (so the per-dpu
+				// numbers in the result reflect the requested state,
+				// even when capacity is exceeded — operators want to
+				// see how far over the limit they are).
+				for dpuID := range dpuSet {
+					if overlay[dpuID] == nil {
+						overlay[dpuID] = &overlayUsage{}
+					}
+					overlay[dpuID].aclRules += delta
+					if overlay[dpuID].aclRules < 0 {
+						overlay[dpuID].aclRules = 0
+					}
+				}
+				setAclRules(ns, spec.GetName(), newRules)
+
+			default:
+				errs = append(errs, SimError{Op: i, Reason: fmt.Sprintf("put: unsupported kind %q (PB-2 supports eni|vnet_mapping|acl_policy)", op.Kind)})
+			}
+
+		case "delete":
+			if op.Name == "" {
+				errs = append(errs, SimError{Op: i, Reason: "delete: name is required"})
+				continue
+			}
+			ns := op.Namespace
+			switch op.Kind {
+			case "eni":
+				prev := overlayEni[ns][op.Name]
+				for _, p := range prev {
+					if u := overlay[p]; u != nil && u.enis > 0 {
+						u.enis--
+					}
+				}
+				if overlayEni[ns] != nil {
+					delete(overlayEni[ns], op.Name)
+				}
+			case "vnet_mapping":
+				// Op.Name carries the canonical key for deletes.
+				exists := false
+				if m, ok := overlayMap[ns]; ok {
+					_, exists = m[op.Name]
+				}
+				if exists {
+					delete(overlayMap[ns], op.Name)
+					for _, d := range dpus {
+						if u := overlay[d.ID]; u != nil && u.vnetMappings > 0 {
+							u.vnetMappings--
+						}
+					}
+				}
+			case "acl_policy":
+				// Without the prior spec we don't know which ENIs were
+				// referenced. For PB-2 we keep delete a best-effort
+				// no-op against the overlay counters; PB-3's diff-aware
+				// dry-run will fetch the prior spec before issuing the
+				// simulated delete.
+				setAclRules(ns, op.Name, 0)
+			default:
+				errs = append(errs, SimError{Op: i, Reason: fmt.Sprintf("delete: unsupported kind %q", op.Kind)})
+			}
+		default:
+			errs = append(errs, SimError{Op: i, Reason: fmt.Sprintf("unknown action %q (want put|delete)", op.Action)})
+		}
+	}
+
+	// Build per-DPU diff against the snapshot at entry.
+	perDPU := make([]PerDPUDelta, 0, len(overlay))
+	for id, after := range overlay {
+		before := &usage{}
+		if u := t.byDPU[id]; u != nil {
+			before = u
+		}
+		entry, hasLimits := dpuByID[id]
+		row := PerDPUDelta{
+			DpuID:             id,
+			DeltaEnis:         after.enis - before.enis,
+			DeltaVnetMappings: after.vnetMappings - before.vnetMappings,
+			DeltaAclRules:     after.aclRules - before.aclRules,
+		}
+		// Surface a per-row capacity flag — duplicates info already in
+		// Errors[] but lets a table renderer light up the offending row
+		// without iterating the error list.
+		if hasLimits && entry.Limits != nil {
+			if entry.Limits.MaxEnis > 0 && after.enis > entry.Limits.MaxEnis {
+				row.ExceedsCapacity = true
+				row.Reason = fmt.Sprintf("max_enis: %d > %d", after.enis, entry.Limits.MaxEnis)
+			}
+			if entry.Limits.MaxVnetMappings > 0 && after.vnetMappings > entry.Limits.MaxVnetMappings {
+				row.ExceedsCapacity = true
+				if row.Reason == "" {
+					row.Reason = fmt.Sprintf("max_vnet_mappings: %d > %d", after.vnetMappings, entry.Limits.MaxVnetMappings)
+				}
+			}
+			if entry.Limits.MaxAclRulesPerGroup > 0 && after.aclRules > entry.Limits.MaxAclRulesPerGroup {
+				row.ExceedsCapacity = true
+				if row.Reason == "" {
+					row.Reason = fmt.Sprintf("max_acl_rules_per_group: %d > %d", after.aclRules, entry.Limits.MaxAclRulesPerGroup)
+				}
+			}
+		}
+		// Only emit rows that have non-zero deltas OR that are flagged
+		// — this keeps output noise-free when the batch touches 2 DPUs
+		// in a 100-DPU fleet.
+		if row.DeltaEnis != 0 || row.DeltaVnetMappings != 0 || row.DeltaAclRules != 0 || row.ExceedsCapacity {
+			perDPU = append(perDPU, row)
+		}
+	}
+
+	return SimulateResult{
+		WouldSucceed: len(errs) == 0,
+		Errors:       errs,
+		PerDPU:       perDPU,
+	}
+}

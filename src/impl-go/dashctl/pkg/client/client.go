@@ -89,6 +89,23 @@ type ServerInfo struct {
 	OK      bool
 }
 
+// SimulateDpuImpact is the per-DPU row of a SimulateResult (PB-2).
+type SimulateDpuImpact struct {
+	DpuID             string `json:"dpu_id"`
+	DeltaEnis         int64  `json:"delta_enis"`
+	DeltaVnetMappings int64  `json:"delta_vnet_mappings"`
+	DeltaAclRules     int64  `json:"delta_acl_rules"`
+	ExceedsCapacity   bool   `json:"exceeds_capacity,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+}
+
+// SimulateResult is the dashd reply to POST /v1/simulate (PB-2).
+type SimulateResult struct {
+	WouldSucceed     bool                 `json:"would_succeed"`
+	ValidationErrors []string             `json:"validation_errors,omitempty"`
+	PerDpuImpact     []*SimulateDpuImpact `json:"per_dpu_impact,omitempty"`
+}
+
 // Client is the contract every backend (REST today; gRPC in Phase 2) implements.
 type Client interface {
 	Close() error
@@ -111,6 +128,12 @@ type Client interface {
 
 	// Reconcile.
 	Reconcile(ctx context.Context, dpuIDs []string) error
+
+	// Simulate runs a dry-run admission check against dashd. The ops
+	// are JSON-encoded service.SimulateOp records; the server returns
+	// a SimulateResult (would_succeed, validation_errors[], per_dpu_impact[]).
+	// PB-2 supports eni|vnet_mapping|acl_policy.
+	Simulate(ctx context.Context, opsJSON []byte) (*SimulateResult, error)
 
 	// Admin views.
 	AdminDrift(ctx context.Context, dpuID string) ([]DriftItem, error)

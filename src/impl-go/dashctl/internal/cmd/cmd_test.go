@@ -36,6 +36,7 @@ type fakeClient struct {
 	getInventoryFn   func(ctx context.Context) ([]client.DpuStatus, error)
 	adminDriftFn     func(ctx context.Context, dpu string) ([]client.DriftItem, error)
 	adminPlacementFn func(ctx context.Context) ([]client.EniPlacementRow, error)
+	simulateFn       func(ctx context.Context, opsJSON []byte) (*client.SimulateResult, error)
 }
 
 type putCall struct {
@@ -125,6 +126,12 @@ func (f *fakeClient) AdminEniPlacement(ctx context.Context) ([]client.EniPlaceme
 		return f.adminPlacementFn(ctx)
 	}
 	return nil, nil
+}
+func (f *fakeClient) Simulate(ctx context.Context, opsJSON []byte) (*client.SimulateResult, error) {
+	if f.simulateFn != nil {
+		return f.simulateFn(ctx, opsJSON)
+	}
+	return &client.SimulateResult{WouldSucceed: true}, nil
 }
 
 // testApp returns an Application with fake client, captured streams,

@@ -99,6 +99,14 @@ mux.HandleFunc("DELETE /v1/{kind}/{name}", h.deleteDefault)
 // Reconcile.
 mux.HandleFunc("POST /v1/reconcile", h.reconcile)
 
+// SimulateApply (PB-2): dry-run admission. Body is JSON of
+// service.SimulateOp list under {"ops": [...]}. Always returns 200
+// (the would_succeed field carries the verdict); only request-shape
+// errors (empty body, bad json) return 400. This matches kubectl's
+// `--dry-run=server` UX where the server is reachable but the request
+// would fail validation — still a successful round-trip.
+mux.HandleFunc("POST /v1/simulate", h.simulate)
+
 return mux
 }
 
@@ -408,6 +416,33 @@ handleServiceErr(w, err)
 return
 }
 writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// --- SimulateApply (PB-2) ---
+
+func (h *handler) simulate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Ops []service.SimulateOp `json:"ops"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if len(body) == 0 {
+		writeErr(w, 400, errors.New("empty body; expected {\"ops\": [...]}"))
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+		return
+	}
+	res, err := h.cp.SimulateApply(r.Context(), req.Ops)
+	if err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	writeJSON(w, 200, res)
 }
 
 // --- Helpers ---

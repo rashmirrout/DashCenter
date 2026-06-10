@@ -76,6 +76,13 @@ type ControlPlaneService interface {
 	List(ctx context.Context, ns, kind string) ([]*StoredItem, error)
 
 	Reconcile(ctx context.Context) error
+
+	// SimulateApply (PB-2) is a read-only dry-run: it accepts a batch of
+	// proposed Put/Delete operations and returns per-DPU capacity deltas
+	// plus a flat list of validation/admission errors. The store and
+	// tracker are not mutated; safe to call concurrently with live
+	// admission traffic.
+	SimulateApply(ctx context.Context, ops []SimulateOp) (*SimulateResult, error)
 }
 
 // DpuInput is the input for PutInventory.
@@ -445,4 +452,132 @@ func (s *controlPlaneService) Reconcile(ctx context.Context) error {
 		s.rec.ForceReconcile()
 	}
 	return nil
+}
+
+// --- SimulateApply (PB-2) ---
+
+// SimulateOp is one operation in a SimulateApply batch.
+//
+// Action is "put" or "delete". For "put", exactly one of the spec
+// pointers must be non-nil and Kind must match. For "delete", Name +
+// Kind are required (Spec is ignored). Namespace defaults to "default"
+// if empty.
+type SimulateOp struct {
+	Action          string                          `json:"action"`
+	Namespace       string                          `json:"namespace,omitempty"`
+	Kind            string                          `json:"kind"`
+	Name            string                          `json:"name,omitempty"`
+	EniSpec         *dashcenterv1.EniSpec           `json:"eni,omitempty"`
+	VnetMappingSpec *dashcenterv1.VnetMappingSpec   `json:"vnet_mapping,omitempty"`
+	AclPolicySpec   *dashcenterv1.AclPolicySpec     `json:"acl_policy,omitempty"`
+}
+
+// SimulateDpuImpact is the per-DPU row of a SimulateResult.
+type SimulateDpuImpact struct {
+	DpuID             string `json:"dpu_id"`
+	DeltaEnis         int64  `json:"delta_enis"`
+	DeltaVnetMappings int64  `json:"delta_vnet_mappings"`
+	DeltaAclRules     int64  `json:"delta_acl_rules"`
+	ExceedsCapacity   bool   `json:"exceeds_capacity,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+}
+
+// SimulateResult is what SimulateApply returns: an aggregate verdict, a
+// flat list of validation/admission errors, and one row per affected
+// DPU.
+type SimulateResult struct {
+	WouldSucceed     bool                 `json:"would_succeed"`
+	ValidationErrors []string             `json:"validation_errors,omitempty"`
+	PerDpuImpact     []*SimulateDpuImpact `json:"per_dpu_impact,omitempty"`
+}
+
+// SimulateApply runs a read-only admission check over a batch of
+// proposed ops. Returns ErrInvalidArgument when ops is empty or
+// malformed (these are upfront input errors — distinct from the
+// per-op admission errors carried inside SimulateResult).
+func (s *controlPlaneService) SimulateApply(ctx context.Context, ops []SimulateOp) (*SimulateResult, error) {
+	if len(ops) == 0 {
+		return nil, fmt.Errorf("%w: ops list is empty", ErrInvalidArgument)
+	}
+	if s.cap == nil {
+		// No capacity tracker configured (legacy test wiring). Return
+		// a successful no-op result rather than 500-ing: clients that
+		// rely on SimulateApply for would-succeed feedback degrade
+		// gracefully.
+		return &SimulateResult{WouldSucceed: true}, nil
+	}
+
+	// Translate to capacity.SimOp + run pre-flight validation.
+	simOps := make([]capacity.SimOp, 0, len(ops))
+	var preErrs []string
+	for i, op := range ops {
+		switch op.Action {
+		case "put", "delete":
+		default:
+			preErrs = append(preErrs, fmt.Sprintf("op[%d]: unknown action %q (want put|delete)", i, op.Action))
+			continue
+		}
+		switch op.Kind {
+		case "eni", "vnet_mapping", "acl_policy":
+		default:
+			preErrs = append(preErrs, fmt.Sprintf("op[%d]: PB-2 supports kind eni|vnet_mapping|acl_policy, got %q", i, op.Kind))
+			continue
+		}
+		ns := resolveNS(op.Namespace)
+
+		so := capacity.SimOp{Action: op.Action, Namespace: ns, Kind: op.Kind, Name: op.Name}
+		if op.Action == "put" {
+			switch op.Kind {
+			case "eni":
+				if op.EniSpec == nil {
+					preErrs = append(preErrs, fmt.Sprintf("op[%d]: put eni: eni spec is nil", i))
+					continue
+				}
+				so.Spec = op.EniSpec
+				if so.Name == "" {
+					so.Name = op.EniSpec.GetName()
+				}
+			case "vnet_mapping":
+				if op.VnetMappingSpec == nil {
+					preErrs = append(preErrs, fmt.Sprintf("op[%d]: put vnet_mapping: spec is nil", i))
+					continue
+				}
+				so.Spec = op.VnetMappingSpec
+			case "acl_policy":
+				if op.AclPolicySpec == nil {
+					preErrs = append(preErrs, fmt.Sprintf("op[%d]: put acl_policy: spec is nil", i))
+					continue
+				}
+				so.Spec = op.AclPolicySpec
+				if so.Name == "" {
+					so.Name = op.AclPolicySpec.GetName()
+				}
+			}
+		} else if op.Name == "" {
+			preErrs = append(preErrs, fmt.Sprintf("op[%d]: delete %s: name is required", i, op.Kind))
+			continue
+		}
+		simOps = append(simOps, so)
+	}
+
+	if len(preErrs) > 0 {
+		return &SimulateResult{WouldSucceed: false, ValidationErrors: preErrs}, nil
+	}
+
+	r := s.cap.Simulate(simOps)
+	out := &SimulateResult{WouldSucceed: r.WouldSucceed}
+	for _, e := range r.Errors {
+		out.ValidationErrors = append(out.ValidationErrors, fmt.Sprintf("op[%d]: %s", e.Op, e.Reason))
+	}
+	for _, row := range r.PerDPU {
+		out.PerDpuImpact = append(out.PerDpuImpact, &SimulateDpuImpact{
+			DpuID:             row.DpuID,
+			DeltaEnis:         row.DeltaEnis,
+			DeltaVnetMappings: row.DeltaVnetMappings,
+			DeltaAclRules:     row.DeltaAclRules,
+			ExceedsCapacity:   row.ExceedsCapacity,
+			Reason:            row.Reason,
+		})
+	}
+	return out, nil
 }

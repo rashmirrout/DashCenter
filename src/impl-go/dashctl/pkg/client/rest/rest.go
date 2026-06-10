@@ -238,6 +238,25 @@ func (c *Client) Reconcile(ctx context.Context, dpuIDs []string) error {
 	return c.do(ctx, http.MethodPost, c.api("/v1/reconcile"), body, nil)
 }
 
+// Simulate runs a dry-run admission check against dashd. opsJSON must be
+// a JSON-encoded array of service.SimulateOp records. The server wraps
+// it under {"ops": [...]} on the wire — we do that here so callers can
+// just hand us the raw array bytes.
+func (c *Client) Simulate(ctx context.Context, opsJSON []byte) (*client.SimulateResult, error) {
+	if len(opsJSON) == 0 {
+		return nil, pkgerrors.New(pkgerrors.CodeInvalidArgument, "rest: simulate: opsJSON is empty")
+	}
+	// We marshal a synthetic envelope rather than parse + re-marshal the
+	// raw bytes — this avoids redundant work and preserves the exact
+	// proto-shaped specs operators may have crafted.
+	body := map[string]json.RawMessage{"ops": json.RawMessage(opsJSON)}
+	var out client.SimulateResult
+	if err := c.do(ctx, http.MethodPost, c.api("/v1/simulate"), body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // --- Admin views ---
 
 // AdminDrift returns live add/update/remove items for one DPU.
