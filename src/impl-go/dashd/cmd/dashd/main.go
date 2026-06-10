@@ -26,6 +26,8 @@ import (
 	adminserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/admin"
 	grpcserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/grpc"
 	restserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/rest"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
+	etcdstore "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store/etcd"
 	filstore "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store/file"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/subscribe"
 )
@@ -90,11 +92,13 @@ if cfg.Auth.Mode == "" || cfg.Auth.Mode == "none" {
 	)
 }
 
-// 3. Open store.
-st, err := filstore.Open(cfg.Storage.File.StateDir)
+// 3. Open store. The backend is selected by cfg.Storage.Backend; PA-1b
+// adds "etcd" alongside the today-default "file". "raft" is reserved
+// for PF (controllerless mode) and rejected at config-validation time.
+st, err := openStore(rootStoreCtx(), cfg)
 if err != nil {
-slog.Error("store open failed", "error", err)
-os.Exit(1)
+	slog.Error("store open failed", "backend", cfg.Storage.Backend, "error", err)
+	os.Exit(1)
 }
 
 // 4. Build inventory.
@@ -381,5 +385,41 @@ func parseLogLevel(s string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
+	}
+}
+
+// rootStoreCtx returns a short-lived context for the store-open call.
+// We don't want the store dial to inherit the daemon-wide signal-
+// notification context because that context is created later, after
+// the store is open. A bounded 30s context here is generous for both
+// a local file mkdir and an etcd cluster dial.
+func rootStoreCtx() context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Intentionally leak the cancel: openStore returns quickly under any
+	// healthy condition; under an unhealthy one the process is about to
+	// exit anyway. Avoiding "defer cancel()" here keeps the helper
+	// callable from one-shot top-level code.
+	_ = cancel
+	return ctx
+}
+
+// openStore picks the configured backend and returns a ready-to-use
+// store. PA-1b adds the "etcd" branch alongside the today-default
+// "file". "raft" is rejected at config validation, never reaches here.
+func openStore(ctx context.Context, cfg *config.Config) (store.DesiredStore, error) {
+	switch cfg.Storage.Backend {
+	case "file":
+		return filstore.Open(cfg.Storage.File.StateDir)
+	case "etcd":
+		return etcdstore.Open(ctx, etcdstore.Config{
+			Endpoints:   cfg.Storage.Etcd.Endpoints,
+			KeyPrefix:   cfg.Storage.Etcd.KeyPrefix,
+			DialTimeout: cfg.Storage.Etcd.DialTimeout,
+			CertFile:    cfg.Storage.Etcd.TLS.CertFile,
+			KeyFile:     cfg.Storage.Etcd.TLS.KeyFile,
+			CAFile:      cfg.Storage.Etcd.TLS.CAFile,
+		})
+	default:
+		return nil, fmt.Errorf("openStore: unsupported backend %q (config validator should have caught this)", cfg.Storage.Backend)
 	}
 }
