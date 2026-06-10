@@ -120,6 +120,11 @@ func TestPutEni(t *testing.T) {
 ts := setupTestServer(t)
 defer ts.Close()
 
+// PA-5: ENI references a Vnet — must exist first in the namespace.
+if r := doReq(t, ts, "PUT", "/v1/vnets/v1", `{"name":"v1","vni":1}`); r.StatusCode != 200 {
+	t.Fatalf("seed PUT vnet expected 200, got %d", r.StatusCode)
+}
+
 resp := doReq(t, ts, "PUT", "/v1/enis/eni-1",
 `{"name":"eni-1","vnet_name":"v1","mac_address":"aa:bb:cc:dd:ee:01","underlay_ip":"10.0.0.1"}`)
 if resp.StatusCode != 200 {
@@ -131,6 +136,16 @@ t.Fatalf("PUT eni expected 200, got %d", resp.StatusCode)
 func TestPutAclPolicy(t *testing.T) {
 ts := setupTestServer(t)
 defer ts.Close()
+
+// PA-5: AclPolicy references eni-1 — must exist in same namespace.
+// Seed the Vnet, then the ENI, then the ACL policy.
+if r := doReq(t, ts, "PUT", "/v1/default/vnets/v1", `{"name":"v1","vni":1}`); r.StatusCode != 200 {
+	t.Fatalf("seed PUT vnet expected 200, got %d", r.StatusCode)
+}
+if r := doReq(t, ts, "PUT", "/v1/default/enis/eni-1",
+	`{"name":"eni-1","vnet_name":"v1","mac_address":"aa:bb:cc:dd:ee:01","underlay_ip":"10.0.0.1"}`); r.StatusCode != 200 {
+	t.Fatalf("seed PUT eni expected 200, got %d", r.StatusCode)
+}
 
 resp := doReq(t, ts, "PUT", "/v1/default/acl-policies/pol-1",
 `{"name":"pol-1","stage":"inbound","eni_names":["eni-1"]}`)

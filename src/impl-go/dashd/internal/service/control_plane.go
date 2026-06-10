@@ -10,6 +10,7 @@ import (
 
 	dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/namespace"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 )
@@ -81,11 +82,12 @@ type controlPlaneService struct {
 	store store.DesiredStore
 	inv   *inventory.Inventory
 	rec   *reconciler.Reconciler
+	nsv   *namespace.Validator
 }
 
 // NewControlPlane creates a new ControlPlaneService.
 func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler) ControlPlaneService {
-	return &controlPlaneService{store: st, inv: inv, rec: rec}
+	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st)}
 }
 
 // validKinds is the set of spec kinds the service layer recognizes.
@@ -139,6 +141,9 @@ func (s *controlPlaneService) PutVnet(ctx context.Context, ns string, spec *dash
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidArgument)
 	}
 	ns = resolveNS(ns)
+	if err := s.nsv.CheckVnet(ctx, ns, spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "vnet", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -155,6 +160,9 @@ func (s *controlPlaneService) PutEni(ctx context.Context, ns string, spec *dashc
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidArgument)
 	}
 	ns = resolveNS(ns)
+	if err := s.nsv.CheckEni(ctx, ns, spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "eni", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -175,6 +183,9 @@ func (s *controlPlaneService) PutVnetMapping(ctx context.Context, ns string, spe
 		name = name + "-" + spec.GetIpAddress()
 	}
 	ns = resolveNS(ns)
+	if err := s.nsv.CheckVnetMapping(ctx, ns, spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "vnet_mapping", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -191,6 +202,9 @@ func (s *controlPlaneService) PutAclPolicy(ctx context.Context, ns string, spec 
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidArgument)
 	}
 	ns = resolveNS(ns)
+	if err := s.nsv.CheckAclPolicy(ctx, ns, spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "acl_policy", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -207,6 +221,9 @@ func (s *controlPlaneService) PutRoutePolicy(ctx context.Context, ns string, spe
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidArgument)
 	}
 	ns = resolveNS(ns)
+	if err := s.nsv.CheckRoutePolicy(ctx, ns, spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "route_policy", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -223,6 +240,9 @@ func (s *controlPlaneService) PutHaSet(ctx context.Context, ns string, spec *das
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidArgument)
 	}
 	ns = resolveNS(ns)
+	if err := s.nsv.CheckHaSet(ctx, ns, spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "ha_set", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -239,6 +259,9 @@ if name == "" {
 return nil, fmt.Errorf("%w: name is required", ErrInvalidArgument)
 }
 ns = resolveNS(ns)
+if err := s.nsv.CheckServiceTunnel(ctx, ns, spec); err != nil {
+	return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+}
 gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "service_tunnel", Name: name}, spec, int64(spec.ExpectedGeneration))
 	if err != nil {
 		return nil, err
