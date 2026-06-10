@@ -195,8 +195,9 @@ DashCenter\
 │       ├── cmd\dashctl\main.go  ← entry point
 │       ├── Makefile             ← build / test / image targets
 │       └── bin\                 ← where make build writes dashctl.exe
-└── explore-with-docker\
-    └── manual-handson.md        ← THIS FILE
+└── docs\explore-with-docker\
+    ├── manual-handson.md        ← THIS FILE
+    └── manifests\               ← inlined experiment manifests (5 files)
 ```
 
 Everything you need to run the lab is under `deploy\dashctl-fleet\` and
@@ -1642,7 +1643,7 @@ view uses the **admin** projection; the REST projection
 ## E2.4 — Apply the full Phase-1 policy set in one shot
 
 The repo ships a complete manifest set at
-`explore-with-docker/manifests/`. Five files, applied in lexicographic
+`docs/explore-with-docker/manifests/`. Five files, applied in lexicographic
 order:
 
 | File | Specs | Lines |
@@ -1656,7 +1657,7 @@ order:
 Apply them all at once:
 
 ```powershell
-PS> & $bin -n default apply -f c:\WorkSpace\PS\PublicRepo\DashCenter\explore-with-docker\manifests
+PS> & $bin -n default apply -f c:\WorkSpace\PS\PublicRepo\DashCenter\docs\explore-with-docker\manifests
 vnet/vnet-app apply in namespace default (generation 1)
 vnet/vnet-db apply in namespace default (generation 1)
 eni/eni-app-01 apply in namespace default (generation 1)
@@ -1767,7 +1768,7 @@ vnet/vnet-db
 
 Selectors today are **client-side**: dashctl pulls the full list, then
 filters in-process. Server-side push-down is a Phase-2 enhancement
-(see [specs/Impl-Plan/dashctl-impl-phases.md](../specs/Impl-Plan/dashctl-impl-phases.md) §"Honest open items").
+(see [specs/Impl-Plan/dashctl-impl-phases.md](../../specs/Impl-Plan/dashctl-impl-phases.md) §"Honest open items").
 
 ### E2.5.2 — ENIs (the most interesting kind)
 
@@ -2196,7 +2197,7 @@ like you would on the host:
 
 ```powershell
 PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm `
->>   -v "${PWD}/explore-with-docker/manifests:/work:ro" `
+>>   -v "${PWD}/docs/explore-with-docker/manifests:/work:ro" `
 >>   --entrypoint /usr/local/bin/dashctl `
 >>   dashctl -n default apply -f /work
 ```
@@ -2264,8 +2265,8 @@ By the end of Experiment 2 you have:
 - Torn the lab down cleanly with both "keep state" and "wipe state"
   options.
 
-You can now point to any line of [src/impl-go/dashd/](../src/impl-go/dashd/) or
-[src/impl-go/dashctl/](../src/impl-go/dashctl/) and have a concrete mental model
+You can now point to any line of [src/impl-go/dashd/](../../src/impl-go/dashd/) or
+[src/impl-go/dashctl/](../../src/impl-go/dashctl/) and have a concrete mental model
 of what request, what file, what response, what dispatch the code is
 producing.
 
