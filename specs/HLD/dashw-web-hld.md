@@ -387,18 +387,109 @@ Deep-dive into a single DPU.
 | **Policy summary** | Accordion listing AclPolicies and RoutePolicies applied to this DPU's ENIs. |
 | **Flow table** | Paginated, sortable table of active flows (`WS /ws/flows/{dpuId}` in Phase B, `GET /admin/observed?dpu={id}` in Phase A). Columns: src, dst, proto, port, direction, action, age, pkts, bytes. |
 
-### 6.4 Vnet View
+### 6.4 Vnet View — Dual-Plane Interactive Canvas
 
-Vnet-centric perspective.
+The Vnet View is the most visually ambitious page in the console. It
+renders a **dual-plane interactive canvas** that reveals the relationship
+between a Vnet's overlay abstractions (ENIs, VNI, mappings) and its
+underlay reality (DPU physical endpoints, tunnel mesh). The canvas is
+divided into two visual planes separated by an animated layer divider.
 
-| Panel | Description |
+#### Canvas layout
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  O V E R L A Y   P L A N E      (top ~38%, dark navy, subtle grid) │
+│                                                                     │
+│          ⬤  vnet-prod                    VNI: 10001                 │
+│       (glowing cyan circle)         (amber badge, pulsing)          │
+│            │         │    │    │         │                           │
+│          ENI₁      ENI₂  ENI₃ ENI₄     ENI₅  …  ENI₁₀              │
+│     (small cyan rounded rects, MAC below, Vnet color glow)          │
+│         connectors descend through layer divider ↓                  │
+│                                                                     │
+├────── ─ ─ O V E R L A Y  │  U N D E R L A Y ─ ─ ─────────────────┤
+│                                                                     │
+│  U N D E R L A Y   P L A N E    (bottom ~62%, deeper navy, dots)   │
+│                                                                     │
+│            ⬡ DPU-1          ⬡ DPU-2                                │
+│         (hexagon)         (hexagon)                                 │
+│                   ╲       ╱                                         │
+│      ⬡ DPU-5 ──── ╳ ────── ⬡ DPU-3      ← full mesh tunnels      │
+│                   ╱       ╲                                         │
+│            ⬡ DPU-4          (10 edges, animated cyan particles)     │
+│                                                                     │
+│  Each DPU hexagon:                                                  │
+│  • 2 ENI sub-badges inside (MAC short form)                        │
+│  • health-state ring (green / amber / red glow)                     │
+│  • underlay IP label below (JetBrains Mono)                         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### Entry animation (Vnet Property Flash)
+
+On mount, a staggered Framer Motion entrance sequence (900ms total):
+
+| Timing | Animation |
 |---|---|
-| **Header** | Vnet name, VNI, namespace, GUID, labels. |
-| **DPU + ENI topology** | Sub-graph showing all DPUs hosting ENIs in this Vnet, with ENI nodes and capacity annotations. |
-| **ENI list** | Table of ENIs in this Vnet: name, MAC, underlay IP, DPU placement, admin state. |
-| **Vnet mappings** | Table of VnetMappingSpecs: src IP → dst IP, MAC, action, params. |
-| **Route policies** | Tree view of RoutePolicySpecs associated with this Vnet: prefix → next-hop type → target. |
-| **Tunnel endpoints** | List of ServiceTunnelSpecs with local/remote underlay IPs and VNIs. |
+| `t=0ms` | Canvas fades in from `opacity 0` (200ms ease-out) |
+| `t=200ms` | Vnet circle scales in from 0 (spring: stiffness 300, damping 20) + name typewriter effect |
+| `t=350ms` | VNI badge slides in from right + glow pulse (3 repeats) |
+| `t=500ms` | ENI nodes cascade downward (stagger 60ms each, `translateY: −20→0`, fade in) |
+| `t=700ms` | Layer divider line draws left→right (SVG `stroke-dashoffset`, 300ms) |
+| `t=800ms` | DPU hexagons scale in (pentagon order DPU-1→5, stagger 80ms, spring) |
+| `t=1100ms` | Tunnel edges draw in (`stroke-dashoffset`, stagger 50ms per edge) |
+| `t=1500ms` | Particle animation starts on all tunnel edges (continuous loop) |
+
+#### Full mesh tunnel visualization
+
+5 DPUs → **C(5,2) = 10 tunnel edges**, rendered as cubic Bézier
+curves that cross the overlay/underlay divider line. Each tunnel edge:
+
+- **Stroke**: `#00D4FF` at 40% opacity (default), 1.5px
+- **Hover**: brightens to 100% opacity, width → 2.5px, glow filter
+  `drop-shadow(0 0 4px #00D4FF)`
+- **Animated particles**: 3 dots per edge, `opacity 0→1→0`, staggered
+  phase, looping — creates impression of flowing traffic
+- **Click** → opens `TunnelDetailDrawer` (right sheet, 420px)
+
+The Bézier control points are positioned so curves pull **upward into
+the overlay region**, visually conveying that tunnels carry VNI-tagged
+overlay traffic through the underlay.
+
+#### DPU hexagon interactions
+
+| Action | Behavior |
+|---|---|
+| **Hover** | `DpuTooltip` glass card floats near cursor: DPU ID, state, underlay IP, ENI count/max, routes used/max, ACL rules used/max, flow count/max. Appears with 150ms delay, fade-in. |
+| **Click** | Navigate to `/dpu/{id}` (DPU Detail View). |
+
+#### Tunnel detail drawer
+
+On tunnel edge click, a right-side `Sheet` (420px) opens:
+
+| Section | Fields |
+|---|---|
+| **Identity** | Source DPU ↔ Destination DPU, tunnel name |
+| **Overlay** | Vnet name, VNI |
+| **Underlay** | Local underlay IP, remote underlay IP, MTU, state |
+| **Stats** (Phase B) | Packets/s sparkline, bytes/s sparkline, drop count |
+
+#### Data tabs (below canvas)
+
+| Tab | Content |
+|---|---|
+| **ENIs** | DataTable: name, MAC, underlay IP, DPU placement, admin state. Row click → ENI detail. |
+| **Mappings** | DataTable: src IP → dst IP, MAC, action, params. |
+| **Routes** | Tree view (PrefixTree component): prefix → next-hop type → target. |
+| **Tunnels** | DataTable: name, local IP, remote IP, VNI, state. |
+
+#### BFF aggregation endpoint
+
+`GET /api/console/vnet/{name}/canvas` returns a pre-computed canvas
+data model containing DPU positions, ENI placements, tunnel endpoints,
+and Vnet properties — enabling the SPA to render the canvas without
+multiple round-trips.
 
 ### 6.5 Routing View
 

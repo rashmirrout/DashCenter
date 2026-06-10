@@ -1616,18 +1616,830 @@ DpuView
     ← useFlows(dpuId) WS Phase B or poll Phase A
 ```
 
-### 21. Vnet View (`/vnet/:vnetName`)
+### 21. Vnet View — Dual-Plane Interactive Canvas (`/vnet/:vnetName`)
+
+The Vnet View is the most visually ambitious page in the console. It
+renders a **dual-plane interactive canvas** (overlay above, underlay
+below) with full mesh tunnel visualization, animated entry sequences,
+and rich interactive behaviors on every element.
+
+#### 21.1 Component tree
 
 ```
 VnetView
-├── VnetHeader (name, VNI, ns, GUID, labels)
-├── VnetTopology (sub-graph: DPUs + ENIs in this Vnet)
-├── Tabs: "ENIs" | "Mappings" | "Routes" | "Tunnels"
-│   ├── VnetEniTable (DataTable)
-│   ├── VnetMappingTable (src→dst, MAC, action)
-│   ├── VnetRouteTree (tree: prefix → next-hop)
-│   └── VnetTunnelList (local↔remote, VNI)
+├── VnetPropertyFlash                ← entry animation orchestrator
+│   └── AnimatePresence (Framer Motion)
+├── VnetCanvas                       ← main React Flow canvas (height: 65vh)
+│   ├── ── Overlay Plane (top ~38%) ──────────────────────────────────
+│   │   ├── VnetCircleNode           (custom RF node: glowing cyan ⬤)
+│   │   │   ├── label: vnet name (Inter 18px 600)
+│   │   │   └── VniBadge             (amber pill: "VNI: 10001", pulsing)
+│   │   └── OverlayEniNode ×N        (custom RF node: small cyan rounded rect)
+│   │       ├── label: ENI name (12px)
+│   │       └── sublabel: MAC address short (JetBrains Mono 11px)
+│   │
+│   ├── ── Layer Divider ─────────────────────────────────────────────
+│   │   └── LayerDividerEdge         (custom RF edge: dashed horizontal line)
+│   │       └── label: "OVERLAY │ UNDERLAY" (text-secondary, 11px, centered)
+│   │
+│   ├── ── Underlay Plane (bottom ~62%) ──────────────────────────────
+│   │   ├── DpuHexNode ×5            (custom RF node: SVG hexagon, 90px)
+│   │   │   ├── hexagon border: health-state glow ring
+│   │   │   │   ├── HEALTHY: #00FF88, slow pulse (2s)
+│   │   │   │   ├── DEGRADED: #FFB800, medium pulse (1s)
+│   │   │   │   └── OFFLINE: #FF3860, fast pulse (0.5s)
+│   │   │   ├── DPU ID label (Inter 13px 600, inside hexagon)
+│   │   │   ├── EniSubBadge ×2       (mini cyan rects inside hexagon)
+│   │   │   │   └── label: MAC short "aa:bb" (JetBrains Mono 9px)
+│   │   │   └── underlay IP below hexagon (JetBrains Mono 11px, text-muted)
+│   │   │
+│   │   └── TunnelEdge ×10           (custom RF edge: cubic Bézier + particles)
+│   │       ├── stroke: #00D4FF @ 40% opacity, 1.5px
+│   │       ├── TunnelParticle ×3    (motion.circle, staggered phase loop)
+│   │       └── hover state: 100% opacity, 2.5px, drop-shadow glow
+│   │
+│   ├── ── Connector Edges ───────────────────────────────────────────
+│   │   └── EniConnectorEdge ×10     (overlay ENI → parent DPU hexagon)
+│   │       └── dashed cyan, 1px, crosses layer divider
+│   │
+│   ├── Controls (React Flow: zoom, fit-view, minimap)
+│   └── Background (React Flow: dots pattern, #0A0E1A/#111827 split)
+│
+├── DpuTooltip                       ← floating glass card on DPU hover
+│   └── GlassCard (glow="cyan", hoverable=false)
+│       ├── DPU ID + StatusBadge
+│       ├── IP: underlay IP
+│       ├── ENIs: used/max (CapacityBar inline)
+│       ├── Routes: used/max
+│       ├── ACL Rules: used/max
+│       └── Flows: used/max
+│
+├── TunnelDetailDrawer               ← right Sheet (420px) on tunnel click
+│   └── Sheet (shadcn/ui)
+│       ├── Header: "DPU-1 ↔ DPU-3" with StatusBadge
+│       ├── Section "Overlay": Vnet name, VNI
+│       ├── Section "Underlay": local IP, remote IP, MTU, state
+│       └── Section "Stats" (Phase B): SparklineChart ×2 (pkts/s, bytes/s), drops
+│
+└── VnetDataTabs                     ← tabbed tables below canvas
+    └── Tabs: "ENIs" | "Mappings" | "Routes" | "Tunnels"
+        ├── VnetEniTable → DataTable (name, MAC, underlay IP, DPU, admin state)
+        │   └── row click: navigate('/dpu/{dpuId}')
+        ├── VnetMappingTable → DataTable (src IP → dst IP, MAC, action, params)
+        ├── VnetRouteTree → PrefixTree (D3: prefix → next-hop, colored)
+        └── VnetTunnelTable → DataTable (name, local IP, remote IP, VNI, state)
 ```
+
+#### 21.2 Canvas data model (TypeScript types)
+
+```typescript
+// Request: GET /api/console/vnet/{name}/canvas
+// Response: VnetCanvasData
+
+interface VnetCanvasData {
+  vnet: {
+    name: string;
+    vni: number;
+    namespace: string;
+    guid: string;
+    labels: Record<string, string>;
+    eni_count: number;
+  };
+  dpus: CanvasDpu[];
+  tunnels: CanvasTunnel[];
+  enis: CanvasEni[];
+}
+
+interface CanvasDpu {
+  id: string;
+  state: 'HEALTHY' | 'DEGRADED' | 'OFFLINE' | 'UNKNOWN';
+  underlay_ip: string;
+  capacity: {
+    enis: { used: number; max: number };
+    routes: { used: number; max: number };
+    acl_rules: { used: number; max: number };
+    flows: { used: number; max: number };
+  };
+  eni_ids: string[];       // ENIs on this DPU belonging to this Vnet
+}
+
+interface CanvasTunnel {
+  id: string;              // e.g., "dpu-1--dpu-3"
+  name: string;
+  src_dpu_id: string;
+  dst_dpu_id: string;
+  local_underlay_ip: string;
+  remote_underlay_ip: string;
+  vni: number;
+  mtu: number;
+  state: 'ACTIVE' | 'DOWN' | 'UNKNOWN';
+}
+
+interface CanvasEni {
+  id: string;
+  name: string;
+  mac_address: string;
+  underlay_ip: string;
+  dpu_id: string;          // which DPU hosts this ENI
+  admin_state: 'up' | 'down';
+}
+```
+
+#### 21.3 Layout algorithm — Pentagon ring + overlay positioning
+
+```typescript
+// --- Constants ---
+const CANVAS_WIDTH = 1200;
+const CANVAS_HEIGHT = 800;
+const DIVIDER_Y = CANVAS_HEIGHT * 0.38;       // 304px — overlay/underlay split
+
+// --- Overlay plane positions ---
+const VNET_CIRCLE_POS = { x: CANVAS_WIDTH / 2, y: 80 };
+
+function computeOverlayEniPositions(eniCount: number): Position[] {
+  const startX = (CANVAS_WIDTH - eniCount * 100) / 2;
+  return Array.from({ length: eniCount }, (_, i) => ({
+    x: startX + i * 100 + 50,
+    y: 200,
+  }));
+}
+
+// --- Underlay plane positions (pentagon ring) ---
+const UNDERLAY_CENTER = { x: CANVAS_WIDTH / 2, y: DIVIDER_Y + (CANVAS_HEIGHT - DIVIDER_Y) / 2 };
+const RING_RADIUS = 220;
+
+function computePentagonPositions(dpuCount: number): Position[] {
+  return Array.from({ length: dpuCount }, (_, i) => {
+    const angle = (i * 2 * Math.PI) / dpuCount - Math.PI / 2;
+    return {
+      x: UNDERLAY_CENTER.x + RING_RADIUS * Math.cos(angle),
+      y: UNDERLAY_CENTER.y + RING_RADIUS * Math.sin(angle),
+    };
+  });
+}
+
+// --- Full mesh tunnel edges ---
+// C(N,2) edges for N DPUs
+function computeFullMeshEdges(dpuIds: string[]): Array<[string, string]> {
+  const edges: Array<[string, string]> = [];
+  for (let i = 0; i < dpuIds.length; i++) {
+    for (let j = i + 1; j < dpuIds.length; j++) {
+      edges.push([dpuIds[i], dpuIds[j]]);
+    }
+  }
+  return edges; // 5 DPUs → 10 edges
+}
+```
+
+#### 21.4 Custom React Flow node: `DpuHexNode`
+
+```typescript
+import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { motion } from 'framer-motion';
+
+interface DpuHexNodeData {
+  dpuId: string;
+  state: 'HEALTHY' | 'DEGRADED' | 'OFFLINE' | 'UNKNOWN';
+  underlayIp: string;
+  enis: Array<{ id: string; macShort: string }>;
+}
+
+const STATE_COLORS = {
+  HEALTHY: '#00FF88',
+  DEGRADED: '#FFB800',
+  OFFLINE: '#FF3860',
+  UNKNOWN: '#6B7280',
+} as const;
+
+const PULSE_DURATIONS = {
+  HEALTHY: 2,
+  DEGRADED: 1,
+  OFFLINE: 0.5,
+  UNKNOWN: 0,
+} as const;
+
+// Hexagon SVG: 90px wide, 100px tall
+const HEX_POINTS = '45,2 85,24 85,72 45,94 5,72 5,24';
+
+export function DpuHexNode({ data }: NodeProps<DpuHexNodeData>) {
+  const color = STATE_COLORS[data.state];
+  const pulse = PULSE_DURATIONS[data.state];
+
+  return (
+    <motion.div
+      initial={{ scale: 0 }}
+      animate={{ scale: 1 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+      className="relative cursor-pointer"
+    >
+      <svg width="90" height="100" viewBox="0 0 90 96">
+        {/* Outer glow ring */}
+        {pulse > 0 && (
+          <polygon points={HEX_POINTS} fill="none" stroke={color}
+            strokeWidth="2" opacity="0.3">
+            <animate attributeName="opacity" values="0.1;0.5;0.1"
+              dur={`${pulse}s`} repeatCount="indefinite" />
+          </polygon>
+        )}
+        {/* Main hexagon */}
+        <polygon points={HEX_POINTS}
+          fill="var(--bg-surface)" stroke={color} strokeWidth="1.5" />
+        {/* DPU ID label */}
+        <text x="45" y="38" textAnchor="middle" fill="var(--text-primary)"
+          fontSize="12" fontFamily="Inter" fontWeight="600">
+          {data.dpuId}
+        </text>
+        {/* ENI sub-badges inside hexagon */}
+        {data.enis.slice(0, 2).map((eni, i) => (
+          <g key={eni.id} transform={`translate(${15 + i * 30}, 50)`}>
+            <rect width="26" height="14" rx="3"
+              fill="var(--accent-cyan-dim)" stroke="var(--accent-cyan)"
+              strokeWidth="0.5" />
+            <text x="13" y="10" textAnchor="middle"
+              fill="var(--accent-cyan)" fontSize="8"
+              fontFamily="JetBrains Mono">
+              {eni.macShort}
+            </text>
+          </g>
+        ))}
+      </svg>
+      {/* Underlay IP below */}
+      <div className="text-center mt-1 font-mono text-[11px] text-muted">
+        {data.underlayIp}
+      </div>
+      {/* React Flow handles */}
+      <Handle type="target" position={Position.Top} className="opacity-0" />
+      <Handle type="source" position={Position.Bottom} className="opacity-0" />
+    </motion.div>
+  );
+}
+```
+
+#### 21.5 Custom React Flow edge: `TunnelEdge` with animated particles
+
+```typescript
+import { type EdgeProps, getBezierPath } from '@xyflow/react';
+import { motion } from 'framer-motion';
+import { useState, useCallback, useMemo } from 'react';
+
+interface TunnelEdgeData {
+  tunnelId: string;
+  state: 'ACTIVE' | 'DOWN' | 'UNKNOWN';
+  vni: number;
+}
+
+const PARTICLE_COUNT = 3;
+
+export function TunnelEdge({
+  id, sourceX, sourceY, targetX, targetY,
+  sourcePosition, targetPosition, data, style,
+}: EdgeProps<TunnelEdgeData>) {
+  const [hovered, setHovered] = useState(false);
+
+  // Bézier with control points pulling UP into overlay region
+  // to visually convey "crossing the layer boundary"
+  const midY = Math.min(sourceY, targetY) - 120; // pull into overlay
+  const path = `M ${sourceX} ${sourceY}
+                C ${sourceX} ${midY},
+                  ${targetX} ${midY},
+                  ${targetX} ${targetY}`;
+
+  const pathLength = useMemo(() => {
+    // approximate for animation duration calc
+    const dx = targetX - sourceX;
+    const dy = targetY - sourceY;
+    return Math.sqrt(dx * dx + dy * dy) * 1.4; // bezier is ~1.4× straight
+  }, [sourceX, sourceY, targetX, targetY]);
+
+  return (
+    <g
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="cursor-pointer"
+    >
+      {/* Invisible wide hit area for hover/click */}
+      <path d={path} fill="none" stroke="transparent" strokeWidth="16" />
+
+      {/* Visible tunnel line */}
+      <motion.path
+        d={path}
+        fill="none"
+        stroke="#00D4FF"
+        strokeWidth={hovered ? 2.5 : 1.5}
+        strokeOpacity={hovered ? 1.0 : 0.4}
+        filter={hovered ? 'drop-shadow(0 0 4px #00D4FF)' : 'none'}
+        transition={{ duration: 0.15 }}
+      />
+
+      {/* Animated particles flowing along the edge */}
+      {data?.state === 'ACTIVE' &&
+        Array.from({ length: PARTICLE_COUNT }, (_, i) => (
+          <motion.circle
+            key={`${id}-particle-${i}`}
+            r={hovered ? 3 : 2}
+            fill="#00D4FF"
+            filter="drop-shadow(0 0 3px #00D4FF)"
+          >
+            <animateMotion
+              dur={`${2 + i * 0.3}s`}
+              repeatCount="indefinite"
+              begin={`${i * 0.7}s`}
+              path={path}
+            />
+            <animate
+              attributeName="opacity"
+              values="0;1;1;0"
+              dur={`${2 + i * 0.3}s`}
+              repeatCount="indefinite"
+              begin={`${i * 0.7}s`}
+            />
+          </motion.circle>
+        ))}
+    </g>
+  );
+}
+```
+
+#### 21.6 Entry animation — `VnetPropertyFlash` orchestrator
+
+```typescript
+import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
+import { useState, useEffect } from 'react';
+
+interface VnetPropertyFlashProps {
+  vnetName: string;
+  vni: number;
+  eniCount: number;
+  dpuCount: number;
+  onComplete: () => void;
+}
+
+// Staggered entry sequence (see HLD §6.4 timing table)
+const STAGES = {
+  CANVAS_FADE:     { delay: 0,    duration: 0.2 },
+  VNET_CIRCLE:     { delay: 0.2,  spring: { stiffness: 300, damping: 20 } },
+  VNI_BADGE:       { delay: 0.35, duration: 0.3, glowRepeat: 3 },
+  ENI_CASCADE:     { delay: 0.5,  stagger: 0.06, duration: 0.25 },
+  LAYER_DIVIDER:   { delay: 0.7,  duration: 0.3 },
+  DPU_HEXAGONS:    { delay: 0.8,  stagger: 0.08, spring: { stiffness: 300, damping: 20 } },
+  TUNNEL_DRAW:     { delay: 1.1,  stagger: 0.05, duration: 0.4 },
+  PARTICLES_START: { delay: 1.5 },
+} as const;
+
+export function VnetPropertyFlash({
+  vnetName, vni, eniCount, dpuCount, onComplete,
+}: VnetPropertyFlashProps) {
+  const [stage, setStage] = useState(0);
+
+  useEffect(() => {
+    const timer = setTimeout(onComplete, 1800); // total sequence ~1.5s + buffer
+    return () => clearTimeout(timer);
+  }, [onComplete]);
+
+  return (
+    <AnimatePresence>
+      {/* Stage 0: Canvas container fades in */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: STAGES.CANVAS_FADE.duration }}
+      >
+        {/* Stage 1: Vnet name typewriter in top-left corner */}
+        <motion.h2
+          className="absolute top-4 left-6 text-2xl font-bold text-accent-cyan z-50"
+          initial={{ opacity: 0, width: 0 }}
+          animate={{ opacity: 1, width: 'auto' }}
+          transition={{ delay: STAGES.VNET_CIRCLE.delay, duration: 0.4 }}
+          style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}
+        >
+          {vnetName}
+        </motion.h2>
+
+        {/* Stage 1b: VNI badge slides in */}
+        <motion.div
+          className="absolute top-4 right-6 z-50"
+          initial={{ x: 60, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ delay: STAGES.VNI_BADGE.delay, duration: 0.3 }}
+        >
+          <motion.span
+            className="px-3 py-1 rounded-full bg-accent-amber/20 text-accent-amber
+                        font-mono text-sm border border-accent-amber/30"
+            animate={{ boxShadow: [
+              '0 0 0px #FFB800',
+              '0 0 12px #FFB800',
+              '0 0 0px #FFB800',
+            ]}}
+            transition={{ delay: STAGES.VNI_BADGE.delay + 0.1,
+                          duration: 0.6, repeat: 2 }}
+          >
+            VNI: {vni}
+          </motion.span>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+```
+
+#### 21.7 `DpuTooltip` — floating glass card on DPU hover
+
+```typescript
+import { GlassCard } from '@/components/GlassCard';
+import { StatusBadge } from '@/components/StatusBadge';
+import type { CanvasDpu } from '@/api/types';
+
+interface DpuTooltipProps {
+  dpu: CanvasDpu;
+  position: { x: number; y: number };
+  visible: boolean;
+}
+
+// Positioned absolutely, offset from cursor, glass morphism
+export function DpuTooltip({ dpu, position, visible }: DpuTooltipProps) {
+  if (!visible) return null;
+
+  const capBar = (used: number, max: number) => {
+    const pct = max > 0 ? (used / max) * 100 : 0;
+    const color = pct > 90 ? 'bg-accent-red' : pct > 70 ? 'bg-accent-amber' : 'bg-accent-cyan';
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <div className="w-20 h-1.5 bg-border rounded-full overflow-hidden">
+          <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+        </div>
+        <span className="font-mono text-text-secondary">{used}/{max}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="fixed z-[100] pointer-events-none"
+      style={{ left: position.x + 16, top: position.y - 8 }}
+    >
+      <GlassCard glow="cyan" hoverable={false} className="p-3 min-w-[220px]">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-sm font-semibold text-text-primary">⬡ {dpu.id}</span>
+          <StatusBadge state={dpu.state} size="sm" />
+        </div>
+        <div className="space-y-1.5 text-xs">
+          <div className="flex justify-between">
+            <span className="text-text-secondary">IP</span>
+            <span className="font-mono text-text-primary">{dpu.underlay_ip}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-text-secondary">ENIs</span>
+            {capBar(dpu.capacity.enis.used, dpu.capacity.enis.max)}
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-text-secondary">Routes</span>
+            {capBar(dpu.capacity.routes.used, dpu.capacity.routes.max)}
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-text-secondary">ACL Rules</span>
+            {capBar(dpu.capacity.acl_rules.used, dpu.capacity.acl_rules.max)}
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-text-secondary">Flows</span>
+            {capBar(dpu.capacity.flows.used, dpu.capacity.flows.max)}
+          </div>
+        </div>
+      </GlassCard>
+    </div>
+  );
+}
+```
+
+#### 21.8 `TunnelDetailDrawer` — right sheet on tunnel click
+
+```typescript
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { StatusBadge } from '@/components/StatusBadge';
+import { SparklineChart } from '@/components/SparklineChart';
+import type { CanvasTunnel } from '@/api/types';
+
+interface TunnelDetailDrawerProps {
+  tunnel: CanvasTunnel | null;
+  vnetName: string;
+  open: boolean;
+  onClose: () => void;
+}
+
+export function TunnelDetailDrawer({ tunnel, vnetName, open, onClose }: TunnelDetailDrawerProps) {
+  if (!tunnel) return null;
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+      <SheetContent side="right" className="w-[420px] bg-bg-surface border-border">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2 text-text-primary">
+            <span className="font-mono">{tunnel.src_dpu_id}</span>
+            <span className="text-accent-cyan">↔</span>
+            <span className="font-mono">{tunnel.dst_dpu_id}</span>
+            <StatusBadge state={tunnel.state === 'ACTIVE' ? 'HEALTHY' : 'OFFLINE'} size="sm" />
+          </SheetTitle>
+        </SheetHeader>
+
+        <div className="mt-6 space-y-6">
+          {/* Overlay section */}
+          <section>
+            <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
+              Overlay
+            </h4>
+            <div className="space-y-2">
+              <InfoRow label="Vnet" value={vnetName} />
+              <InfoRow label="VNI" value={String(tunnel.vni)} mono />
+            </div>
+          </section>
+
+          {/* Underlay section */}
+          <section>
+            <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
+              Underlay
+            </h4>
+            <div className="space-y-2">
+              <InfoRow label="Local IP" value={tunnel.local_underlay_ip} mono />
+              <InfoRow label="Remote IP" value={tunnel.remote_underlay_ip} mono />
+              <InfoRow label="MTU" value={String(tunnel.mtu)} mono />
+              <InfoRow label="State" value={tunnel.state}
+                       badge={tunnel.state === 'ACTIVE' ? 'green' : 'red'} />
+            </div>
+          </section>
+
+          {/* Stats section (Phase B — live sparklines) */}
+          <section>
+            <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
+              Stats <span className="text-text-muted">(Phase B)</span>
+            </h4>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">Packets/s</span>
+                <SparklineChart data={[]} width={120} height={24} color="var(--accent-cyan)" />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">Bytes/s</span>
+                <SparklineChart data={[]} width={120} height={24} color="var(--accent-green)" />
+              </div>
+              <InfoRow label="Drops" value="—" />
+            </div>
+          </section>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function InfoRow({ label, value, mono, badge }: {
+  label: string; value: string; mono?: boolean;
+  badge?: 'green' | 'red' | 'amber';
+}) {
+  return (
+    <div className="flex justify-between items-center">
+      <span className="text-xs text-text-secondary">{label}</span>
+      <span className={`text-sm text-text-primary ${mono ? 'font-mono' : ''}`}>
+        {badge && <span className={`inline-block w-2 h-2 rounded-full mr-1.5
+          ${badge === 'green' ? 'bg-accent-green' : badge === 'red' ? 'bg-accent-red' : 'bg-accent-amber'}`} />}
+        {value}
+      </span>
+    </div>
+  );
+}
+```
+
+#### 21.9 `VnetCanvas` — main canvas component (wiring)
+
+```typescript
+import ReactFlow, {
+  Controls, MiniMap, Background, BackgroundVariant,
+  useNodesState, useEdgesState,
+  type Node, type Edge,
+} from '@xyflow/react';
+import { useNavigate } from 'react-router-dom';
+import { useCallback, useMemo, useState } from 'react';
+import { DpuHexNode } from './DpuHexNode';
+import { TunnelEdge } from './TunnelEdge';
+import { DpuTooltip } from './DpuTooltip';
+import { TunnelDetailDrawer } from './TunnelDetailDrawer';
+import {
+  computePentagonPositions, computeOverlayEniPositions,
+  computeFullMeshEdges, CANVAS_WIDTH, CANVAS_HEIGHT,
+  DIVIDER_Y, VNET_CIRCLE_POS,
+} from './layout';
+import type { VnetCanvasData, CanvasDpu, CanvasTunnel } from '@/api/types';
+
+const nodeTypes = {
+  dpuHex: DpuHexNode,
+  vnetCircle: VnetCircleNode,     // §21.10
+  overlayEni: OverlayEniNode,     // §21.11
+};
+
+const edgeTypes = {
+  tunnel: TunnelEdge,
+  eniConnector: EniConnectorEdge,  // dashed, crosses divider
+  layerDivider: LayerDividerEdge,  // horizontal dashed line
+};
+
+interface VnetCanvasProps {
+  data: VnetCanvasData;
+}
+
+export function VnetCanvas({ data }: VnetCanvasProps) {
+  const navigate = useNavigate();
+  const [hoveredDpu, setHoveredDpu] = useState<{ dpu: CanvasDpu; pos: { x: number; y: number } } | null>(null);
+  const [selectedTunnel, setSelectedTunnel] = useState<CanvasTunnel | null>(null);
+
+  // --- Compute node positions ---
+  const dpuPositions = useMemo(
+    () => computePentagonPositions(data.dpus.length),
+    [data.dpus.length]
+  );
+  const eniPositions = useMemo(
+    () => computeOverlayEniPositions(data.enis.length),
+    [data.enis.length]
+  );
+
+  // --- Build React Flow nodes ---
+  const nodes: Node[] = useMemo(() => [
+    // Vnet circle (overlay)
+    { id: 'vnet', type: 'vnetCircle', position: VNET_CIRCLE_POS,
+      data: { name: data.vnet.name, vni: data.vnet.vni } },
+    // ENI nodes (overlay)
+    ...data.enis.map((eni, i) => ({
+      id: `eni-${eni.id}`, type: 'overlayEni', position: eniPositions[i],
+      data: { name: eni.name, mac: eni.mac_address, state: eni.admin_state },
+    })),
+    // DPU hexagons (underlay)
+    ...data.dpus.map((dpu, i) => ({
+      id: `dpu-${dpu.id}`, type: 'dpuHex', position: dpuPositions[i],
+      data: {
+        dpuId: dpu.id, state: dpu.state, underlayIp: dpu.underlay_ip,
+        enis: data.enis.filter(e => e.dpu_id === dpu.id)
+          .map(e => ({ id: e.id, macShort: e.mac_address.slice(0, 5) })),
+      },
+    })),
+  ], [data, dpuPositions, eniPositions]);
+
+  // --- Build React Flow edges ---
+  const meshEdges = useMemo(() => computeFullMeshEdges(data.dpus.map(d => d.id)), [data.dpus]);
+
+  const edges: Edge[] = useMemo(() => [
+    // Layer divider (decorative)
+    { id: 'divider', type: 'layerDivider', source: 'divider-l', target: 'divider-r',
+      data: { y: DIVIDER_Y } },
+    // Tunnel edges (full mesh)
+    ...meshEdges.map(([src, dst], i) => {
+      const tunnel = data.tunnels.find(
+        t => (t.src_dpu_id === src && t.dst_dpu_id === dst) ||
+             (t.src_dpu_id === dst && t.dst_dpu_id === src)
+      );
+      return {
+        id: `tunnel-${src}-${dst}`, type: 'tunnel',
+        source: `dpu-${src}`, target: `dpu-${dst}`,
+        data: { tunnelId: tunnel?.id ?? '', state: tunnel?.state ?? 'UNKNOWN', vni: tunnel?.vni ?? 0 },
+      };
+    }),
+    // ENI connectors (overlay ENI → DPU)
+    ...data.enis.map(eni => ({
+      id: `conn-${eni.id}`, type: 'eniConnector',
+      source: `eni-${eni.id}`, target: `dpu-${eni.dpu_id}`,
+      animated: false,
+      style: { stroke: '#00D4FF', strokeWidth: 1, strokeDasharray: '4 4', opacity: 0.3 },
+    })),
+  ], [data, meshEdges]);
+
+  // --- Interaction handlers ---
+  const onNodeMouseEnter = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type === 'dpuHex') {
+      const dpu = data.dpus.find(d => d.id === node.data.dpuId);
+      if (dpu) setHoveredDpu({ dpu, pos: { x: node.position.x + 100, y: node.position.y } });
+    }
+  }, [data.dpus]);
+
+  const onNodeMouseLeave = useCallback(() => setHoveredDpu(null), []);
+
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type === 'dpuHex') navigate(`/dpu/${node.data.dpuId}`);
+  }, [navigate]);
+
+  const onEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    if (edge.type === 'tunnel') {
+      const tunnel = data.tunnels.find(t => t.id === edge.data?.tunnelId);
+      if (tunnel) setSelectedTunnel(tunnel);
+    }
+  }, [data.tunnels]);
+
+  return (
+    <div className="relative" style={{ height: '65vh', minHeight: 500 }}>
+      <ReactFlow
+        nodes={nodes} edges={edges}
+        nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
+        onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
+        fitView
+        proOptions={{ hideAttribution: true }}
+      >
+        <Controls position="bottom-right" />
+        <MiniMap nodeColor={(n) => n.type === 'dpuHex' ? '#00D4FF' : '#374151'}
+                 className="!bg-bg-primary !border-border" />
+        <Background variant={BackgroundVariant.Dots} color="#1F2937" gap={20} />
+      </ReactFlow>
+
+      {/* DPU hover tooltip */}
+      <DpuTooltip
+        dpu={hoveredDpu?.dpu!}
+        position={hoveredDpu?.pos ?? { x: 0, y: 0 }}
+        visible={!!hoveredDpu}
+      />
+
+      {/* Tunnel detail drawer */}
+      <TunnelDetailDrawer
+        tunnel={selectedTunnel}
+        vnetName={data.vnet.name}
+        open={!!selectedTunnel}
+        onClose={() => setSelectedTunnel(null)}
+      />
+    </div>
+  );
+}
+```
+
+#### 21.10 Additional custom nodes (brief specs)
+
+**`VnetCircleNode`** — Overlay plane: large glowing circle (`#00D4FF` ring, `backdrop-blur`, 60px radius). Label = Vnet name inside. `VniBadge` pill positioned to upper-right.
+
+**`OverlayEniNode`** — Small rounded rect (50×28px), `accent-cyan-dim` fill, cyan border. Label = ENI name (Inter 11px). Sub-label = MAC (JetBrains Mono 9px). Admin state dot (green/red, 4px).
+
+**`LayerDividerEdge`** — Full-width horizontal edge at `DIVIDER_Y`. Dashed stroke (`stroke-dasharray: 8 4`), `#374151`. Center label: `"OVERLAY │ UNDERLAY"` in `text-secondary` 11px. SVG `stroke-dashoffset` animate on entry (draws left→right in 300ms).
+
+**`EniConnectorEdge`** — Straight vertical dashed line from overlay ENI node → parent DPU hexagon in underlay. `#00D4FF` at 30% opacity, 1px, `stroke-dasharray: 4 4`. Crosses the layer divider.
+
+#### 21.11 BFF aggregation endpoint — `vnet/{name}/canvas`
+
+Added to `internal/api/aggregator.go`:
+
+```go
+// GET /api/console/vnet/{name}/canvas
+//
+// Produces a pre-computed canvas model for the Vnet View:
+// 1. Fetch Vnet spec                 → dashd REST GET /v1/{ns}/vnets/{name}
+// 2. List all ENIs in this Vnet      → dashd REST GET /v1/{ns}/enis?vnet={name}
+// 3. For each unique DPU hosting an ENI, fetch DPU status
+//    → dashd Admin GET /admin/health (extract per-DPU)
+// 4. List ServiceTunnels with this Vnet's VNI
+//    → dashd REST GET /v1/{ns}/service-tunnels?vni={vni}
+// 5. Merge into VnetCanvasData JSON response
+func (a *Aggregator) HandleVnetCanvas(w http.ResponseWriter, r *http.Request) {
+    vnetName := chi.URLParam(r, "name")
+    ns := r.URL.Query().Get("ns")
+    if ns == "" { ns = "default" }
+
+    // 1. Vnet
+    vnet, err := a.dashdREST.GetVnet(r.Context(), ns, vnetName)
+    // 2. ENIs
+    enis, err := a.dashdREST.ListEnis(r.Context(), ns, ListOptions{VnetFilter: vnetName})
+    // 3. Unique DPUs
+    dpuIDs := uniqueDpuIDs(enis)
+    health, err := a.dashdAdmin.GetHealth(r.Context())
+    dpus := extractDpuDetails(health, dpuIDs)
+    // 4. Tunnels (full mesh between DPUs in this Vnet)
+    tunnels, err := a.dashdREST.ListServiceTunnels(r.Context(), ns, ListOptions{VNIFilter: vnet.VNI})
+
+    canvas := VnetCanvasData{
+        Vnet:    vnetSummary(vnet, len(enis)),
+        Dpus:    dpus,
+        Tunnels: tunnels,
+        Enis:    mapEnisToCanvas(enis),
+    }
+    writeJSON(w, http.StatusOK, canvas)
+}
+```
+
+#### 21.12 Query hook
+
+```typescript
+export function useVnetCanvas(vnetName: string) {
+  return useQuery({
+    queryKey: ['vnet', 'canvas', vnetName],
+    queryFn: () => api.get<VnetCanvasData>(`/api/console/vnet/${vnetName}/canvas`),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    enabled: !!vnetName,
+  });
+}
+```
+
+#### 21.13 Accessibility & reduced motion
+
+- All animated elements check `prefers-reduced-motion`:
+  - If `reduce`: skip particle animations, use instant transitions, no typewriter
+  - Entry animation collapses to a single 300ms `opacity 0→1`
+- DPU hexagons and tunnel edges are keyboard-focusable (`tabIndex={0}`)
+- `aria-label` on every interactive node: `"DPU dpu-1, state healthy, click to view details"`
+- Tunnel edges: `role="link"` + `aria-label="Tunnel between DPU-1 and DPU-3, click for details"`
+- DpuTooltip content is announced via `aria-live="polite"` region
+- Canvas supports keyboard navigation: `Tab` to cycle nodes, `Enter` to click, `Escape` to close drawer
 
 ### 22. Routing View
 
