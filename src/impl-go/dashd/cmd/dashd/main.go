@@ -23,6 +23,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/schema"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 	adminserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/admin"
 	grpcserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/grpc"
@@ -141,8 +142,15 @@ if err := capTracker.Recount(rootStoreCtx(), st); err != nil {
 	slog.Warn("capacity: initial Recount failed; starting with zero counters", "error", err)
 }
 
+// 7c. Capability + schema gate (PB-3). nil-tolerant downstream.
+// Gate consults inventory.Capabilities advertised by each DPU at
+// RegisterDpu time. Until a DPU advertises, the gate is permissive
+// for that DPU (MC-3 forward-compat). Construction is lock-free —
+// the gate carries no internal state; it queries inventory live.
+capGate := schema.NewGate(inv)
+
 // 8. Create shared service layer (Phase 1B).
-cpService := service.NewControlPlane(st, inv, rec, capTracker)
+cpService := service.NewControlPlane(st, inv, rec, capTracker, capGate)
 obsService := service.NewObservability(inv, st, obs)
 
 // --- Dry-run mode ---

@@ -13,6 +13,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/namespace"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/schema"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 )
 
@@ -25,6 +26,12 @@ var ErrInvalidArgument = errors.New("invalid argument")
 // hard-fail when limits are advertised; nil limits allow writes through
 // (capacity tracker logs a warning).
 var ErrResourceExhausted = errors.New("resource exhausted")
+
+// ErrFailedPrecondition indicates a capability or schema gate rejected
+// the write (PB-3). Maps to HTTP 412 / gRPC FAILED_PRECONDITION. The
+// underlying schema-package error carries (dpu, kind, reason) so the
+// operator can act without reading dashd logs.
+var ErrFailedPrecondition = errors.New("failed precondition")
 
 // PutResult is the response from any Put* operation.
 type PutResult struct {
@@ -71,6 +78,15 @@ type ControlPlaneService interface {
 	PutInventory(ctx context.Context, dpus []DpuInput) error
 	GetInventory(ctx context.Context) ([]DpuStatus, error)
 
+	// RegisterDpu (PB-3) attaches advertised DpuCapacityLimits and
+	// DpuCapabilities to a DPU that was previously added via
+	// PutInventory. This is the capability-discovery seam: until a
+	// DPU calls RegisterDpu the schema gate is permissive (nil caps
+	// == "not yet known", MC-3 contract). The DPU must already exist
+	// in inventory; this RPC does not create one (use PutInventory
+	// for that).
+	RegisterDpu(ctx context.Context, reg DpuRegistration) error
+
 	Delete(ctx context.Context, ns, kind, name string) error
 	Get(ctx context.Context, ns, kind, name string) (*StoredItem, error)
 	List(ctx context.Context, ns, kind string) ([]*StoredItem, error)
@@ -92,6 +108,16 @@ type DpuInput struct {
 	Labels   map[string]string `json:"labels,omitempty"`
 }
 
+// DpuRegistration is the input for RegisterDpu (PB-3). At least one of
+// Limits or Capabilities should be non-nil — a registration with both
+// nil is rejected to avoid silently clearing previously-advertised
+// values via a misconfigured client.
+type DpuRegistration struct {
+	ID           string                          `json:"id"`
+	Limits       *dashcenterv1.DpuCapacityLimits `json:"limits,omitempty"`
+	Capabilities *dashcenterv1.DpuCapabilities   `json:"capabilities,omitempty"`
+}
+
 // controlPlaneService is the default implementation.
 type controlPlaneService struct {
 	store store.DesiredStore
@@ -103,13 +129,19 @@ type controlPlaneService struct {
 	// PutAclPolicy consult it before persisting and on success update
 	// its internal counters; Delete decrements them.
 	cap *capacity.Tracker
+	// gate is the capability/schema admission checker (PB-3). nil
+	// disables all capability checks (legacy / test). When non-nil,
+	// PutServiceTunnel / PutHaSet consult CheckKind, and PutEni /
+	// PutVnetMapping / PutRoutePolicy / PutServiceTunnel consult
+	// CheckSpec for IPv6 underlay gating.
+	gate *schema.Gate
 }
 
 // NewControlPlane creates a new ControlPlaneService. The capacity
-// tracker is optional — pass nil to disable admission gates (used by
-// existing unit tests; production wires a non-nil tracker).
-func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker) ControlPlaneService {
-	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap}
+// tracker and schema gate are optional — pass nil to disable admission
+// gates (used by existing unit tests; production wires both).
+func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker, gate *schema.Gate) ControlPlaneService {
+	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap, gate: gate}
 }
 
 // validKinds is the set of spec kinds the service layer recognizes.
@@ -185,6 +217,11 @@ func (s *controlPlaneService) PutEni(ctx context.Context, ns string, spec *dashc
 	if err := s.nsv.CheckEni(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
+	if s.gate != nil {
+		if err := s.gate.CheckSpec(spec.GetPlacementHintDpuIds(), "eni", spec); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrFailedPrecondition, err)
+		}
+	}
 	if s.cap != nil {
 		if err := s.cap.CheckEni(ns, spec); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrResourceExhausted, err)
@@ -215,6 +252,11 @@ func (s *controlPlaneService) PutVnetMapping(ctx context.Context, ns string, spe
 	ns = resolveNS(ns)
 	if err := s.nsv.CheckVnetMapping(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
+	if s.gate != nil {
+		if err := s.gate.CheckSpec(nil, "vnet_mapping", spec); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrFailedPrecondition, err)
+		}
 	}
 	if s.cap != nil {
 		if err := s.cap.CheckVnetMapping(ns, spec); err != nil {
@@ -279,6 +321,11 @@ func (s *controlPlaneService) PutRoutePolicy(ctx context.Context, ns string, spe
 	if err := s.nsv.CheckRoutePolicy(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
+	if s.gate != nil {
+		if err := s.gate.CheckSpec(nil, "route_policy", spec); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrFailedPrecondition, err)
+		}
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "route_policy", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -298,6 +345,14 @@ func (s *controlPlaneService) PutHaSet(ctx context.Context, ns string, spec *das
 	if err := s.nsv.CheckHaSet(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
+	if s.gate != nil {
+		// HA must hold on every member DPU listed in the set; an empty
+		// member list falls back to fleet-wide (the validator already
+		// rejects an HA set with no members, so this is defensive).
+		if err := s.gate.CheckKind(spec.GetMemberDpuIds(), "ha_set"); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrFailedPrecondition, err)
+		}
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "ha_set", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
@@ -316,6 +371,18 @@ return nil, fmt.Errorf("%w: name is required", ErrInvalidArgument)
 ns = resolveNS(ns)
 if err := s.nsv.CheckServiceTunnel(ctx, ns, spec); err != nil {
 	return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+}
+if s.gate != nil {
+	// ServiceTunnel is fleet-wide today (no placement field), so the
+	// kind gate must hold on EVERY registered DPU — if any single DPU
+	// lacks caps.service_tunnel we reject (PB-G3). The spec gate
+	// additionally enforces IPv6 underlay constraints (PB-G4 friend).
+	if err := s.gate.CheckKind(nil, "service_tunnel"); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrFailedPrecondition, err)
+	}
+	if err := s.gate.CheckSpec(nil, "service_tunnel", spec); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrFailedPrecondition, err)
+	}
 }
 gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "service_tunnel", Name: name}, spec, int64(spec.ExpectedGeneration))
 	if err != nil {

@@ -19,7 +19,7 @@ t.Fatalf("Open: %v", err)
 }
 t.Cleanup(func() { fs.Close() })
 inv := inventory.New()
-return NewControlPlane(fs, inv, nil, nil)
+return NewControlPlane(fs, inv, nil, nil, nil)
 }
 
 func TestPutVnet_OK(t *testing.T) {

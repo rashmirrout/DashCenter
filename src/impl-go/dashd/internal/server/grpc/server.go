@@ -98,6 +98,9 @@ return status.Errorf(codes.InvalidArgument, "%v", err)
 if errors.Is(err, service.ErrResourceExhausted) {
 return status.Errorf(codes.ResourceExhausted, "%v", err)
 }
+if errors.Is(err, service.ErrFailedPrecondition) {
+return status.Errorf(codes.FailedPrecondition, "%v", err)
+}
 return status.Errorf(codes.Internal, "internal error")
 }
 
