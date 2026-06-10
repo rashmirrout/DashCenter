@@ -195,10 +195,28 @@ func storedItemToPolicyObject(item *service.StoredItem) (*dashcenterv1.PolicyObj
 	return po, nil
 }
 
-// PutInventory / RegisterDpu / DeregisterDpu are NOT overridden here —
-// the embedded UnimplementedControlPlaneServer returns codes.Unimplemented
-// for them automatically, which is the correct Phase 1 behavior. They are
-// wired to Phase 2 milestones (PB capacity gating, PC operations).
+// PutInventory / DeregisterDpu are NOT overridden here — the embedded
+// UnimplementedControlPlaneServer returns codes.Unimplemented for them
+// automatically, which is the correct Phase 1 behavior. They are wired
+// to Phase 2 milestones (PC operations).
+
+// RegisterDpu (PB-3) attaches advertised DpuCapacityLimits +
+// DpuCapabilities to a previously-registered DPU. Used by DPU agents'
+// phone-home flow and by the bootstrap container in deploy/dashctl-fleet.
+func (h *controlPlaneHandler) RegisterDpu(ctx context.Context, reg *dashcenterv1.DpuRegistration) (*dashcenterv1.Ack, error) {
+	if reg == nil || reg.GetIdentity() == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "identity is required")
+	}
+	input := service.DpuRegistration{
+		ID:           reg.GetIdentity().GetDpuId(),
+		Limits:       reg.GetLimits(),
+		Capabilities: reg.GetCapabilities(),
+	}
+	if err := h.cp.RegisterDpu(ctx, input); err != nil {
+		return nil, serviceErrToStatus(err)
+	}
+	return &dashcenterv1.Ack{TxnId: "register:" + input.ID}, nil
+}
 
 // SimulateApply (PB-2) is the gRPC dry-run admission endpoint. The proto
 // is unary single-op (one PolicyApplyRequest carrying one PolicyObject),

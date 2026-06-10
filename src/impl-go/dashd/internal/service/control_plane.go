@@ -410,6 +410,29 @@ func (s *controlPlaneService) PutInventory(ctx context.Context, dpus []DpuInput)
 	return nil
 }
 
+func (s *controlPlaneService) RegisterDpu(ctx context.Context, reg DpuRegistration) error {
+	if reg.ID == "" {
+		return fmt.Errorf("%w: dpu id is required", ErrInvalidArgument)
+	}
+	if reg.Limits == nil && reg.Capabilities == nil {
+		return fmt.Errorf("%w: at least one of limits or capabilities must be set", ErrInvalidArgument)
+	}
+	if _, err := s.inv.Get(reg.ID); err != nil {
+		return fmt.Errorf("%w: dpu %q is not registered (call PutInventory first)", ErrInvalidArgument, reg.ID)
+	}
+	if reg.Limits != nil {
+		if err := s.inv.SetLimits(reg.ID, reg.Limits); err != nil {
+			return fmt.Errorf("register %s: %w", reg.ID, err)
+		}
+	}
+	if reg.Capabilities != nil {
+		if err := s.inv.SetCapabilities(reg.ID, reg.Capabilities); err != nil {
+			return fmt.Errorf("register %s: %w", reg.ID, err)
+		}
+	}
+	return nil
+}
+
 func (s *controlPlaneService) GetInventory(ctx context.Context) ([]DpuStatus, error) {
 	entries := s.inv.List()
 	result := make([]DpuStatus, len(entries))

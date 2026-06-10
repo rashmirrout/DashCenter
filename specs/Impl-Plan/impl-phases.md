@@ -24,7 +24,7 @@
 | **Phase 1A** — Core Implementation | Single-node reconciliation loop with file store | ✅ Complete | 3 / 3 |
 | **Phase 1B** — Production Hardening | Shared service layer, dual REST+gRPC, coverage, integration tests, dry-run | ✅ Complete | 15 / 16 (only G10 goleak deferred) |
 | **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ✅ Complete — ready to tag `dashd-2.0.0-alpha` | 6 / 6 |
-| **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ⏳ In progress (PB-1 ✅ · PB-2 ✅) | 2 / 4 |
+| **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ✅ Complete — ready to tag `dashd-2.0.0-beta` | 4 / 4 |
 | **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ❌ Not started (unblocks once PA tagged, runs ∥ with PB) | 0 / 8 |
 | **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
 | **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ❌ Not started (**deferred to last** — operator decision 2026-06-10) | 0 / 5 |
@@ -624,7 +624,7 @@ This milestone is the foundation for every other Phase 2 capability. No Phase 2 
 
 ---
 
-## Phase 2 · Milestone PB — Admission Gates ⏳
+## Phase 2 · Milestone PB — Admission Gates ✅
 
 ### Objective
 
@@ -669,7 +669,7 @@ Add **pre-write admission control** that prevents operators from creating specs 
 | **New files** | `gate.go`, `gate_test.go` |
 | **Key API** | `Gate.CheckKind(dpuID, kind) error`, `Gate.CheckSpec(dpuID, kind, spec) error` |
 | **Tests required** | 5 cases (incapable DPU, capable DPU, IPv6 requirement, schema version minimum) |
-| **Status** | ❌ Not started |
+| **Status** | ✅ 2026-06-10 — **PB-3 landed.** New package `internal/schema/` (~270 LOC) with `Gate{inv}` providing two admission methods: `CheckKind(targets, kind)` covers fleet-wide / placement-targeted kind requirements (`service_tunnel` → caps.ServiceTunnel; `ha_set` → either caps.HaActiveActive or caps.HaActiveStandby); `CheckSpec(targets, kind, spec)` covers spec-level requirements (ENI / VnetMapping / ServiceTunnel with IPv6 underlay → caps.Ipv6; RoutePolicy with v6 prefix → caps.Ipv6). Heuristic IPv6 detection (`strings.Contains(s, ":")`) avoids pulling net/netip dependencies and works on partially-validated specs. nil capabilities (PB-3 MC-3) is treated as "not yet advertised, allow with log warning" — mirrors PB-1's nil-Limits contract so a half-bootstrapped fleet doesn't silently reject every Put. Wired into `service.controlPlaneService` via a new `gate *schema.Gate` constructor argument (nil-tolerant for legacy tests). Put-paths gated: PutEni (CheckSpec for IPv6 underlay against placement hints), PutVnetMapping (CheckSpec for IPv6 underlay/overlay), PutRoutePolicy (CheckSpec for IPv6 prefix in any route), PutHaSet (CheckKind against member DPUs), PutServiceTunnel (CheckKind fleet-wide + CheckSpec for IPv6 underlay). New `service.ErrFailedPrecondition` sentinel mapped to HTTP **412** (REST) and `codes.FailedPrecondition` (gRPC); error messages carry actionable triple `dpu=X kind=Y reason=...` so operators don't need to read dashd logs. **Capability discovery RPC**: implemented gRPC `RegisterDpu(DpuRegistration)` (proto already defined) + REST `POST /v1/inventory/{id}/register`; both delegate to `service.RegisterDpu(ctx, DpuRegistration{ID, Limits, Capabilities})` which calls `inv.SetLimits` + `inv.SetCapabilities`. DPU must already exist in inventory (PutInventory) before RegisterDpu — prevents typo'd IDs from silently creating dangling entries. **27 unit tests** across schema (16) + service (8 — PB-G3 + PB-G4 + IPv6 ENI + RegisterDpu round-trip) + gRPC (1 — RegisterDpu_PB3 replacing the prior _Unimplemented assertion + handler InvalidArgument); schema package coverage **97.1%**. `go vet ./... && go test -count=1 ./...` → all 19 dashd packages + 8 dashctl packages green. **Live e2e**: brought up 5-DPU fleet, `POST /v1/inventory/dpu-sim-01/register {capabilities:{service_tunnel:false}}` then `PUT /v1/default/service-tunnels/st-after` → **HTTP 412** with body `"failed precondition: schema: failed precondition: dpu=dpu-sim-01 kind=service_tunnel reason=caps.service_tunnel=false"` (PB-G3); re-register with `service_tunnel:true` then same PUT → **HTTP 200** (PB-G4); IPv6 ENI on the still-incapable DPU → **HTTP 412** with `"dpu=dpu-sim-01 kind=eni name=eni-v6 reason=ipv6 required (underlay_ip) but caps.ipv6=false"`. MC-3 verified: a fresh DPU with no RegisterDpu call accepts ServiceTunnel writes (permissive nil-caps path). |
 
 ---
 
@@ -679,8 +679,8 @@ Add **pre-write admission control** that prevents operators from creating specs 
 |---|------|--------|
 | PB-G1 | `CheckPut` at capacity+1 → `RESOURCE_EXHAUSTED` with limit detail | ✅ |
 | PB-G2 | `SimulateApply` returns capacity preview without writing | ✅ |
-| PB-G3 | `PutServiceTunnel` on incapable DPU → `FAILED_PRECONDITION` | ❌ |
-| PB-G4 | `PutServiceTunnel` on capable DPU → success | ❌ |
+| PB-G3 | `PutServiceTunnel` on incapable DPU → `FAILED_PRECONDITION` | ✅ |
+| PB-G4 | `PutServiceTunnel` on capable DPU → success | ✅ |
 
 ---
 

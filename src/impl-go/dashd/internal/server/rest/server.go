@@ -72,6 +72,10 @@ mux := http.NewServeMux()
 mux.HandleFunc("PUT /v1/inventory", h.putInventory)
 mux.HandleFunc("GET /v1/inventory", h.getInventory)
 
+// RegisterDpu (PB-3): advertise DpuCapacityLimits + DpuCapabilities for
+// a previously-registered DPU. Body shape mirrors service.DpuRegistration.
+mux.HandleFunc("POST /v1/inventory/{id}/register", h.registerDpu)
+
 // Namespace-scoped spec routes (with optional {ns} prefix, fallback to "default").
 // Pattern: /v1/{ns}/{plural_kind}/{name}
 mux.HandleFunc("PUT /v1/{ns}/vnets/{name}", h.putVnet)
@@ -380,6 +384,45 @@ handleServiceErr(w, err)
 return
 }
 writeJSON(w, 200, map[string]any{"accepted": true})
+}
+
+// registerDpu (PB-3) accepts a DpuRegistration body and forwards to the
+// service layer. Body shape (JSON):
+//
+//	{
+//	  "limits": { "max_enis": 100, ... },
+//	  "capabilities": { "ipv6": true, "service_tunnel": false, ... }
+//	}
+//
+// The {id} path parameter overrides any "id" in the body. At least one
+// of limits or capabilities must be set — empty bodies are rejected to
+// avoid silently clearing previously-advertised values.
+func (h *handler) registerDpu(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, 400, errors.New("path: dpu id is required"))
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if len(body) == 0 {
+		writeErr(w, 400, errors.New("empty body; expected {\"limits\":..., \"capabilities\":...}"))
+		return
+	}
+	var req service.DpuRegistration
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	req.ID = id
+	if err := h.cp.RegisterDpu(r.Context(), req); err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"accepted": true, "id": id})
 }
 
 func (h *handler) getInventory(w http.ResponseWriter, r *http.Request) {

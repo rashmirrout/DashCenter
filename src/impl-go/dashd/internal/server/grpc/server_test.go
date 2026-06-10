@@ -56,6 +56,7 @@ func (stubControlPlane) Reconcile(_ context.Context) error { return nil }
 func (stubControlPlane) SimulateApply(_ context.Context, _ []service.SimulateOp) (*service.SimulateResult, error) {
 	return &service.SimulateResult{WouldSucceed: true}, nil
 }
+func (stubControlPlane) RegisterDpu(_ context.Context, _ service.DpuRegistration) error { return nil }
 
 // newTestServer builds a New(...) instance with stub services so calls
 // to gRPC RegisterService never see a nil interface inside the desc.
