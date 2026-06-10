@@ -84,7 +84,7 @@ func TestAuthDefault(t *testing.T) {
 	}
 }
 
-func TestAuthModeTokenRejected(t *testing.T) {
+func TestAuthModeTokenAcceptedInPD(t *testing.T) {
 	y := `
 mode: controller
 storage:
@@ -99,15 +99,12 @@ auth:
       name: alice
 `
 	_, err := Load(writeTemp(t, "auth-token.yaml", y))
-	if err == nil {
-		t.Fatal("expected error for auth.mode=token")
-	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("error should mention 'not yet implemented', got: %v", err)
+	if err != nil {
+		t.Fatalf("PD: token mode should be accepted; got %v", err)
 	}
 }
 
-func TestAuthModeMTLSRejected(t *testing.T) {
+func TestAuthModeMTLSAcceptedInPD(t *testing.T) {
 	y := `
 mode: controller
 storage:
@@ -122,11 +119,8 @@ auth:
     ca_file:   /tmp/ca.pem
 `
 	_, err := Load(writeTemp(t, "auth-mtls.yaml", y))
-	if err == nil {
-		t.Fatal("expected error for auth.mode=mtls")
-	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("error should mention 'not yet implemented', got: %v", err)
+	if err != nil {
+		t.Fatalf("PD: mtls mode should be accepted; got %v", err)
 	}
 }
 

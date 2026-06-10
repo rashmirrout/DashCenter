@@ -66,20 +66,34 @@ func TestRoleMap_RegisterLookup(t *testing.T) {
 }
 
 func TestRoleMap_AllowAlwaysTrueInPA1(t *testing.T) {
-	// PA-1 contract: Allow returns true for every (method, subject) pair
-	// because auth.mode=none means "auth off". PD will replace this; the
-	// test guards against accidental early-enforcement.
+	// PA-1 contract: Allow returns true (auth.mode=none). Kept as the
+	// public Allow() signature; PD's closed-default lives on the new
+	// AllowMethod() — see TestRoleMap_AllowMethod_ClosedDefault.
 	rm := NewRoleMap()
 	rm.Register(RPCInfo{Method: "/test", Access: AccessRead, AllowedRoles: []string{RoleAdmin}})
-
 	if !rm.Allow("/test", Anonymous) {
-		t.Error("Allow(/test, Anonymous) = false; want true (PA-1 contract)")
+		t.Error("Allow(/test, Anonymous) = false; want true (PA-1 compat)")
 	}
-	if !rm.Allow("/not-registered", Anonymous) {
-		t.Error("Allow(/not-registered, Anonymous) = false; want true (PA-1 contract)")
+}
+
+// PD-G3: closed-default RBAC. AllowMethod returns false for unregistered
+// methods and for subjects whose role is not in AllowedRoles. Admin is
+// implicitly permitted everywhere.
+func TestRoleMap_AllowMethod_ClosedDefault(t *testing.T) {
+	rm := NewRoleMap()
+	rm.Register(RPCInfo{Method: "/test", Access: AccessWrite, AllowedRoles: []string{RoleOperator}})
+
+	if rm.AllowMethod("/not-registered", Subject{Role: RoleOperator}) {
+		t.Error("AllowMethod for unregistered method must be false (closed-default)")
 	}
-	if !rm.Allow("/test", Subject{Role: "wrong-role"}) {
-		t.Error("Allow returned false for wrong role; PA-1 must allow all")
+	if rm.AllowMethod("/test", Subject{Role: RoleViewer}) {
+		t.Error("AllowMethod /test with viewer must be false (not in AllowedRoles)")
+	}
+	if !rm.AllowMethod("/test", Subject{Role: RoleOperator}) {
+		t.Error("AllowMethod /test with operator must be true")
+	}
+	if !rm.AllowMethod("/not-registered", Subject{Role: RoleAdmin}) {
+		t.Error("AllowMethod admin must be allowed even on unregistered methods")
 	}
 }
 
@@ -131,12 +145,32 @@ func TestNewListener_EmptyModeBehavesAsNone(t *testing.T) {
 	}
 }
 
-func TestNewListener_TokenAndMTLSRejectedInPA1(t *testing.T) {
-	for _, mode := range []string{"token", "mtls"} {
-		_, err := NewListener("tcp", "127.0.0.1:0", ListenerConfig{Mode: mode})
-		if err == nil {
-			t.Errorf("NewListener(%q) should error in PA-1; config validator should prevent this code path", mode)
-		}
+func TestNewListener_TokenWithoutTLSMaterialIsPlain(t *testing.T) {
+	// PD: token mode without cert/key falls through to plain net.Listen
+	// so operators can run dashd behind an upstream TLS terminator.
+	ln, err := NewListener("tcp", "127.0.0.1:0", ListenerConfig{Mode: "token"})
+	if err != nil {
+		t.Fatalf("NewListener(token, no TLS): %v", err)
+	}
+	defer ln.Close()
+	if _, ok := ln.(*net.TCPListener); !ok {
+		t.Errorf("expected *net.TCPListener for token-without-TLS; got %T", ln)
+	}
+}
+
+func TestNewListener_MTLSWithoutTLSMaterialErrors(t *testing.T) {
+	// PD: mTLS requires server cert/key + CA; missing material errors
+	// loudly instead of silently downgrading.
+	_, err := NewListener("tcp", "127.0.0.1:0", ListenerConfig{Mode: "mtls"})
+	if err == nil {
+		t.Error("NewListener(mtls) without material should error")
+	}
+}
+
+func TestNewListener_RejectsTokenWithUnpairedKey(t *testing.T) {
+	_, err := NewListener("tcp", "127.0.0.1:0", ListenerConfig{Mode: "token", CertFile: "/no/such/cert"})
+	if err == nil {
+		t.Error("NewListener(token) with unpaired cert should error")
 	}
 }
 

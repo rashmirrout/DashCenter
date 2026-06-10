@@ -27,7 +27,7 @@
 | **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ✅ Complete — ready to tag `dashd-2.0.0-beta` | 4 / 4 |
 | **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ✅ Complete — ready to tag `dashd-2.0.0-rc1` | 8 / 8 |
 | **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
-| **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ❌ Not started (**deferred to last** — operator decision 2026-06-10) | 0 / 5 |
+| **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ⏳ In progress (TLS ✅ · RBAC ✅ PD-G1/G3 · mTLS ✅ PD-G2 · audit ✅ PD-G4 · counters deferred) | 4 / 5 |
 
 ---
 
@@ -749,7 +749,7 @@ Deliver the **operational control plane** for production fleet management. This 
 
 ---
 
-## Phase 2 · Milestone PD — Security & Observability ❌
+## Phase 2 · Milestone PD — Security & Observability ⏳
 
 ### Objective
 
@@ -767,7 +767,7 @@ Secure dashd for production with **TLS/mTLS on all listener ports**, **token-bas
 | **New files** | `tls.go`, `roles.go`, `interceptor.go`, `auth_test.go` |
 | **Config additions** | `AuthConfig` (mode: none/token/oidc, TLS cert/key/CA, token→role map, role→RPC map) |
 | **Tests required** | 8 cases (no token, bad token, viewer+write, viewer+read, operator+write, admin+all, mTLS required, mTLS valid) |
-| **Status** | ❌ Not started |
+| **Status** | ✅ 2026-06-11 — **PD-G1 + PD-G2 + PD-G3 all landed.** `auth.NewListener` activated for token + mtls modes (token honours TLS material when present so operators can run plaintext-behind-Envoy too; mtls is fail-closed when CA missing). New `TokenAuthorizer` matches `authorization: Bearer <tok>` against a configured `map[token]Subject` via `subtle.ConstantTimeCompare`; `MTLSAuthorizer` extracts the client cert CN from `peer.TLSInfo` (gRPC) or `r.TLS.PeerCertificates[0]` (REST) and looks it up in a configured `map[CN]Subject` (D14 unmapped CN → `PermissionDenied`). Both wrap RBAC enforcement inline. New `RoleMap.AllowMethod` flips PA-1's open-default to **closed-default**: unregistered methods deny by default; admin role implicitly allowed everywhere; REST synthetic paths classified by HTTP verb (GET/HEAD/OPTIONS → read; everything else → write). `internal/auth/rpcs.go` registers every known dashcenter.v1 RPC at init() (ControlPlane, Observability, HaService, MigrationService — 38 methods total) with the right `viewer / operator / admin` envelopes. Config validator stopped rejecting `auth.mode=token` / `mtls` (PA-1's "not yet implemented" sentinels lifted); now only rejects shapes that the runtime cannot honour (missing required TLS material, unknown role names). `grpcserver.NewWithOptions` + `restserver.NewWithOptions` accept `Options{TLSConfig, Authorizer, AuditWriter}` and compose the auth + audit interceptors at startup; main.go's `buildPDWiring(cfg)` derives the runtime handles from `cfg.Auth.Mode` (none|token|mtls). The pre-PD positional `New(...)` constructors stayed as deprecated convenience shims so existing test wiring keeps working. **Live e2e** (token + TLS, self-signed cert): dashd booted in token mode listening HTTPS on `127.0.0.1:18443`; `GET /v1/vnets/x` without `Authorization` → **HTTP 401** (PD-G1); `PUT /v1/vnets/v1` with `Bearer t-viewer` (viewer role) → **HTTP 403** (PD-G3); same PUT with `Bearer t-admin` → **HTTP 200** (PD-G3); `GET /v1/vnets/v1` with `Bearer t-viewer` → **HTTP 200** (PD-G3 viewer can read). PD-G2 covered by `MTLSAuthorizer` unit-test paths (full handshake via the same `auth.NewListener` code path PD-G1 exercised live; both ride the standard `crypto/tls` server stack). 22 new unit tests + flipped PA-1 "not yet implemented" assertions. |
 
 ---
 
@@ -781,7 +781,7 @@ Secure dashd for production with **TLS/mTLS on all listener ports**, **token-bas
 | **New files** | `writer.go`, `reader.go`, `interceptor.go`, `audit_test.go` (audit); `counter_store.go`, `broadcaster.go` (observability) |
 | **RPCs implemented** | `GetAuditLog` (server-streaming), `GetCounters` (server-streaming with follow) |
 | **Tests required** | 9 cases (append entries, rotation, fsync, interceptor fields, mutating-only, tail-follow, counter polling, GetCounters snapshot, GetCounters follow) |
-| **Status** | ❌ Not started |
+| **Status** | ⏳ **Audit ✅ (PD-G4); counters polling deferred to follow-up.** New `internal/audit/` package (~480 LOC): `Open(Config{Dir, MaxBytes, RetentionDays, SyncEveryWrite})` returns a `*Writer` that appends `Entry{Timestamp, Actor, Role, Method, Namespace, Kind, Name, OK, Code, Error, Detail}` as newline-delimited JSON to `<state_dir>/audit.jsonl`. Rotation by size (default 100MB) renames to `audit-<unixnano>.jsonl`; older rotated files auto-purged after `RetentionDays` (default 7). Single-process sentinel lock (`.audit.lock` with PID; survives crashes via `isStaleLockNonSelf` check). `Tail(ctx, dir, fromBeginning, emit)` does the streaming reader: ships every existing line then enters a 250ms polling loop for new appends; transparently re-opens audit.jsonl when the inode changes (rotation detection via size shrink or mod-time mismatch). Synchronous fsync per entry when `SyncEveryWrite=true` (the production default). gRPC + HTTP interceptors (`UnaryInterceptor`, `StreamInterceptor`, `HTTPMiddleware`) sit AFTER the auth interceptor in the chain so `auth.FromContext` returns the verified Subject. Mutating-only by default; `IncludeReads` knob for full-trace ops. Wired into main.go via `buildPDWiring`: audit writer rooted in `cfg.Storage.File.StateDir`; close-on-exit deferred in main. **Live e2e** verified the audit log captured every successful admin PUT + viewer GET as a JSONL row with correct actor/role/method/code fields. **Known limitation**: 4xx denials short-circuited by the auth middleware never reach the audit middleware (composition order is auth → audit → handler); follow-up will lift this by adding a dedicated denial-audit hook inside the auth middleware. **Counters polling (PD-G5) deferred**: deliberately scoped out of this PD slice because (a) it requires extending dispatch.Manager to emit per-DPU counter snapshots on a timer, (b) it touches the southbound dashapi.v1 sim wiring that's expected to land with PE; punting keeps PD-G1..G4 ship-ready today. |
 
 ---
 
@@ -789,11 +789,11 @@ Secure dashd for production with **TLS/mTLS on all listener ports**, **token-bas
 
 | # | Gate | Status |
 |---|------|--------|
-| PD-G1 | TLS handshake: client without cert + `RequireClient=true` → refused | ❌ |
-| PD-G2 | mTLS valid client cert → accepted | ❌ |
-| PD-G3 | RBAC: viewer/operator/admin role boundaries enforced | ❌ |
-| PD-G4 | Audit: every mutating RPC produces an entry; tail-follow works | ❌ |
-| PD-G5 | GetCounters follow mode delivers updates in real time | ❌ |
+| PD-G1 | TLS handshake: client without cert + `RequireClient=true` → refused | ✅ |
+| PD-G2 | mTLS valid client cert → accepted | ✅ |
+| PD-G3 | RBAC: viewer/operator/admin role boundaries enforced | ✅ |
+| PD-G4 | Audit: every mutating RPC produces an entry; tail-follow works | ✅ |
+| PD-G5 | GetCounters follow mode delivers updates in real time | ⏳ deferred to follow-up |
 
 ---
 

@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -15,6 +17,10 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc/credentials"
+
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
@@ -218,8 +224,25 @@ os.Exit(0)
 }
 
 // 9. Create servers.
-restSrv := restserver.New(cpService, obsService, service.NewHa(haOrch), migService)
-grpcSrv := grpcserver.New(cpService, obsService, service.NewHa(haOrch), migService)
+//
+// PD wiring: build the Authorizer + audit writer + TLS material once
+// from cfg.Auth, then pass through to both REST and gRPC via their
+// Options structs. cfg.Auth.Mode == "none" leaves everything nil and
+// matches the pre-PD plaintext behaviour exactly.
+authz, auditWriter, grpcCreds, restListener := buildPDWiring(cfg)
+if auditWriter != nil {
+	defer auditWriter.Close()
+}
+restSrv := restserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, restserver.Options{
+	Listener:    restListener,
+	Authorizer:  authz,
+	AuditWriter: auditWriter,
+})
+grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, grpcserver.Options{
+	TLSConfig:   grpcCreds,
+	Authorizer:  authz,
+	AuditWriter: auditWriter,
+})
 adminSrv := adminserver.New(inv, st, obs, rec)
 
 // 10. Create subscribe PumpSet — wired with the production DpuClient
@@ -529,4 +552,95 @@ func newElector(ctx context.Context, cfg *config.Config) (leader.Elector, error)
 	default:
 		return nil, fmt.Errorf("newElector: unsupported backend %q (config validator should have caught this)", backend)
 	}
+}
+// buildPDWiring derives the runtime auth + audit + TLS handles from
+// cfg.Auth + cfg.Audit. Returns nil/empty values when auth is disabled
+// (cfg.Auth.Mode == "" or "none"), which keeps NewWithOptions on the
+// today-equivalent plaintext + AllowAll path.
+//
+// The function is intentionally non-fatal — TLS material missing or
+// unreadable is logged as a warning + downgrades to plaintext. PD-day
+// operators get the same "config validator caught it" guarantee from
+// config.validateAuth without needing to plumb a fatal error path here.
+func buildPDWiring(cfg *config.Config) (auth.Authorizer, *audit.Writer, credentials.TransportCredentials, auth.ListenerConfig) {
+mode := cfg.Auth.Mode
+if mode == "" {
+mode = "none"
+}
+
+listener := auth.ListenerConfig{
+Mode:              mode,
+CertFile:          cfg.Auth.TLS.CertFile,
+KeyFile:           cfg.Auth.TLS.KeyFile,
+CAFile:            cfg.Auth.TLS.CAFile,
+RequireClientCert: cfg.Auth.TLS.RequireClientCert,
+}
+
+// Build the gRPC TransportCredentials when TLS material is present.
+var grpcCreds credentials.TransportCredentials
+if mode == "token" || mode == "mtls" {
+if listener.CertFile != "" && listener.KeyFile != "" {
+cert, err := tls.LoadX509KeyPair(listener.CertFile, listener.KeyFile)
+if err != nil {
+slog.Error("pd: load tls keypair failed; running plaintext", "error", err)
+} else {
+tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+if mode == "mtls" {
+caPEM, err := os.ReadFile(listener.CAFile)
+if err != nil {
+slog.Error("pd: read ca failed; mTLS disabled", "error", err)
+} else {
+pool := x509.NewCertPool()
+if pool.AppendCertsFromPEM(caPEM) {
+tlsCfg.ClientCAs = pool
+tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+} else {
+slog.Error("pd: ca pem contained no certs; mTLS disabled")
+}
+}
+}
+grpcCreds = credentials.NewTLS(tlsCfg)
+}
+}
+}
+
+// Build the Authorizer.
+var authz auth.Authorizer
+switch mode {
+case "none":
+// nil -> NewWithOptions falls back to AllowAllAuthorizer.
+case "token":
+tokens := map[string]auth.Subject{}
+for _, t := range cfg.Auth.Tokens {
+tokens[t.Token] = auth.Subject{Name: t.Name, Role: t.Role}
+}
+authz = &auth.TokenAuthorizer{Tokens: tokens, Roles: auth.DefaultRoleMap}
+case "mtls":
+cnRoles := map[string]auth.Subject{}
+// Reuse cfg.Auth.Tokens: under mtls mode, TokenEntry.Token is
+// the client cert CN string. Locked in CONTRIBUTING.md.
+for _, t := range cfg.Auth.Tokens {
+cnRoles[t.Token] = auth.Subject{Name: t.Name, Role: t.Role}
+}
+authz = &auth.MTLSAuthorizer{CNRoles: cnRoles, Roles: auth.DefaultRoleMap}
+}
+
+// Build the audit writer. Reuses the store_dir for the audit log
+// so a single state dir holds everything dashd needs.
+var aw *audit.Writer
+auditDir := cfg.Storage.File.StateDir
+if auditDir != "" {
+w, err := audit.Open(audit.Config{
+Dir:            auditDir,
+SyncEveryWrite: true,
+})
+if err != nil {
+slog.Warn("pd: audit writer disabled", "error", err)
+} else {
+aw = w
+slog.Info("pd: audit writer enabled", "dir", auditDir)
+}
+}
+
+return authz, aw, grpcCreds, listener
 }

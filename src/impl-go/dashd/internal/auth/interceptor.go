@@ -1,14 +1,9 @@
 // gRPC and REST interceptors / middleware.
 //
 // AC-4 / AC-5 require every dashd RPC handler to be reached through the
-// shared interceptor chains. PA-1 ships pass-through implementations
-// that satisfy the interceptor signatures so callers can wire them
-// today; PD replaces these with real bearer/mTLS verification and RBAC
-// enforcement without any caller change.
-//
-// The pattern is intentional: PD's auth interceptor will live behind the
-// same function name and the same exported type, so when PD ships, the
-// only change in any server file is "go get a newer version of dashd."
+// shared interceptor chains. PA-1 shipped pass-through implementations;
+// PD activates real Authorizer dispatch. The function signatures and
+// type names are unchanged so callers wired in PA/PB/PC keep working.
 package auth
 
 import (
@@ -16,6 +11,7 @@ import (
 	"net/http"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Authorizer is the contract PD's real interceptor will implement.
@@ -99,18 +95,43 @@ func NewHTTPMiddleware(a Authorizer) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Pre-extract credentials from the HTTP request so the
+			// Authorizer's gRPC-oriented bearer/cn extractors find
+			// something in ctx.
+			ctx := r.Context()
+			if hdr := r.Header.Get("Authorization"); hdr != "" {
+				ctx = context.WithValue(ctx, bearerHeaderKey{}, hdr)
+			}
+			if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+				ctx = context.WithValue(ctx, clientCNKey{}, r.TLS.PeerCertificates[0].Subject.CommonName)
+			}
+
 			// Synthesise a method name from the REST verb + path so the
 			// Authorizer can apply the same role table to both transports.
 			method := "/REST" + r.URL.Path + "/" + r.Method
-			subj, err := a.Authorize(r.Context(), method)
+			subj, err := a.Authorize(ctx, method)
 			if err != nil {
-				// PD will translate this to a structured 401/403 response.
-				// PA-1 should never reach this path because
-				// AllowAllAuthorizer never errors.
-				http.Error(w, err.Error(), http.StatusUnauthorized)
+				code := http.StatusUnauthorized
+				if err == ErrPermissionDenied {
+					code = http.StatusForbidden
+				}
+				http.Error(w, err.Error(), code)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(WithSubject(r.Context(), subj)))
+			next.ServeHTTP(w, r.WithContext(WithSubject(ctx, subj)))
 		})
 	}
+}
+
+// cnFromTLSInfo isolates the credentials.TLSInfo type lookup from the
+// rest of the auth package. Returns the client cert CommonName or "".
+func cnFromTLSInfo(ai credentials.AuthInfo) string {
+	tlsInfo, ok := ai.(credentials.TLSInfo)
+	if !ok {
+		return ""
+	}
+	if len(tlsInfo.State.PeerCertificates) == 0 {
+		return ""
+	}
+	return tlsInfo.State.PeerCertificates[0].Subject.CommonName
 }

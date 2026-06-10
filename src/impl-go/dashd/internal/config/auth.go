@@ -87,10 +87,10 @@ func applyAuthDefaults(a *AuthConfig) {
 	}
 }
 
-// validateAuth returns nil on a valid AuthConfig. Today (PA-1) it rejects
-// Mode="token" and Mode="mtls" with "not yet implemented" so that
-// contributors writing those configs get a clean error instead of silent
-// no-op behaviour. PD will replace those rejections with live behaviour.
+// validateAuth returns nil on a valid AuthConfig. PD activated
+// Mode="token" and Mode="mtls" so the previous "not yet implemented"
+// errors are gone; the validator now only rejects shapes that the
+// runtime cannot honour (missing required material, unknown role names).
 func validateAuth(a AuthConfig) error {
 	var errs []error
 
@@ -99,7 +99,6 @@ func validateAuth(a AuthConfig) error {
 		// always valid
 
 	case AuthModeToken:
-		errs = append(errs, errors.New(`auth.mode="token" is not yet implemented (planned for Phase 2 PD); use "none" until then`))
 		if len(a.Tokens) == 0 {
 			errs = append(errs, errors.New(`auth.mode="token" requires at least one entry in auth.tokens`))
 		}
@@ -113,9 +112,11 @@ func validateAuth(a AuthConfig) error {
 		}
 
 	case AuthModeMTLS:
-		errs = append(errs, errors.New(`auth.mode="mtls" is not yet implemented (planned for Phase 2 PD); use "none" until then`))
 		if a.TLS.CAFile == "" {
 			errs = append(errs, errors.New(`auth.mode="mtls" requires auth.tls.ca_file`))
+		}
+		if a.TLS.CertFile == "" || a.TLS.KeyFile == "" {
+			errs = append(errs, errors.New(`auth.mode="mtls" requires auth.tls.cert_file and auth.tls.key_file (server identity)`))
 		}
 
 	default:

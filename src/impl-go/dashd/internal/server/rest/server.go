@@ -9,10 +9,13 @@ import (
 "fmt"
 "io"
 "log/slog"
+"net"
 "net/http"
 "time"
 
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
@@ -20,30 +23,83 @@ dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1
 
 // Server is the REST HTTP server.
 type Server struct {
-srv *http.Server
+srv      *http.Server
+listener auth.ListenerConfig
 }
 
 // New creates a REST server wired to the shared service layer. ha and
 // mig may be nil — in that case the /v1/ha/* and /v1/migrations/*
 // routes return 503.
+//
+// Deprecated convenience constructor: prefer NewWithOptions in
+// production (it accepts TLS + auth + audit wiring).
 func New(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService) *Server {
-h := &handler{cp: cp, obs: obs, ha: ha, mig: mig}
-return &Server{srv: &http.Server{
-Handler:           h.router(),
-ReadHeaderTimeout: 5 * time.Second,
-}}
+return NewWithOptions(cp, obs, ha, mig, Options{})
 }
 
-// Serve starts listening on addr.
+// Options bundles PD-G1..G4 wiring for the REST server.
+type Options struct {
+	// Listener carries TLS material; if non-zero ListenerConfig.Mode
+	// is honoured at Serve time (TLS in token/mtls modes).
+	Listener auth.ListenerConfig
+
+	// Authorizer is consulted by the HTTP middleware. nil falls
+	// back to auth.AllowAllAuthorizer (today's plaintext behaviour).
+	Authorizer auth.Authorizer
+
+	// AuditWriter logs every request. nil disables auditing.
+	AuditWriter *audit.Writer
+}
+
+// NewWithOptions is the production constructor.
+func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService, opts Options) *Server {
+h := &handler{cp: cp, obs: obs, ha: ha, mig: mig}
+var handlerChain http.Handler = h.router()
+// Compose OUTSIDE -> IN so auth runs first and audit reads Subject
+// from ctx.
+if opts.AuditWriter != nil {
+handlerChain = audit.HTTPMiddleware(audit.InterceptorConfig{Writer: opts.AuditWriter, Roles: auth.DefaultRoleMap})(handlerChain)
+}
+if opts.Authorizer != nil {
+handlerChain = auth.NewHTTPMiddleware(opts.Authorizer)(handlerChain)
+}
+return &Server{
+srv: &http.Server{
+Handler:           handlerChain,
+ReadHeaderTimeout: 5 * time.Second,
+},
+listener: opts.Listener,
+}
+}
+
+// Serve starts listening on addr. When the configured Listener.Mode
+// is token / mtls and TLS material is present, the listener is wrapped
+// in TLS via auth.NewListener.
 func (s *Server) Serve(addr string) error {
 s.srv.Addr = addr
-slog.Info("rest: listening", "addr", addr)
+slog.Info("rest: listening", "addr", addr, "mode", s.listener.Mode)
+lc := s.listener
+if lc.Mode == "" || lc.Mode == "none" {
 err := s.srv.ListenAndServe()
 if errors.Is(err, http.ErrServerClosed) {
 return nil
 }
 return err
 }
+// TLS path: build via auth.NewListener so token + mtls modes get
+// the same TLS code path everywhere.
+ln, err := auth.NewListener("tcp", addr, lc)
+if err != nil {
+return err
+}
+err = s.srv.Serve(ln)
+if errors.Is(err, http.ErrServerClosed) {
+return nil
+}
+return err
+}
+
+var _ net.Listener = (net.Listener)(nil) // keep "net" referenced when TLS is off
 
 // Stop gracefully shuts down the server.
 func (s *Server) Stop() {
