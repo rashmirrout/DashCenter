@@ -243,15 +243,27 @@ grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch
 	Authorizer:  authz,
 	AuditWriter: auditWriter,
 })
-adminSrv := adminserver.New(inv, st, obs, rec)
+
+// 9b. Root context for elector + servers.
+rootCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+defer cancel()
+
+// 9c. Build elector early so the admin server can report live leader
+// state (admin runs on every node — leader AND follower — so its
+// health/leader endpoints MUST observe real leadership instead of the
+// PA-0 always-true stub).
+elector, err := newElector(rootCtx, cfg)
+if err != nil {
+	slog.Error("elector open failed",
+		"backend", cfg.HA.Controller.Elector.Backend, "error", err)
+	os.Exit(1)
+}
+
+adminSrv := adminserver.NewWithElector(inv, st, obs, rec, elector)
 
 // 10. Create subscribe PumpSet — wired with the production DpuClient
 // factory so each Pump can open real Subscribe streams.
 pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
-
-// 11. Create root context with signal handling.
-rootCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-defer cancel()
 
 	// 12. Always-on subsystems (run on leader AND follower alike).
 	//
@@ -306,12 +318,6 @@ defer cancel()
 	// cfg.HA.Controller.Elector.Backend ("none" for single-node dev /
 	// today's behaviour, "etcd" for multi-node controller-mode clusters).
 	// leaderLoop's contract is identical regardless of backend.
-	elector, err := newElector(rootCtx, cfg)
-	if err != nil {
-		slog.Error("elector open failed",
-			"backend", cfg.HA.Controller.Elector.Backend, "error", err)
-		os.Exit(1)
-	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
