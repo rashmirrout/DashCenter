@@ -113,6 +113,14 @@ func (s *richControlPlaneStub) RegisterDpu(_ context.Context, _ service.DpuRegis
 	return nil
 }
 
+func (s *richControlPlaneStub) CordonDpu(_ context.Context, _, _ string) error    { return nil }
+func (s *richControlPlaneStub) UncordonDpu(_ context.Context, _, _ string) error  { return nil }
+func (s *richControlPlaneStub) ListCordonedDpus(_ context.Context) []string       { return nil }
+
+func (s *richControlPlaneStub) ApplyBatch(_ context.Context, ops []service.BatchOp) (*service.BatchResult, error) {
+	return &service.BatchResult{Committed: true, OpsTotal: len(ops), OpsCommitted: len(ops)}, nil
+}
+
 // richObservabilityStub implements service.ObservabilityService.
 type richObservabilityStub struct {
 statuses []service.DpuStatus

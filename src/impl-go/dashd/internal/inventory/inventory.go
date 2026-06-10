@@ -30,6 +30,14 @@ Capabilities *dashcenterv1.DpuCapabilities
 // check possible", allowing writes through with a log warning so a
 // half-configured cluster does not silently reject every Put.
 Limits       *dashcenterv1.DpuCapacityLimits
+// Cordoned, when true, excludes this DPU from new ENI placements
+// (PC-1). The capacity tracker still counts existing ENIs but the
+// placement engine in capacity.placementForEni filters cordoned
+// DPUs out of the fleet-wide fallback. A placement_hint that
+// explicitly names a cordoned DPU is rejected at admission time by
+// the operations layer (not silently dropped). Drain (PC-7) sets
+// this true before migrating ENIs off the DPU.
+Cordoned     bool
 LastSeen     time.Time
 ConsecErrors int
 }
@@ -187,6 +195,22 @@ return ErrNotFound
 }
 entry.Limits = limits
 return nil
+}
+
+// SetCordoned flips the placement-exclusion flag (PC-1). When true,
+// the placement engine excludes this DPU from new ENI fan-out.
+// Existing ENIs already placed on the DPU stay put until drained.
+// Idempotent.
+func (inv *Inventory) SetCordoned(id string, cordoned bool) error {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+
+	entry, ok := inv.byID[id]
+	if !ok {
+		return ErrNotFound
+	}
+	entry.Cordoned = cordoned
+	return nil
 }
 
 // IncrementErrors atomically bumps ConsecErrors and returns new value.

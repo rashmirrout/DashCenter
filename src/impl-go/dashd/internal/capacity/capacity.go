@@ -568,9 +568,11 @@ func (t *Tracker) SnapshotForDPU(dpuID string) (enis, aclRules, vnetMappings int
 // --- internal helpers -------------------------------------------------
 
 // placementForEni returns the DPU ids an ENI should be counted against.
-// When placement_hint_dpu_ids is non-empty, that's the answer. When
-// empty, returns every DPU in the inventory (fail-conservative — PC
-// will replace this with the placement engine's actual decision).
+// When placement_hint_dpu_ids is non-empty, that's the answer (operators
+// are explicit — we honour their decision even for cordoned DPUs; the
+// service layer enforces the cordon ban for explicit-hint Puts and
+// surfaces a clear error). When empty, returns every NON-CORDONED DPU
+// in the inventory (PC-1: cordon excludes from fleet-wide fallback).
 func (t *Tracker) placementForEni(spec *dashcenterv1.EniSpec, allDPUs []inventory.DpuEntry) []string {
 	if spec == nil {
 		return nil
@@ -585,6 +587,9 @@ func (t *Tracker) placementForEni(spec *dashcenterv1.EniSpec, allDPUs []inventor
 	}
 	out := make([]string, 0, len(allDPUs))
 	for _, d := range allDPUs {
+		if d.Cordoned {
+			continue
+		}
 		out = append(out, d.ID)
 	}
 	return out

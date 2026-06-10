@@ -24,7 +24,7 @@ t.Cleanup(func() { fs.Close() })
 
 inv := inventory.New()
 obs := model.NewObsCache()
-cpSvc := service.NewControlPlane(fs, inv, nil, nil, nil)
+cpSvc := service.NewControlPlane(fs, inv, nil, nil, nil, nil)
 obsSvc := service.NewObservability(inv, fs, obs)
 srv := New(cpSvc, obsSvc)
 return httptest.NewServer(srv.srv.Handler)

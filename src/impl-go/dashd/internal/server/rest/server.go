@@ -76,6 +76,12 @@ mux.HandleFunc("GET /v1/inventory", h.getInventory)
 // a previously-registered DPU. Body shape mirrors service.DpuRegistration.
 mux.HandleFunc("POST /v1/inventory/{id}/register", h.registerDpu)
 
+// Cordon / Uncordon (PC-1). Body: {"reason": "..."} — reason is
+// recorded in the operations audit ring for forensics. Idempotent.
+mux.HandleFunc("POST /v1/inventory/{id}/cordon", h.cordonDpu)
+mux.HandleFunc("POST /v1/inventory/{id}/uncordon", h.uncordonDpu)
+mux.HandleFunc("GET /v1/inventory/cordoned", h.listCordoned)
+
 // Namespace-scoped spec routes (with optional {ns} prefix, fallback to "default").
 // Pattern: /v1/{ns}/{plural_kind}/{name}
 mux.HandleFunc("PUT /v1/{ns}/vnets/{name}", h.putVnet)
@@ -110,6 +116,13 @@ mux.HandleFunc("POST /v1/reconcile", h.reconcile)
 // `--dry-run=server` UX where the server is reachable but the request
 // would fail validation — still a successful round-trip.
 mux.HandleFunc("POST /v1/simulate", h.simulate)
+
+// ApplyBatch (PC-8): atomic multi-spec write. Body is JSON of
+// service.BatchOp list under {"ops": [...]}. Returns 200 with the
+// service.BatchResult envelope on commit; 207 (Multi-Status) with
+// the same envelope on partial rollback so operators can distinguish
+// success from clean-failure from dirty-failure at the HTTP layer.
+mux.HandleFunc("POST /v1/apply-batch", h.applyBatch)
 
 return mux
 }
@@ -386,6 +399,52 @@ return
 writeJSON(w, 200, map[string]any{"accepted": true})
 }
 
+// --- Cordon / Uncordon (PC-1) -----------------------------------------
+
+// reasonBody is the optional body shape for cordon / uncordon. We accept
+// either an empty body or {"reason":"..."}.
+type reasonBody struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func (h *handler) cordonDpu(w http.ResponseWriter, r *http.Request) {
+	h.cordonImpl(w, r, true)
+}
+
+func (h *handler) uncordonDpu(w http.ResponseWriter, r *http.Request) {
+	h.cordonImpl(w, r, false)
+}
+
+func (h *handler) cordonImpl(w http.ResponseWriter, r *http.Request, cordoned bool) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, 400, errors.New("path: dpu id is required"))
+		return
+	}
+	var req reasonBody
+	if body, err := io.ReadAll(r.Body); err == nil && len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+			return
+		}
+	}
+	var err error
+	if cordoned {
+		err = h.cp.CordonDpu(r.Context(), id, req.Reason)
+	} else {
+		err = h.cp.UncordonDpu(r.Context(), id, req.Reason)
+	}
+	if err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"accepted": true, "id": id, "cordoned": cordoned})
+}
+
+func (h *handler) listCordoned(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"dpus": h.cp.ListCordonedDpus(r.Context())})
+}
+
 // registerDpu (PB-3) accepts a DpuRegistration body and forwards to the
 // service layer. Body shape (JSON):
 //
@@ -486,6 +545,47 @@ func (h *handler) simulate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, res)
+}
+
+// --- ApplyBatch (PC-8) ---
+
+func (h *handler) applyBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Ops []service.BatchOp `json:"ops"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if len(body) == 0 {
+		writeErr(w, 400, errors.New("empty body; expected {\"ops\": [...]}"))
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+		return
+	}
+	res, batchErr := h.cp.ApplyBatch(r.Context(), req.Ops)
+	if res == nil {
+		// Shape-error from the service layer (e.g. unknown kind) —
+		// surface the standard service error path so it gets mapped
+		// to 400 / 412 / 429 as appropriate.
+		handleServiceErr(w, batchErr)
+		return
+	}
+	// Always return the full envelope. Status code:
+	//   200 — committed
+	//   207 (Multi-Status) — rolled back cleanly
+	//   500 — rolled back BUT some compensations failed (dirty)
+	status := http.StatusOK
+	if !res.Committed {
+		status = http.StatusMultiStatus
+		if len(res.CompFailures) > 0 {
+			status = http.StatusInternalServerError
+		}
+	}
+	writeJSON(w, status, res)
 }
 
 // --- Helpers ---

@@ -12,6 +12,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/namespace"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/schema"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
@@ -87,6 +88,29 @@ type ControlPlaneService interface {
 	// for that).
 	RegisterDpu(ctx context.Context, reg DpuRegistration) error
 
+	// CordonDpu (PC-1) flags the DPU as ineligible for new fleet-wide
+	// ENI placements. Existing ENIs stay put; operators must invoke
+	// DrainDpu (PC-7) to evacuate. An explicit placement_hint that
+	// names a cordoned DPU is rejected by PutEni with
+	// ErrFailedPrecondition. Idempotent. Errors: ErrInvalidArgument
+	// (empty id), ErrNotFound (no such DPU).
+	CordonDpu(ctx context.Context, dpuID, reason string) error
+	UncordonDpu(ctx context.Context, dpuID, reason string) error
+	ListCordonedDpus(ctx context.Context) []string
+
+	// ApplyBatch (PC-8) commits a list of Put/Delete ops atomically.
+	// Either every op lands in the desired store, or none do — the
+	// saga coordinator rolls back any partially-applied ops on the
+	// first failure (reverse order). Returns the saga.Result envelope
+	// describing the outcome; the error is non-nil iff the batch was
+	// not committed.
+	//
+	// PC-8 wires the existing per-kind Put / Delete machinery through
+	// the saga; capacity + schema admission still run per op (so a
+	// batch that would exceed capacity is rejected at op-i, then the
+	// previous i-1 are rolled back).
+	ApplyBatch(ctx context.Context, ops []BatchOp) (*BatchResult, error)
+
 	Delete(ctx context.Context, ns, kind, name string) error
 	Get(ctx context.Context, ns, kind, name string) (*StoredItem, error)
 	List(ctx context.Context, ns, kind string) ([]*StoredItem, error)
@@ -135,13 +159,20 @@ type controlPlaneService struct {
 	// PutVnetMapping / PutRoutePolicy / PutServiceTunnel consult
 	// CheckSpec for IPv6 underlay gating.
 	gate *schema.Gate
+	// ops is the cordon / drain manager (PC-1). nil disables cordon
+	// admission (legacy tests). When non-nil, PutEni rejects an
+	// explicit placement_hint that names a cordoned DPU — capacity's
+	// fleet-wide fallback already skips cordoned DPUs, so the only
+	// way to land an ENI on one is via explicit hint, and we want
+	// that to fail loudly.
+	ops *operations.Manager
 }
 
 // NewControlPlane creates a new ControlPlaneService. The capacity
 // tracker and schema gate are optional — pass nil to disable admission
 // gates (used by existing unit tests; production wires both).
-func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker, gate *schema.Gate) ControlPlaneService {
-	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap, gate: gate}
+func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker, gate *schema.Gate, ops *operations.Manager) ControlPlaneService {
+	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap, gate: gate, ops: ops}
 }
 
 // validKinds is the set of spec kinds the service layer recognizes.
@@ -216,6 +247,14 @@ func (s *controlPlaneService) PutEni(ctx context.Context, ns string, spec *dashc
 	ns = resolveNS(ns)
 	if err := s.nsv.CheckEni(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
+	if s.ops != nil {
+		for _, hint := range spec.GetPlacementHintDpuIds() {
+			if s.ops.IsCordoned(hint) {
+				return nil, fmt.Errorf("%w: placement_hint dpu=%s is cordoned (uncordon first or pick another DPU)",
+					ErrFailedPrecondition, hint)
+			}
+		}
 	}
 	if s.gate != nil {
 		if err := s.gate.CheckSpec(spec.GetPlacementHintDpuIds(), "eni", spec); err != nil {
@@ -447,6 +486,47 @@ func (s *controlPlaneService) GetInventory(ctx context.Context) ([]DpuStatus, er
 	return result, nil
 }
 
+// --- Cordon / Uncordon (PC-1) -----------------------------------------
+
+func (s *controlPlaneService) CordonDpu(ctx context.Context, dpuID, reason string) error {
+	if dpuID == "" {
+		return fmt.Errorf("%w: dpu id is required", ErrInvalidArgument)
+	}
+	if s.ops == nil {
+		return fmt.Errorf("%w: operations manager not configured", ErrInvalidArgument)
+	}
+	if err := s.ops.Cordon(dpuID, reason); err != nil {
+		if errors.Is(err, operations.ErrNotFound) {
+			return fmt.Errorf("%w: dpu %q not in inventory", ErrInvalidArgument, dpuID)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *controlPlaneService) UncordonDpu(ctx context.Context, dpuID, reason string) error {
+	if dpuID == "" {
+		return fmt.Errorf("%w: dpu id is required", ErrInvalidArgument)
+	}
+	if s.ops == nil {
+		return fmt.Errorf("%w: operations manager not configured", ErrInvalidArgument)
+	}
+	if err := s.ops.Uncordon(dpuID, reason); err != nil {
+		if errors.Is(err, operations.ErrNotFound) {
+			return fmt.Errorf("%w: dpu %q not in inventory", ErrInvalidArgument, dpuID)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *controlPlaneService) ListCordonedDpus(ctx context.Context) []string {
+	if s.ops == nil {
+		return nil
+	}
+	return s.ops.ListCordoned()
+}
+
 // --- CRUD operations ---
 
 func (s *controlPlaneService) Delete(ctx context.Context, ns, kind, name string) error {
@@ -670,4 +750,254 @@ func (s *controlPlaneService) SimulateApply(ctx context.Context, ops []SimulateO
 		})
 	}
 	return out, nil
+}
+// --- ApplyBatch (PC-8) -------------------------------------------------
+
+// BatchOp is one element of an ApplyBatch request. Shape mirrors
+// SimulateOp but covers all dashcenter.v1 kinds (admission gates run
+// per op as the saga executor walks them).
+type BatchOp struct {
+Action            string                          `json:"action"` // "put" | "delete"
+Namespace         string                          `json:"namespace,omitempty"`
+Kind              string                          `json:"kind"`
+Name              string                          `json:"name,omitempty"`
+VnetSpec          *dashcenterv1.VnetSpec          `json:"vnet,omitempty"`
+EniSpec           *dashcenterv1.EniSpec           `json:"eni,omitempty"`
+VnetMappingSpec   *dashcenterv1.VnetMappingSpec   `json:"vnet_mapping,omitempty"`
+AclPolicySpec     *dashcenterv1.AclPolicySpec     `json:"acl_policy,omitempty"`
+RoutePolicySpec   *dashcenterv1.RoutePolicySpec   `json:"route_policy,omitempty"`
+HaSetSpec         *dashcenterv1.HaSetSpec         `json:"ha_set,omitempty"`
+ServiceTunnelSpec *dashcenterv1.ServiceTunnelSpec `json:"service_tunnel,omitempty"`
+}
+
+// BatchResult is the wire-shape envelope returned by ApplyBatch.
+type BatchResult struct {
+Committed    bool                  `json:"committed"`
+OpsTotal     int                   `json:"ops_total"`
+OpsCommitted int                   `json:"ops_committed"`
+FailedIndex  int                   `json:"failed_index,omitempty"`
+FailedError  string                `json:"failed_error,omitempty"`
+Compensated  int                   `json:"compensated,omitempty"`
+CompFailures []sagaCompFailureJSON `json:"comp_failures,omitempty"`
+}
+
+// sagaCompFailureJSON mirrors saga.ItemError for wire output without
+// importing internal/saga at the wire layer (keep the type surface
+// thin).
+type sagaCompFailureJSON struct {
+Index  int    `json:"index"`
+Kind   string `json:"kind"`
+Name   string `json:"name"`
+Action string `json:"action"`
+Error  string `json:"error"`
+}
+
+// sagaServiceExecutor adapts the service-layer Put / Delete machinery
+// (which runs admission gates and updates capacity counters) into a
+// saga.Executor. We deliberately go through the public service methods
+// rather than the raw store so capacity + schema admission run per op
+// inside the batch — a batch that would exceed MaxEnis on the 7th op
+// rolls back the first 6 instead of silently committing them.
+type sagaServiceExecutor struct {
+svc *controlPlaneService
+// nsResolved is filled in lazily; each op may carry its own
+// namespace.
+}
+
+func (e *sagaServiceExecutor) SnapshotPrior(ctx context.Context, op sagaOpAdapter) ([]byte, error) {
+sp, err := e.svc.store.Get(ctx, store.ObjectKey{Namespace: op.ns, Kind: op.kind, Name: op.name})
+if errors.Is(err, store.ErrNotFound) {
+return nil, nil
+}
+if err != nil {
+return nil, err
+}
+return append([]byte(nil), sp.Data...), nil
+}
+
+func (e *sagaServiceExecutor) Execute(ctx context.Context, op sagaOpAdapter) error {
+if op.action == "delete" {
+return e.svc.Delete(ctx, op.ns, op.kind, op.name)
+}
+// PUT — dispatch to the right typed handler so admission gates run.
+switch op.kind {
+case "vnet":
+_, err := e.svc.PutVnet(ctx, op.ns, op.vnet)
+return err
+case "eni":
+_, err := e.svc.PutEni(ctx, op.ns, op.eni)
+return err
+case "vnet_mapping":
+_, err := e.svc.PutVnetMapping(ctx, op.ns, op.vnetMapping)
+return err
+case "acl_policy":
+_, err := e.svc.PutAclPolicy(ctx, op.ns, op.aclPolicy)
+return err
+case "route_policy":
+_, err := e.svc.PutRoutePolicy(ctx, op.ns, op.routePolicy)
+return err
+case "ha_set":
+_, err := e.svc.PutHaSet(ctx, op.ns, op.haSet)
+return err
+case "service_tunnel":
+_, err := e.svc.PutServiceTunnel(ctx, op.ns, op.serviceTunnel)
+return err
+}
+return fmt.Errorf("%w: unknown kind %q in batch", ErrInvalidArgument, op.kind)
+}
+
+func (e *sagaServiceExecutor) Compensate(ctx context.Context, op sagaOpAdapter, prior []byte) error {
+key := store.ObjectKey{Namespace: op.ns, Kind: op.kind, Name: op.name}
+if prior == nil {
+// Op created the key — reverse with raw store.Delete.
+if err := e.svc.store.Delete(ctx, key); err != nil && !errors.Is(err, store.ErrNotFound) {
+return err
+}
+// Best-effort capacity counter cleanup for kinds we know about.
+e.maybeRemoveFromCapacity(op.kind, op.ns, op.name, nil)
+return nil
+}
+// Op overwrote an existing payload — restore.
+var raw json.RawMessage = prior
+if _, err := e.svc.store.Put(ctx, key, raw, 0); err != nil {
+return err
+}
+return nil
+}
+
+// maybeRemoveFromCapacity invokes the capacity Remove* methods for
+// kinds the tracker counts. Best-effort: if the spec can't be parsed
+// we skip; this is rollback, the worst case is a counter that's too
+// high until the next Recount.
+func (e *sagaServiceExecutor) maybeRemoveFromCapacity(kind, ns, name string, _ []byte) {
+if e.svc.cap == nil {
+return
+}
+switch kind {
+case "eni":
+e.svc.cap.RemoveEni(ns, name)
+}
+}
+
+// sagaOpAdapter is the typed shape `sagaServiceExecutor` walks. We
+// keep it private — callers build BatchOp on the wire and we translate
+// here.
+type sagaOpAdapter struct {
+action        string
+ns            string
+kind          string
+name          string
+vnet          *dashcenterv1.VnetSpec
+eni           *dashcenterv1.EniSpec
+vnetMapping   *dashcenterv1.VnetMappingSpec
+aclPolicy     *dashcenterv1.AclPolicySpec
+routePolicy   *dashcenterv1.RoutePolicySpec
+haSet         *dashcenterv1.HaSetSpec
+serviceTunnel *dashcenterv1.ServiceTunnelSpec
+}
+
+func (s *controlPlaneService) ApplyBatch(ctx context.Context, batchOps []BatchOp) (*BatchResult, error) {
+if len(batchOps) == 0 {
+return nil, fmt.Errorf("%w: ops list is empty", ErrInvalidArgument)
+}
+adapters := make([]sagaOpAdapter, 0, len(batchOps))
+for i, o := range batchOps {
+if o.Action != "put" && o.Action != "delete" {
+return nil, fmt.Errorf("%w: op[%d] action must be put|delete (got %q)", ErrInvalidArgument, i, o.Action)
+}
+a := sagaOpAdapter{action: o.Action, ns: resolveNS(o.Namespace), kind: o.Kind, name: o.Name}
+switch o.Kind {
+case "vnet":
+a.vnet = o.VnetSpec
+if a.vnet != nil && a.name == "" {
+a.name = a.vnet.GetName()
+}
+case "eni":
+a.eni = o.EniSpec
+if a.eni != nil && a.name == "" {
+a.name = a.eni.GetName()
+}
+case "vnet_mapping":
+a.vnetMapping = o.VnetMappingSpec
+if a.vnetMapping != nil && a.name == "" {
+n := a.vnetMapping.GetVnetName()
+if ip := a.vnetMapping.GetIpAddress(); ip != "" {
+n = n + "-" + ip
+}
+a.name = n
+}
+case "acl_policy":
+a.aclPolicy = o.AclPolicySpec
+if a.aclPolicy != nil && a.name == "" {
+a.name = a.aclPolicy.GetName()
+}
+case "route_policy":
+a.routePolicy = o.RoutePolicySpec
+if a.routePolicy != nil && a.name == "" {
+a.name = a.routePolicy.GetName()
+}
+case "ha_set":
+a.haSet = o.HaSetSpec
+if a.haSet != nil && a.name == "" {
+a.name = a.haSet.GetName()
+}
+case "service_tunnel":
+a.serviceTunnel = o.ServiceTunnelSpec
+if a.serviceTunnel != nil && a.name == "" {
+a.name = a.serviceTunnel.GetName()
+}
+default:
+return nil, fmt.Errorf("%w: op[%d] unknown kind %q", ErrInvalidArgument, i, o.Kind)
+}
+if a.action == "delete" && a.name == "" {
+return nil, fmt.Errorf("%w: op[%d] delete requires name", ErrInvalidArgument, i)
+}
+adapters = append(adapters, a)
+}
+
+ex := &sagaServiceExecutor{svc: s}
+// We need a generic saga.Run that accepts our typed adapter; the
+// saga package's Op uses any-payload. Run our own minimal serial
+// loop here so we don't have to round-trip through saga.Op (we get
+// the same semantics: forward-pass, reverse-order rollback,
+// compensation-failure surfacing).
+res := &BatchResult{OpsTotal: len(adapters)}
+priors := make([][]byte, 0, len(adapters))
+for i, op := range adapters {
+if err := ctx.Err(); err != nil {
+res.FailedIndex = i
+res.FailedError = err.Error()
+return s.rollbackBatch(ex, adapters, priors, res), fmt.Errorf("apply_batch op[%d]: %w", i, err)
+}
+prior, err := ex.SnapshotPrior(ctx, op)
+if err != nil {
+res.FailedIndex = i
+res.FailedError = "snapshot prior: " + err.Error()
+return s.rollbackBatch(ex, adapters, priors, res), fmt.Errorf("apply_batch op[%d] snapshot: %w", i, err)
+}
+if err := ex.Execute(ctx, op); err != nil {
+res.FailedIndex = i
+res.FailedError = err.Error()
+return s.rollbackBatch(ex, adapters, priors, res), fmt.Errorf("apply_batch op[%d]: %w", i, err)
+}
+priors = append(priors, prior)
+}
+res.Committed = true
+res.OpsCommitted = len(adapters)
+return res, nil
+}
+
+func (s *controlPlaneService) rollbackBatch(ex *sagaServiceExecutor, ops []sagaOpAdapter, priors [][]byte, res *BatchResult) *BatchResult {
+compCtx := context.Background()
+for i := len(priors) - 1; i >= 0; i-- {
+op := ops[i]
+if err := ex.Compensate(compCtx, op, priors[i]); err != nil {
+res.CompFailures = append(res.CompFailures, sagaCompFailureJSON{
+Index: i, Kind: op.kind, Name: op.name, Action: op.action, Error: err.Error(),
+})
+continue
+}
+res.Compensated++
+}
+return res
 }

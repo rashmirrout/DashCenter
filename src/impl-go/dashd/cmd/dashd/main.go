@@ -22,6 +22,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/leader"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/schema"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
@@ -149,8 +150,13 @@ if err := capTracker.Recount(rootStoreCtx(), st); err != nil {
 // the gate carries no internal state; it queries inventory live.
 capGate := schema.NewGate(inv)
 
+// 7d. Operations manager (PC-1): cordon admission + (PC-7) drain.
+// Mutates inventory.DpuEntry.Cordoned and exposes an in-memory audit
+// ring (PD will replace with the persistent audit log).
+opsMgr := operations.New(inv)
+
 // 8. Create shared service layer (Phase 1B).
-cpService := service.NewControlPlane(st, inv, rec, capTracker, capGate)
+cpService := service.NewControlPlane(st, inv, rec, capTracker, capGate, opsMgr)
 obsService := service.NewObservability(inv, st, obs)
 
 // --- Dry-run mode ---

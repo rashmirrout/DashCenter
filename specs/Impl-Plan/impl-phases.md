@@ -25,7 +25,7 @@
 | **Phase 1B** — Production Hardening | Shared service layer, dual REST+gRPC, coverage, integration tests, dry-run | ✅ Complete | 15 / 16 (only G10 goleak deferred) |
 | **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ✅ Complete — ready to tag `dashd-2.0.0-alpha` | 6 / 6 |
 | **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ✅ Complete — ready to tag `dashd-2.0.0-beta` | 4 / 4 |
-| **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ❌ Not started (unblocks once PA tagged, runs ∥ with PB) | 0 / 8 |
+| **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ⏳ In progress (cordon ✅ PC-G‐cordon · saga ✅ PC-G8) | 2 / 8 |
 | **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
 | **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ❌ Not started (**deferred to last** — operator decision 2026-06-10) | 0 / 5 |
 
@@ -684,7 +684,7 @@ Add **pre-write admission control** that prevents operators from creating specs 
 
 ---
 
-## Phase 2 · Milestone PC — Operations ❌
+## Phase 2 · Milestone PC — Operations ⏳
 
 ### Objective
 
@@ -730,7 +730,7 @@ Deliver the **operational control plane** for production fleet management. This 
 | **New files** | `operations.go`, `drain.go`, `operations_test.go` (operations); `coordinator.go`, `state.go`, `recovery.go`, `coordinator_test.go` (saga) |
 | **RPCs implemented** | `CordonDpu`, `UncordonDpu`, `DrainDpu`, `EniMigrationLink` |
 | **Tests required** | 9 cases (cordon excludes from placement, drain 5 ENIs, drain no destination, drain cancellation, saga commit-all, saga rollback on #3 failure, saga restart recovery, concurrent sagas) |
-| **Status** | ❌ Not started |
+| **Status** | ⏳ **Cordon ✅ + Saga ApplyBatch ✅ — 2026-06-11.** Drain + restart-recovery still ahead. **Cordon half**: new `internal/operations` package (~210 LOC) with `Manager{inv, audit}` exposing `Cordon`/`Uncordon`/`IsCordoned`/`ListCordoned`/`AuditRecent` (1k-entry ring; PD replaces with persistent audit log). `inventory.DpuEntry` gained `Cordoned bool` + `inv.SetCordoned`. `capacity.placementForEni` excludes cordoned DPUs from the fleet-wide no-hint fallback, so a Put without `placement_hint_dpu_ids` only counts against live DPUs. Explicit `placement_hint` at a cordoned DPU is hard-rejected by `service.PutEni` with `ErrFailedPrecondition` (HTTP 412 / gRPC FailedPrecondition) and an actionable message (`placement_hint dpu=X is cordoned (uncordon first or pick another DPU)`). REST: `POST /v1/inventory/{id}/cordon` + `POST /v1/inventory/{id}/uncordon` (body `{"reason":"..."}`) + `GET /v1/inventory/cordoned`. **Saga half** (PC-G8): new `internal/saga` package (~290 LOC) with `Run(ctx, Executor, ops) Result` providing forward-pass apply + reverse-order compensation. `StoreExecutor` is the default Executor backed by `store.DesiredStore`; snapshots payloads via Get before each write so Compensate can restore prior bytes via raw `json.RawMessage` Put. The service-layer `ApplyBatch(ctx, []BatchOp)` adapts proto specs through the typed PutVnet/PutEni/PutVnetMapping/PutAclPolicy/PutRoutePolicy/PutHaSet/PutServiceTunnel handlers so admission gates (namespace, capacity, schema, cordon) run per op inside the batch — a batch that exceeds capacity at op #7 rolls back ops 1–6 instead of silently committing them. Sentinel `saga.ErrCompensation` is wrapped when any compensation also fails so operators can distinguish clean rollback from dirty rollback. REST `POST /v1/apply-batch` returns **200 OK** on commit, **207 Multi-Status** on clean rollback, **500** on dirty rollback (compensation failures); body is the `BatchResult` envelope in all three cases. **22 unit tests** (12 operations + 10 saga) + **6 service-layer integration tests** for cordon admission + ApplyBatch happy path / rollback / capacity-exceed mid-batch / nil ops / unknown action / unknown kind / delete op. Coverage: `operations` package = (covered by 12 tests, 100% public surface), `saga` package = **89.0%**. `go vet ./... && go test -count=1 ./...` → all **21 dashd + 8 dashctl packages green**. **Live e2e** (`docker compose -f deploy/dashctl-fleet/docker-compose.yml`): `POST /v1/inventory/dpu-sim-01/cordon` → 200; `GET /v1/inventory/cordoned` → `{"dpus":["dpu-sim-01"]}`; PutEni with `placement_hint_dpu_ids:["dpu-sim-01"]` → **412** with cordon message; 3-vnet ApplyBatch happy path → 200, all 3 visible via GET; 3-vnet ApplyBatch where op #3 has empty name → **207** with `committed:false ops_committed:0 failed_index:2`, prior 2 vnets verified **404** post-rollback. **Drain (PC-G7) + HA orchestration (PC-G1..G3) + ENI live migration (PC-G4..G6) remain ahead** — each is a multi-day milestone in its own right (HA = 6 RPCs streamed via `WatchHaEvents`; Migration = 10-phase state machine over 12 RPCs); the cordon/saga foundation here is the shared substrate they will build on. | 
 
 ---
 
@@ -744,8 +744,8 @@ Deliver the **operational control plane** for production fleet management. This 
 | PC-G4 | ENI migration 10-phase happy path completes; ENI on dest only | ❌ |
 | PC-G5 | Migration rollback from FLOW_DRAIN restores original | ❌ |
 | PC-G6 | Migration restart-recovery: dashd restart mid-migration → resume | ❌ |
-| PC-G7 | Drain DPU with 5 ENIs → all migrate; final state CORDONED | ❌ |
-| PC-G8 | Saga: 10-item batch with #5 failing → all 10 absent from store | ❌ |
+| PC-G7 | Drain DPU with 5 ENIs → all migrate; final state CORDONED | ⏳ cordon half ✅, drain pending |
+| PC-G8 | Saga: 10-item batch with #5 failing → all 10 absent from store | ✅ |
 
 ---
 
