@@ -565,6 +565,82 @@ func (t *Tracker) SnapshotForDPU(dpuID string) (enis, aclRules, vnetMappings int
 	return 0, 0, 0
 }
 
+// EniRef identifies one ENI by namespace + name.
+type EniRef struct {
+	Namespace string
+	Name      string
+}
+
+// EnisOnDPU returns the (namespace, name) of every ENI currently
+// placed on dpuID. Used by PC-G7 drain to enumerate the set of ENIs
+// that need rehoming before the DPU can be evacuated. Sorted by
+// (namespace, name) for stable iteration.
+func (t *Tracker) EnisOnDPU(dpuID string) []EniRef {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	out := []EniRef{}
+	for ns, names := range t.eniDPUs {
+		for name, hosts := range names {
+			if contains(hosts, dpuID) {
+				out = append(out, EniRef{Namespace: ns, Name: name})
+			}
+		}
+	}
+	// Stable order so drain is deterministic across calls.
+	sortEniRefs(out)
+	return out
+}
+
+// LeastLoadedDPU returns the DPU id with the fewest ENIs among the
+// candidates, excluding cordoned DPUs and any in `excluded`. Returns
+// "" when no candidate is eligible. Tie-break: lexicographic DPU id.
+//
+// PC-G7 drain uses this to pick destinations for the ENIs being moved
+// off a cordoned DPU.
+func (t *Tracker) LeastLoadedDPU(excluded []string) string {
+	excludeSet := map[string]struct{}{}
+	for _, id := range excluded {
+		excludeSet[id] = struct{}{}
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	var bestID string
+	var bestEnis int64 = -1
+	for _, d := range t.inv.List() {
+		if d.Cordoned {
+			continue
+		}
+		if _, skip := excludeSet[d.ID]; skip {
+			continue
+		}
+		count := int64(0)
+		if u := t.byDPU[d.ID]; u != nil {
+			count = u.enis
+		}
+		if bestEnis < 0 || count < bestEnis || (count == bestEnis && d.ID < bestID) {
+			bestID = d.ID
+			bestEnis = count
+		}
+	}
+	return bestID
+}
+
+// sortEniRefs sorts the slice in place by (Namespace, Name).
+func sortEniRefs(refs []EniRef) {
+	// Tiny inline insertion sort — drain enumeration is bounded by
+	// MaxEnis (single DPU) and avoids pulling sort just for this.
+	for i := 1; i < len(refs); i++ {
+		for j := i; j > 0; j-- {
+			a, b := refs[j-1], refs[j]
+			if a.Namespace > b.Namespace || (a.Namespace == b.Namespace && a.Name > b.Name) {
+				refs[j-1], refs[j] = b, a
+				continue
+			}
+			break
+		}
+	}
+}
+
 // --- internal helpers -------------------------------------------------
 
 // placementForEni returns the DPU ids an ENI should be counted against.

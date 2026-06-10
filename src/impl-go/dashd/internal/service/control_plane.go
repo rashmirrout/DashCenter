@@ -98,6 +98,13 @@ type ControlPlaneService interface {
 	UncordonDpu(ctx context.Context, dpuID, reason string) error
 	ListCordonedDpus(ctx context.Context) []string
 
+	// DrainDpu (PC-G7) cordons the source then rehomes every ENI
+	// placed on it to a least-loaded uncordoned destination. Returns
+	// a per-ENI summary; the error is non-nil only when the drain
+	// could not begin (unknown DPU, cordon failed). Per-ENI failures
+	// are reported in operations.DrainResult.Failed.
+	DrainDpu(ctx context.Context, dpuID string, opts operations.DrainOpts) (operations.DrainResult, error)
+
 	// ApplyBatch (PC-8) commits a list of Put/Delete ops atomically.
 	// Either every op lands in the desired store, or none do — the
 	// saga coordinator rolls back any partially-applied ops on the
@@ -525,6 +532,80 @@ func (s *controlPlaneService) ListCordonedDpus(ctx context.Context) []string {
 		return nil
 	}
 	return s.ops.ListCordoned()
+}
+
+// --- DrainDpu (PC-G7) -------------------------------------------------
+
+// drainMover adapts the service+capacity+inventory triple into the
+// operations.Mover surface. We keep this private — production wires
+// it once at the call site; tests can substitute their own Mover.
+type drainMover struct {
+	svc *controlPlaneService
+	ctx context.Context // parent ctx for the drain call; per-op Rehome uses the worker-pool ctx
+}
+
+func (d *drainMover) EnisOn(dpuID string) []operations.EniRef {
+	if d.svc.cap == nil {
+		return nil
+	}
+	hits := d.svc.cap.EnisOnDPU(dpuID)
+	out := make([]operations.EniRef, len(hits))
+	for i, h := range hits {
+		out[i] = operations.EniRef{Namespace: h.Namespace, Name: h.Name}
+	}
+	return out
+}
+
+func (d *drainMover) PickDestination(_ operations.EniRef, excluded []string) string {
+	if d.svc.cap == nil {
+		return ""
+	}
+	return d.svc.cap.LeastLoadedDPU(excluded)
+}
+
+func (d *drainMover) Rehome(ctx context.Context, eni operations.EniRef, dst string) error {
+	// Fetch the current ENI spec, swap its placement_hint_dpu_ids,
+	// and PutEni so admission gates (capacity + schema + cordon)
+	// fire — destination might be at capacity, lack the IPv6 caps,
+	// or have been cordoned mid-drain.
+	sp, err := s_storeGet(ctx, d.svc, eni.Namespace, "eni", eni.Name)
+	if err != nil {
+		return fmt.Errorf("rehome: get eni %s/%s: %w", eni.Namespace, eni.Name, err)
+	}
+	spec := &dashcenterv1.EniSpec{}
+	if err := json.Unmarshal(sp.Data, spec); err != nil {
+		return fmt.Errorf("rehome: unmarshal eni %s/%s: %w", eni.Namespace, eni.Name, err)
+	}
+	spec.PlacementHintDpuIds = []string{dst}
+	// Pass the current generation so a concurrent edit aborts the
+	// rehome (operator will see "generation mismatch" in
+	// DrainResult.Failed and can retry).
+	spec.ExpectedGeneration = uint64(sp.Generation)
+	if _, err := d.svc.PutEni(ctx, eni.Namespace, spec); err != nil {
+		return fmt.Errorf("rehome: put eni %s/%s -> %s: %w", eni.Namespace, eni.Name, dst, err)
+	}
+	return nil
+}
+
+// s_storeGet is a tiny indirection so the test compile path is
+// unambiguous even when the file is read out-of-order. It is a thin
+// wrapper around store.Get.
+func s_storeGet(ctx context.Context, s *controlPlaneService, ns, kind, name string) (*store.StoredSpec, error) {
+	return s.store.Get(ctx, store.ObjectKey{Namespace: ns, Kind: kind, Name: name})
+}
+
+func (s *controlPlaneService) DrainDpu(ctx context.Context, dpuID string, opts operations.DrainOpts) (operations.DrainResult, error) {
+	if dpuID == "" {
+		return operations.DrainResult{}, fmt.Errorf("%w: dpu id is required", ErrInvalidArgument)
+	}
+	if s.ops == nil {
+		return operations.DrainResult{}, fmt.Errorf("%w: operations manager not configured", ErrInvalidArgument)
+	}
+	if s.cap == nil {
+		return operations.DrainResult{}, fmt.Errorf("%w: capacity tracker not configured (drain needs ENI placement info)", ErrInvalidArgument)
+	}
+	mover := &drainMover{svc: s, ctx: ctx}
+	return s.ops.Drain(ctx, dpuID, opts, mover)
 }
 
 // --- CRUD operations ---

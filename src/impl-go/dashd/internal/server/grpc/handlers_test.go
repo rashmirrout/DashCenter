@@ -30,6 +30,7 @@ import (
 "time"
 
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 "google.golang.org/grpc"
@@ -119,6 +120,10 @@ func (s *richControlPlaneStub) ListCordonedDpus(_ context.Context) []string     
 
 func (s *richControlPlaneStub) ApplyBatch(_ context.Context, ops []service.BatchOp) (*service.BatchResult, error) {
 	return &service.BatchResult{Committed: true, OpsTotal: len(ops), OpsCommitted: len(ops)}, nil
+}
+
+func (s *richControlPlaneStub) DrainDpu(_ context.Context, dpu string, _ operations.DrainOpts) (operations.DrainResult, error) {
+	return operations.DrainResult{DpuID: dpu, Cordoned: true}, nil
 }
 
 // richObservabilityStub implements service.ObservabilityService.

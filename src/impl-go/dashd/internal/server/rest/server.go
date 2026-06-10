@@ -13,6 +13,7 @@ import (
 "time"
 
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 )
@@ -81,6 +82,13 @@ mux.HandleFunc("POST /v1/inventory/{id}/register", h.registerDpu)
 mux.HandleFunc("POST /v1/inventory/{id}/cordon", h.cordonDpu)
 mux.HandleFunc("POST /v1/inventory/{id}/uncordon", h.uncordonDpu)
 mux.HandleFunc("GET /v1/inventory/cordoned", h.listCordoned)
+
+// Drain (PC-G7). Body: {"reason":"...","parallelism":4}. Cordons
+// the DPU then rehomes every ENI to a least-loaded uncordoned
+// destination. Returns the full DrainResult envelope; status code
+// is 200 when every ENI migrated, 207 (Multi-Status) when some
+// failed (the source remains cordoned for retry).
+mux.HandleFunc("POST /v1/inventory/{id}/drain", h.drainDpu)
 
 // Namespace-scoped spec routes (with optional {ns} prefix, fallback to "default").
 // Pattern: /v1/{ns}/{plural_kind}/{name}
@@ -443,6 +451,50 @@ func (h *handler) cordonImpl(w http.ResponseWriter, r *http.Request, cordoned bo
 
 func (h *handler) listCordoned(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"dpus": h.cp.ListCordonedDpus(r.Context())})
+}
+
+// drainDpu (PC-G7) cordons the DPU then rehomes every ENI to a
+// least-loaded uncordoned destination. Body shape (JSON, all fields
+// optional):
+//
+//	{
+//	  "reason": "rolling reboot",
+//	  "parallelism": 4
+//	}
+//
+// Response is the operations.DrainResult envelope. Status code:
+//   200 — every ENI migrated; source is cordoned and empty
+//   207 — some ENIs failed to migrate; source remains cordoned for
+//         retry. Inspect result.failed[] for per-ENI reasons.
+func (h *handler) drainDpu(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, 400, errors.New("path: dpu id is required"))
+		return
+	}
+	var req struct {
+		Reason      string `json:"reason,omitempty"`
+		Parallelism int    `json:"parallelism,omitempty"`
+	}
+	if body, err := io.ReadAll(r.Body); err == nil && len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+			return
+		}
+	}
+	res, err := h.cp.DrainDpu(r.Context(), id, operations.DrainOpts{
+		Parallelism: req.Parallelism,
+		Reason:      req.Reason,
+	})
+	if err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	status := http.StatusOK
+	if len(res.Failed) > 0 {
+		status = http.StatusMultiStatus
+	}
+	writeJSON(w, status, res)
 }
 
 // registerDpu (PB-3) accepts a DpuRegistration body and forwards to the
