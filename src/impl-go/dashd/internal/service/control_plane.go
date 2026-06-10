@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/namespace"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
@@ -17,6 +18,13 @@ import (
 
 // ErrInvalidArgument indicates a validation failure.
 var ErrInvalidArgument = errors.New("invalid argument")
+
+// ErrResourceExhausted indicates a per-DPU capacity limit would be
+// exceeded by accepting this write. Maps to HTTP 429 / gRPC
+// RESOURCE_EXHAUSTED. Locked decision D4 (impl-phases.md): admission is
+// hard-fail when limits are advertised; nil limits allow writes through
+// (capacity tracker logs a warning).
+var ErrResourceExhausted = errors.New("resource exhausted")
 
 // PutResult is the response from any Put* operation.
 type PutResult struct {
@@ -83,11 +91,18 @@ type controlPlaneService struct {
 	inv   *inventory.Inventory
 	rec   *reconciler.Reconciler
 	nsv   *namespace.Validator
+	// cap is the per-DPU capacity tracker. nil means no admission
+	// gates (legacy / test). When non-nil, PutEni/PutVnetMapping/
+	// PutAclPolicy consult it before persisting and on success update
+	// its internal counters; Delete decrements them.
+	cap *capacity.Tracker
 }
 
-// NewControlPlane creates a new ControlPlaneService.
-func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler) ControlPlaneService {
-	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st)}
+// NewControlPlane creates a new ControlPlaneService. The capacity
+// tracker is optional — pass nil to disable admission gates (used by
+// existing unit tests; production wires a non-nil tracker).
+func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker) ControlPlaneService {
+	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap}
 }
 
 // validKinds is the set of spec kinds the service layer recognizes.
@@ -163,9 +178,17 @@ func (s *controlPlaneService) PutEni(ctx context.Context, ns string, spec *dashc
 	if err := s.nsv.CheckEni(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
+	if s.cap != nil {
+		if err := s.cap.CheckEni(ns, spec); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrResourceExhausted, err)
+		}
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "eni", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
+	}
+	if s.cap != nil {
+		s.cap.ApplyEni(ns, spec)
 	}
 	return &PutResult{Accepted: true, Generation: gen}, nil
 }
@@ -186,9 +209,17 @@ func (s *controlPlaneService) PutVnetMapping(ctx context.Context, ns string, spe
 	if err := s.nsv.CheckVnetMapping(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
+	if s.cap != nil {
+		if err := s.cap.CheckVnetMapping(ns, spec); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrResourceExhausted, err)
+		}
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "vnet_mapping", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
+	}
+	if s.cap != nil {
+		s.cap.ApplyVnetMapping(ns, spec)
 	}
 	return &PutResult{Accepted: true, Generation: gen}, nil
 }
@@ -205,9 +236,26 @@ func (s *controlPlaneService) PutAclPolicy(ctx context.Context, ns string, spec 
 	if err := s.nsv.CheckAclPolicy(ctx, ns, spec); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
+	// For updates we need the previous rule count so the tracker only
+	// admits the delta (not the full new rule count on top of old).
+	oldRuleCount := int64(0)
+	if s.cap != nil {
+		if sp, err := s.store.Get(ctx, store.ObjectKey{Namespace: ns, Kind: "acl_policy", Name: name}); err == nil {
+			var old dashcenterv1.AclPolicySpec
+			if json.Unmarshal(sp.Data, &old) == nil {
+				oldRuleCount = int64(len(old.GetRules()))
+			}
+		}
+		if err := s.cap.CheckAclPolicy(ns, spec, oldRuleCount); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrResourceExhausted, err)
+		}
+	}
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "acl_policy", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
+	}
+	if s.cap != nil {
+		s.cap.ApplyAclPolicy(ns, spec, oldRuleCount)
 	}
 	return &PutResult{Accepted: true, Generation: gen}, nil
 }
@@ -312,7 +360,39 @@ func (s *controlPlaneService) Delete(ctx context.Context, ns, kind, name string)
 		return fmt.Errorf("%w: name is required", ErrInvalidArgument)
 	}
 	ns = resolveNS(ns)
-	return s.store.Delete(ctx, store.ObjectKey{Namespace: ns, Kind: kind, Name: name})
+	// Read the spec before deletion so we can decrement capacity
+	// counters correctly (we need fields like placement hints / rule
+	// counts that the bare key doesn't carry).
+	var before *store.StoredSpec
+	if s.cap != nil {
+		if sp, err := s.store.Get(ctx, store.ObjectKey{Namespace: ns, Kind: kind, Name: name}); err == nil {
+			before = sp
+		}
+	}
+	if err := s.store.Delete(ctx, store.ObjectKey{Namespace: ns, Kind: kind, Name: name}); err != nil {
+		return err
+	}
+	if s.cap != nil && before != nil {
+		switch kind {
+		case "eni":
+			s.cap.RemoveEni(ns, name)
+		case "vnet_mapping":
+			var spec dashcenterv1.VnetMappingSpec
+			if json.Unmarshal(before.Data, &spec) == nil {
+				key := spec.GetVnetName()
+				if spec.GetIpAddress() != "" {
+					key = key + "-" + spec.GetIpAddress()
+				}
+				s.cap.RemoveVnetMapping(ns, key)
+			}
+		case "acl_policy":
+			var spec dashcenterv1.AclPolicySpec
+			if json.Unmarshal(before.Data, &spec) == nil {
+				s.cap.RemoveAclPolicy(ns, &spec)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *controlPlaneService) Get(ctx context.Context, ns, kind, name string) (*StoredItem, error) {

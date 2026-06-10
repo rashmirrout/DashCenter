@@ -95,6 +95,9 @@ return status.Errorf(codes.FailedPrecondition, "generation mismatch")
 if errors.Is(err, service.ErrInvalidArgument) {
 return status.Errorf(codes.InvalidArgument, "%v", err)
 }
+if errors.Is(err, service.ErrResourceExhausted) {
+return status.Errorf(codes.ResourceExhausted, "%v", err)
+}
 return status.Errorf(codes.Internal, "internal error")
 }
 

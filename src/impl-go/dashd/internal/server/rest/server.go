@@ -445,6 +445,10 @@ if errors.Is(err, service.ErrInvalidArgument) {
 writeErr(w, 400, err)
 return
 }
+if errors.Is(err, service.ErrResourceExhausted) {
+writeErr(w, 429, err)
+return
+}
 // Unclassified errors are still 500, but log the underlying reason
 // (so operators have a fighting chance to diagnose), and include a
 // truncated copy of the message in the response body. This avoids the

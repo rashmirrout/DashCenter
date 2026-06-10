@@ -51,6 +51,7 @@ package capacity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -94,15 +95,20 @@ type Tracker struct {
 	// Used by Apply/Remove for ACL policies (which reference ENIs by
 	// name) to know which DPU(s) to attribute rules to.
 	eniDPUs map[string]map[string][]string
+	// vnetMappingPresence[namespace][mappingKey] tracks which mappings
+	// we've already counted, so a Put of an existing mapping is a no-op
+	// instead of double-counting.
+	vnetMappingPresence map[string]map[string]struct{}
 }
 
 // NewTracker constructs an empty tracker. Call Recount before serving
 // admission to populate the counters from the existing desired state.
 func NewTracker(inv Inventory) *Tracker {
 	return &Tracker{
-		inv:     inv,
-		byDPU:   map[string]*usage{},
-		eniDPUs: map[string]map[string][]string{},
+		inv:                 inv,
+		byDPU:               map[string]*usage{},
+		eniDPUs:             map[string]map[string][]string{},
+		vnetMappingPresence: map[string]map[string]struct{}{},
 	}
 }
 
@@ -117,6 +123,7 @@ func (t *Tracker) Recount(ctx context.Context, st store.DesiredStore) error {
 		t.mu.Lock()
 		t.byDPU = map[string]*usage{}
 		t.eniDPUs = map[string]map[string][]string{}
+		t.vnetMappingPresence = map[string]map[string]struct{}{}
 		t.mu.Unlock()
 		return nil
 	}
@@ -188,6 +195,7 @@ func (t *Tracker) Recount(ctx context.Context, st store.DesiredStore) error {
 
 	t.byDPU = map[string]*usage{}
 	t.eniDPUs = map[string]map[string][]string{}
+	t.vnetMappingPresence = map[string]map[string]struct{}{}
 
 	// Seed every known DPU with a zero usage so List has a stable shape.
 	for _, d := range dpus {
@@ -207,8 +215,16 @@ func (t *Tracker) Recount(ctx context.Context, st store.DesiredStore) error {
 	}
 
 	// VnetMappings — fleet-wide for Phase 1.
-	for _, mappings := range allMappings {
-		for range mappings {
+	for ns, mappings := range allMappings {
+		if t.vnetMappingPresence[ns] == nil {
+			t.vnetMappingPresence[ns] = map[string]struct{}{}
+		}
+		for _, m := range mappings {
+			key := mappingNameOf(m)
+			if key == "" {
+				continue
+			}
+			t.vnetMappingPresence[ns][key] = struct{}{}
 			for _, d := range dpus {
 				t.byDPU[d.ID].vnetMappings++
 			}
@@ -587,25 +603,15 @@ func mappingNameOf(spec *dashcenterv1.VnetMappingSpec) string {
 	return name
 }
 
-// vnetMappingPresence is a Set-shaped helper. We use a parallel map to
-// byDPU because PB-1's "is this mapping new or an update?" question
-// doesn't fit cleanly into the per-DPU counter.
-type vnetMappingPresence = map[string]map[string]struct{}
-
-var presence vnetMappingPresence
-
-func (t *Tracker) ensurePresence() {
-	if presence == nil {
-		presence = map[string]map[string]struct{}{}
-	}
-}
+// vnetMappingPresence and the helper functions below let CheckVnetMapping
+// / ApplyVnetMapping distinguish "new mapping" from "update of an
+// existing mapping" without scanning the desired store on every Put.
 
 func (t *Tracker) mappingExists(ns, key string) bool {
-	t.ensurePresence()
-	if presence[ns] == nil {
+	if t.vnetMappingPresence[ns] == nil {
 		return false
 	}
-	_, ok := presence[ns][key]
+	_, ok := t.vnetMappingPresence[ns][key]
 	return ok
 }
 
@@ -614,17 +620,15 @@ func (t *Tracker) mappingExistsLocked(ns, key string) bool {
 }
 
 func (t *Tracker) markMappingLocked(ns, key string) {
-	t.ensurePresence()
-	if presence[ns] == nil {
-		presence[ns] = map[string]struct{}{}
+	if t.vnetMappingPresence[ns] == nil {
+		t.vnetMappingPresence[ns] = map[string]struct{}{}
 	}
-	presence[ns][key] = struct{}{}
+	t.vnetMappingPresence[ns][key] = struct{}{}
 }
 
 func (t *Tracker) unmarkMappingLocked(ns, key string) {
-	t.ensurePresence()
-	if presence[ns] != nil {
-		delete(presence[ns], key)
+	if t.vnetMappingPresence[ns] != nil {
+		delete(t.vnetMappingPresence[ns], key)
 	}
 }
 
@@ -650,5 +654,5 @@ func contains(s []string, v string) bool {
 // because the file + etcd stores serialise via encoding/json — keep the
 // codec symmetric.
 func unmarshalSpec(data []byte, dst any) error {
-	return jsonUnmarshal(data, dst)
+	return json.Unmarshal(data, dst)
 }

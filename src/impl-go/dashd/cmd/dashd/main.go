@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/leader"
@@ -128,8 +129,20 @@ rec := reconciler.New(st, mgr, cfg.Reconcile.TickInterval)
 // and the GetDpuStatus / GetHealth observability surfaces are dishonest.
 prober := inventory.NewProber(inv, probeInterval, probeViaTCP)
 
+// 7b. Per-DPU capacity admission tracker (PB-1). nil-tolerant downstream.
+// We seed counters from whatever the store already holds so a restart
+// does not silently reset the budget. Recount() failure is logged but
+// non-fatal: it can only fail due to context cancel or a corrupt store
+// envelope, and in both cases the tracker keeps a zero baseline (worst
+// case: a few extra writes succeed and then get rejected on the next
+// Apply when the in-memory counter catches up via Apply* calls).
+capTracker := capacity.NewTracker(inv)
+if err := capTracker.Recount(rootStoreCtx(), st); err != nil {
+	slog.Warn("capacity: initial Recount failed; starting with zero counters", "error", err)
+}
+
 // 8. Create shared service layer (Phase 1B).
-cpService := service.NewControlPlane(st, inv, rec)
+cpService := service.NewControlPlane(st, inv, rec, capTracker)
 obsService := service.NewObservability(inv, st, obs)
 
 // --- Dry-run mode ---

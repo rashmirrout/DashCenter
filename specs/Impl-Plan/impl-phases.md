@@ -24,7 +24,7 @@
 | **Phase 1A** — Core Implementation | Single-node reconciliation loop with file store | ✅ Complete | 3 / 3 |
 | **Phase 1B** — Production Hardening | Shared service layer, dual REST+gRPC, coverage, integration tests, dry-run | ✅ Complete | 15 / 16 (only G10 goleak deferred) |
 | **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ✅ Complete — ready to tag `dashd-2.0.0-alpha` | 6 / 6 |
-| **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ❌ Not started (unblocks once PA tagged) | 0 / 4 |
+| **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ⏳ In progress (PB-1 ✅) | 1 / 4 |
 | **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ❌ Not started (unblocks once PA tagged, runs ∥ with PB) | 0 / 8 |
 | **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
 | **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ❌ Not started (**deferred to last** — operator decision 2026-06-10) | 0 / 5 |
@@ -624,7 +624,7 @@ This milestone is the foundation for every other Phase 2 capability. No Phase 2 
 
 ---
 
-## Phase 2 · Milestone PB — Admission Gates ❌
+## Phase 2 · Milestone PB — Admission Gates ⏳
 
 ### Objective
 
@@ -643,7 +643,7 @@ Add **pre-write admission control** that prevents operators from creating specs 
 | **Key API** | `Tracker.CheckPut(ctx, ns, kind, name, spec) error` |
 | **Plugs into** | `control_plane.go` — after namespace validation, before `store.Put` |
 | **Tests required** | 7 cases (within capacity, at limit, ACL rule count, Recount after Put/Delete, SimulateApply) |
-| **Status** | ❌ Not started |
+| **Status** | ✅ 2026-06-10 — **PB-1 landed.** New package `internal/capacity/` (~600 LOC) with `Tracker{inv, byDPU, eniDPUs, vnetMappingPresence, mu}` providing kind-specific admission methods: `CheckEni`, `CheckVnetMapping`, `CheckAclPolicy(spec, oldRuleCount)` and matching `Apply*` / `Remove*` mutators. ENI placement is resolved via `PlacementHintDpuIds` (fan-out) or fleet-wide when unset; VnetMapping admission charges against all registered DPUs (fleet-wide); AclPolicy rule count is charged against every DPU hosting the referenced ENIs and uses delta arithmetic (`newCount - oldRuleCount`) so updates that shrink rules never spuriously reject. `inventory.DpuEntry` gained a nullable `Limits *DpuCapacityLimits` field + `SetLimits(id, limits)` for the future capability-discovery RPC; nil limits = "capacity not yet advertised, allow with log warning" (MC-3 contract — forward-compat with controllerless mode where the DPU is authoritative for its own limits). `Tracker.Recount(ctx, store)` rebuilds counters from the desired store on dashd boot and after manual repair. Wired into `service.controlPlaneService` via a new `cap *capacity.Tracker` constructor argument (nil-tolerant for legacy tests); `PutEni` / `PutVnetMapping` / `PutAclPolicy` consult `Check*` between namespace validation and `store.Put`, then call `Apply*` on success; `Delete` reads the spec back and calls the matching `Remove*` to decrement counters. Sentinel `service.ErrResourceExhausted` mapped to HTTP 429 (REST) and `codes.ResourceExhausted` (gRPC). Error messages carry the actionable quadruple: `"dpu=X dimension=max_enis limit=N current=N requested=+1"` so operators don't need to read dashd logs to figure out what to free. 18 unit tests covering nil specs, within-limit, at-limit rejection (PB-G1), unknown placement target, update-no-delta, rule-count delta, Recount from store, ctx-cancel; **86.0% coverage**. `go vet ./... && go test -count=1 ./... → all packages green`. Live e2e regression: 5-DPU fleet + 16-spec apply + 5-DPU reconcile = 0 drift, 0 capacity warnings (tracker correctly falls through when DPUs advertise no limits). Follow-on slices: **PB-2** (SimulateApply preview RPC, PB-G2) and **PB-3** (capability-discovery RPC populating `SetLimits`, plus schema/capability gating PB-G3/PB-G4). |
 
 ---
 
@@ -665,7 +665,7 @@ Add **pre-write admission control** that prevents operators from creating specs 
 
 | # | Gate | Status |
 |---|------|--------|
-| PB-G1 | `CheckPut` at capacity+1 → `RESOURCE_EXHAUSTED` with limit detail | ❌ |
+| PB-G1 | `CheckPut` at capacity+1 → `RESOURCE_EXHAUSTED` with limit detail | ✅ |
 | PB-G2 | `SimulateApply` returns capacity preview without writing | ❌ |
 | PB-G3 | `PutServiceTunnel` on incapable DPU → `FAILED_PRECONDITION` | ❌ |
 | PB-G4 | `PutServiceTunnel` on capable DPU → success | ❌ |
