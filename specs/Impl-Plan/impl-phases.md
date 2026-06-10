@@ -23,11 +23,49 @@
 |-------|-----------|--------|--------------|
 | **Phase 1A** — Core Implementation | Single-node reconciliation loop with file store | ✅ Complete | 3 / 3 |
 | **Phase 1B** — Production Hardening | Shared service layer, dual REST+gRPC, coverage, integration tests, dry-run | ✅ Complete | 15 / 16 (only G10 goleak deferred) |
-| **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ❌ Not started | 0 / 6 |
-| **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ❌ Not started | 0 / 4 |
-| **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ❌ Not started | 0 / 8 |
-| **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ❌ Not started | 0 / 5 |
-| **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started | 0 / 5 |
+| **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ⏳ In progress (PA-0 scaffolding) | 0 / 6 |
+| **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ❌ Not started (unblocks once PA tagged) | 0 / 4 |
+| **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ❌ Not started (unblocks once PA tagged, runs ∥ with PB) | 0 / 8 |
+| **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
+| **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ❌ Not started (**deferred to last** — operator decision 2026-06-10) | 0 / 5 |
+
+---
+
+## Implementation Strategy (decided 2026-06-10) — **Strategy B**
+
+```
+                           dashd-2.0.0-alpha          dashd-2.0.0-beta            dashd-2.0.0-rc1            dashd-2.0.0
+                                  │                          │                          │                       │
+PA  ──────────────────────────────►│                          │                          │                       │
+                                  ├─► PB ───────────────────►│                          │                       │
+                                  └─► PC ───────────────────►│                          │                       │
+                                                             └─► PE ───────────────────►│                       │
+                                                                                         └─► PD (auth+audit+counters) ─►│
+```
+
+| Slot | Milestone(s) | Why this order |
+|---|---|---|
+| 1 | **PA** (infra) | hard prereq for everything; etcd is the substrate |
+| 2 | **PB ∥ PC** | parallelizable after PA; PB unblocks dashctl's `apply --dry-run=server`, PC is the bulk of the project |
+| 3 | **PE** (diagnostics + gNMI) | TraceFlow/Explain/hit-stats ship before auth so operators get visibility tooling sooner |
+| 4 | **PD** (TLS / mTLS / RBAC / audit / counters) | deferred to last; required for `dashd-2.0.0` GA tag |
+
+**Operator decisions captured** (defaults locked):
+
+| # | Decision | Locked value |
+|---|---|---|
+| D1 | Strategy | **B** — parallel PB ∥ PC after PA; PD deferred to last |
+| D2 | Bundle etcd in dev compose | yes |
+| D3 | etcd lease TTL | 15s |
+| D4 | Over-capacity behaviour | hard-fail `RESOURCE_EXHAUSTED` |
+| D5 | Drain default parallelism | 4 |
+| D6 | Saga rollback when retries exhausted | mark `STUCK` + surface in `/admin/sagas`; never auto-retry forever |
+| D7 | Audit-log retention | (decided with PD when it lands) |
+| D8 | gNMI client bundling | no — document `gnmic` externally |
+| D9 | dashctl-2A scaffolding PR once PA tagged | yes |
+| D10 | Release tags | `dashd-2.0.0-alpha` after PA, `…-beta` after PC, `2.0.0-rc1` after PE, `2.0.0` after PD |
+
+**Implication of deferring PD**: through alpha/beta/rc1, all listeners stay plaintext (the existing `DASHCTL_INSECURE` env var is the operator escape hatch), `GetAuditLog`/`GetCounters` continue returning `UNIMPLEMENTED`, and no audit trail is written for migrations/failovers performed during PE testing. dashd's structured JSON log already records every mutating action with the same fields, so forensic reconstruction via `jq` is possible until PD lands. Accepted as part of the deferral decision.
 
 ---
 
@@ -290,13 +328,25 @@ src/impl-go/dashd/
 
 ---
 
-## Phase 2 · Milestone PA — Infrastructure ❌
+## Phase 2 · Milestone PA — Infrastructure ⏳
 
 ### Objective
 
 Build the **production infrastructure layer** that all other Phase 2 modules depend on. This milestone replaces the single-node file-backed store with an **etcd-backed distributed store** providing strong consistency, global monotonic generations via `ModRevision`, and prefix-based `Watch` with automatic compaction recovery. It adds **etcd-lease leader election** so that exactly one dashd instance per cluster runs the reconciler (followers serve read-only traffic from the same strongly-consistent etcd). Finally, it adds **namespace enforcement** — every spec is scoped to a namespace, cross-namespace references are rejected, and RBAC can be scoped per-namespace in Phase 2 PD.
 
 This milestone is the foundation for every other Phase 2 capability. No Phase 2 module can begin until PA passes all gates.
+
+### PA PR-level breakdown (started 2026-06-10)
+
+| PR | Scope | Touches | Gates | Status |
+|---|---|---|---|---|
+| **PA-0** | Refactor `cmd/dashd/main.go` so reconciler+dispatch+subscribe launch inside `leaderLoop(ctx, elector)` using `NoneElector` (always-leader). No behaviour change; lets PA-3/PA-4 be small. | `internal/ha/leader/`, `cmd/dashd/main.go` | none yet — proves regression-free | ✅ 2026-06-10 — `internal/ha/leader/{leader.go,none.go,none_test.go}` (10 tests, all pass); main.go refactored; `go build`+`go vet`+`go test ./...` all green; live fleet e2e: 16 specs applied, all 5 DPUs report 0 drift; dashd logs `leaderLoop: assumed leadership leader_id=dashd-local` |
+| PA-1 | etcd store backend implementing `store.DesiredStore`; in-process etcd test harness | `internal/store/etcd/`, `internal/config/` | PA-G1, PA-G2 | ❌ |
+| PA-2 | Compaction recovery on `Watch`; re-sync from latest snapshot on `ErrCompacted` | `internal/store/etcd/compaction.go` | PA-G1 (extends) | ❌ |
+| PA-3 | EtcdElector implementation (etcd-lease leader election) | `internal/ha/leader/etcd.go` | PA-G3, PA-G4 | ❌ |
+| PA-4 | Wire `EtcdElector` into `main.go` via the PA-0 `leaderLoop`; follower mode for read RPCs | `cmd/dashd/main.go` | PA-G3 | ❌ |
+| PA-5 | Namespace validator: cross-namespace reference rejection | `internal/namespace/` | PA-G5, PA-G6 | ❌ |
+| PA-6 | Integration suite expansion: 3-node etcd cluster, kill-leader scenarios | `test/integration/etcd_*.go` (`//go:build integration_ha`) | PA-G3 (proven) | ❌ |
 
 ---
 
