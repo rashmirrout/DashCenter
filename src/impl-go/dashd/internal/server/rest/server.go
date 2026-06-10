@@ -23,9 +23,11 @@ type Server struct {
 srv *http.Server
 }
 
-// New creates a REST server wired to the shared service layer.
-func New(cp service.ControlPlaneService, obs service.ObservabilityService) *Server {
-h := &handler{cp: cp, obs: obs}
+// New creates a REST server wired to the shared service layer. ha may
+// be nil — in that case the /v1/ha/* routes return 503; existing
+// callers wire it explicitly post-PC-G1.
+func New(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService) *Server {
+h := &handler{cp: cp, obs: obs, ha: ha}
 return &Server{srv: &http.Server{
 Handler:           h.router(),
 ReadHeaderTimeout: 5 * time.Second,
@@ -53,6 +55,7 @@ _ = s.srv.Shutdown(ctx)
 type handler struct {
 cp  service.ControlPlaneService
 obs service.ObservabilityService
+ha  service.HaService // may be nil; /v1/ha/* returns 503 when so
 }
 
 // urlKindToStoreKind maps plural URL path segments to singular store kind names.
@@ -131,6 +134,14 @@ mux.HandleFunc("POST /v1/simulate", h.simulate)
 // the same envelope on partial rollback so operators can distinguish
 // success from clean-failure from dirty-failure at the HTTP layer.
 mux.HandleFunc("POST /v1/apply-batch", h.applyBatch)
+
+// HA orchestration (PC-G1..G3).
+mux.HandleFunc("GET /v1/ha", h.listHa)
+mux.HandleFunc("GET /v1/ha/{ns}/{name}", h.getHa)
+mux.HandleFunc("POST /v1/ha/{ns}/{name}/switchover", h.haSwitchover)
+mux.HandleFunc("POST /v1/ha/{ns}/{name}/failover", h.haFailover)
+mux.HandleFunc("GET /v1/ha/events", h.haWatchEvents)
+mux.HandleFunc("GET /v1/ha/flow-sync-stats", h.haFlowSyncStats)
 
 return mux
 }

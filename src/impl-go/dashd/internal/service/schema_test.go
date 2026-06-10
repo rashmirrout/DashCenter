@@ -35,7 +35,7 @@ func newServiceWithGate(t *testing.T, caps *dashcenterv1.DpuCapabilities) Contro
 			t.Fatalf("inv.SetCapabilities: %v", err)
 		}
 	}
-	return NewControlPlane(fs, inv, nil, nil, schema.NewGate(inv), nil)
+	return NewControlPlane(fs, inv, nil, nil, schema.NewGate(inv), nil, nil)
 }
 
 // --- PB-G3 / PB-G4: ServiceTunnel kind gate ---------------------------

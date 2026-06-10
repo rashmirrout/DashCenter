@@ -32,7 +32,7 @@ func newServiceWithTracker(t *testing.T, limits *dashcenterv1.DpuCapacityLimits)
 		t.Fatalf("inv.SetLimits: %v", err)
 	}
 	tr := capacity.NewTracker(inv)
-	svc := NewControlPlane(fs, inv, nil, tr, nil, nil)
+	svc := NewControlPlane(fs, inv, nil, tr, nil, nil, nil)
 	return svc, tr
 }
 

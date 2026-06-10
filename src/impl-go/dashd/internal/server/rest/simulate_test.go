@@ -37,9 +37,9 @@ func setupSimServer(t *testing.T) *httptest.Server {
 	tr := capacity.NewTracker(inv)
 
 	obs := model.NewObsCache()
-	cpSvc := service.NewControlPlane(fs, inv, nil, tr, nil, nil)
+	cpSvc := service.NewControlPlane(fs, inv, nil, tr, nil, nil, nil)
 	obsSvc := service.NewObservability(inv, fs, obs)
-	srv := New(cpSvc, obsSvc)
+	srv := New(cpSvc, obsSvc, nil)
 	return httptest.NewServer(srv.srv.Handler)
 }
 

@@ -22,21 +22,27 @@ type Server struct {
 gs   *grpc.Server
 cp   service.ControlPlaneService
 obs  service.ObservabilityService
+ha   service.HaService
 }
 
-// New creates a gRPC server wired to the shared service layer.
-func New(cp service.ControlPlaneService, obs service.ObservabilityService) *Server {
+// New creates a gRPC server wired to the shared service layer. ha may
+// be nil — in that case the HaService RPCs return codes.Unimplemented
+// (legacy / pre-PC-G1 test wiring).
+func New(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService) *Server {
 gs := grpc.NewServer(
 grpc.ChainUnaryInterceptor(recoveryInterceptor, loggingInterceptor),
 )
 
-s := &Server{gs: gs, cp: cp, obs: obs}
+s := &Server{gs: gs, cp: cp, obs: obs, ha: ha}
 
 // Register ControlPlane service.
 registerControlPlane(gs, cp)
 
 // Register ObservabilityService.
 registerObservability(gs, obs)
+
+// Register HaService (PC-G1..G3).
+registerHa(gs, ha)
 
 // Enable gRPC server reflection for debugging tools like grpcurl.
 reflection.Register(gs)

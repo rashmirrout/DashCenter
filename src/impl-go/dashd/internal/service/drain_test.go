@@ -29,7 +29,7 @@ func newServiceForDrain(t *testing.T, dpus ...string) (ControlPlaneService, *cap
 	}
 	tr := capacity.NewTracker(inv)
 	ops := operations.New(inv)
-	return NewControlPlane(fs, inv, nil, tr, nil, ops), tr, ops
+	return NewControlPlane(fs, inv, nil, tr, nil, ops, nil), tr, ops
 }
 
 func TestDrainDpu_5ENIs_AllMoved_PC_G7(t *testing.T) {

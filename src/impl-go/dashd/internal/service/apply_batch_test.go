@@ -88,7 +88,7 @@ func TestApplyBatch_CapacityExceeded_MidBatch_RollsBack(t *testing.T) {
 		t.Fatalf("SetLimits: %v", err)
 	}
 	tr := capacity.NewTracker(inv)
-	svc := NewControlPlane(fs, inv, nil, tr, nil, nil)
+	svc := NewControlPlane(fs, inv, nil, tr, nil, nil, nil)
 	ctx := context.Background()
 	// Seed parent vnet via service.
 	if _, err := svc.PutVnet(ctx, "default", &dashcenterv1.VnetSpec{Name: "vnet-app", Vni: 100}); err != nil {

@@ -10,6 +10,7 @@ import (
 
 	dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/orchestrator"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/namespace"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
@@ -173,13 +174,19 @@ type controlPlaneService struct {
 	// way to land an ENI on one is via explicit hint, and we want
 	// that to fail loudly.
 	ops *operations.Manager
+	// haOrch is the HA orchestrator (PC-G1..G3). nil keeps HA RPCs
+	// returning Unimplemented — used by legacy tests that don't need
+	// to exercise the HA surface. When non-nil, PutHaSet calls
+	// SyncFromSpec so the orchestrator always sees applied sets and
+	// Delete("ha_set", ...) calls Remove so it forgets them again.
+	haOrch *orchestrator.Orchestrator
 }
 
 // NewControlPlane creates a new ControlPlaneService. The capacity
 // tracker and schema gate are optional — pass nil to disable admission
 // gates (used by existing unit tests; production wires both).
-func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker, gate *schema.Gate, ops *operations.Manager) ControlPlaneService {
-	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap, gate: gate, ops: ops}
+func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker, gate *schema.Gate, ops *operations.Manager, haOrch *orchestrator.Orchestrator) ControlPlaneService {
+	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap, gate: gate, ops: ops, haOrch: haOrch}
 }
 
 // validKinds is the set of spec kinds the service layer recognizes.
@@ -402,6 +409,13 @@ func (s *controlPlaneService) PutHaSet(ctx context.Context, ns string, spec *das
 	gen, err := s.store.Put(ctx, store.ObjectKey{Namespace: ns, Kind: "ha_set", Name: name}, spec, int64(spec.GetExpectedGeneration()))
 	if err != nil {
 		return nil, err
+	}
+	if s.haOrch != nil {
+		// Make sure the orchestrator's view of namespace matches what we
+		// just persisted — the spec may have left it blank.
+		copy := *spec
+		copy.Namespace = ns
+		s.haOrch.SyncFromSpec(&copy)
 	}
 	return &PutResult{Accepted: true, Generation: gen}, nil
 }
@@ -649,6 +663,9 @@ func (s *controlPlaneService) Delete(ctx context.Context, ns, kind, name string)
 				s.cap.RemoveAclPolicy(ns, &spec)
 			}
 		}
+	}
+	if s.haOrch != nil && kind == "ha_set" {
+		s.haOrch.Remove(ns, name)
 	}
 	return nil
 }

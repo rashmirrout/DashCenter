@@ -20,6 +20,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/leader"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/orchestrator"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
@@ -155,8 +156,16 @@ capGate := schema.NewGate(inv)
 // ring (PD will replace with the persistent audit log).
 opsMgr := operations.New(inv)
 
+// 7e. HA orchestrator (PC-G1..G3). Holds the live per-HA-set role
+// model. PutHaSet auto-registers sets via SyncFromSpec; switchover
+// and failover walk the DASH 10-state machine and emit events on a
+// fan-out bus that WatchHaEvents subscribes to. Pusher is the
+// southbound abstraction — NoOpPusher until PE wires real DASH HA
+// scope dispatch against the sim.
+haOrch := orchestrator.New(&orchestrator.NoOpPusher{})
+
 // 8. Create shared service layer (Phase 1B).
-cpService := service.NewControlPlane(st, inv, rec, capTracker, capGate, opsMgr)
+cpService := service.NewControlPlane(st, inv, rec, capTracker, capGate, opsMgr, haOrch)
 obsService := service.NewObservability(inv, st, obs)
 
 // --- Dry-run mode ---
@@ -188,8 +197,8 @@ os.Exit(0)
 }
 
 // 9. Create servers.
-restSrv := restserver.New(cpService, obsService)
-grpcSrv := grpcserver.New(cpService, obsService)
+restSrv := restserver.New(cpService, obsService, service.NewHa(haOrch))
+grpcSrv := grpcserver.New(cpService, obsService, service.NewHa(haOrch))
 adminSrv := adminserver.New(inv, st, obs, rec)
 
 // 10. Create subscribe PumpSet — wired with the production DpuClient

@@ -37,7 +37,7 @@ func newServiceWithOps(t *testing.T, ids ...string) (ControlPlaneService, *opera
 	}
 	tr := capacity.NewTracker(inv)
 	ops := operations.New(inv)
-	return NewControlPlane(fs, inv, nil, tr, nil, ops), ops, tr
+	return NewControlPlane(fs, inv, nil, tr, nil, ops, nil), ops, tr
 }
 
 func TestPutEni_ExplicitHintAtCordonedDPU_Rejected(t *testing.T) {

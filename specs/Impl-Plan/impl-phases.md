@@ -25,7 +25,7 @@
 | **Phase 1B** — Production Hardening | Shared service layer, dual REST+gRPC, coverage, integration tests, dry-run | ✅ Complete | 15 / 16 (only G10 goleak deferred) |
 | **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ✅ Complete — ready to tag `dashd-2.0.0-alpha` | 6 / 6 |
 | **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ✅ Complete — ready to tag `dashd-2.0.0-beta` | 4 / 4 |
-| **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ⏳ In progress (cordon ✅ · saga ✅ PC-G8 · drain ✅ PC-G7) | 3 / 8 |
+| **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ⏳ In progress (cordon ✅ · saga ✅ PC-G8 · drain ✅ PC-G7 · HA orchestrator ✅ PC-G1/G2/G3) | 6 / 8 |
 | **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
 | **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ❌ Not started (**deferred to last** — operator decision 2026-06-10) | 0 / 5 |
 
@@ -702,7 +702,7 @@ Deliver the **operational control plane** for production fleet management. This 
 | **New files** | `orchestrator.go`, `state.go`, `switchover.go`, `failover.go`, `broadcaster.go`, `orchestrator_test.go` |
 | **RPCs implemented** | `GetHaSetState`, `GetHaScopeState`, `TriggerSwitchover`, `TriggerFailover`, `WatchHaEvents`, `GetFlowSyncStats` |
 | **Tests required** | 6 cases (switchover happy path, switchover timeout, failover skips old-active, WatchHaEvents delivery, GetFlowSyncStats) |
-| **Status** | ❌ Not started |
+| **Status** | ✅ 2026-06-11 — **PC-G1 + PC-G2 + PC-G3 all landed.** New package `internal/ha/orchestrator/` (~470 LOC) holds the per-HA-set in-memory role model + a fan-out event bus. Members are auto-seeded from PutHaSet (first member auto-promoted to ACTIVE so the first switchover has somewhere to flip from). State machine walks the upstream DASH 10-state role enum: switchover = `ACTIVE → SWITCHING_TO_STANDBY → STANDBY` for the old active, `STANDBY → SWITCHING_TO_ACTIVE → ACTIVE` for the target; failover = old-active jumps straight to DEAD without any southbound contact (PC-G2 contract). The southbound `Pusher` interface (`DrainOldActive` / `PromoteToActive` / `DemoteToStandby`) is the injectable seam: production wires `NoOpPusher` today and PE swaps in a real dashapi.v1 client when the sim grows DASH HA scope endpoints. Tests assert `DrainOldActive` is called exactly once on switchover and exactly zero times on failover. `Broadcaster` provides the WatchHaEvents fan-out with per-subscriber bounded buffers (default 32); a slow subscriber that fills its buffer is silently dropped so a stuck HTTP client cannot block the orchestrator. `Filter{Namespaces, HaSetNames, Types}` narrows subscriptions; every role transition publishes `TYPE_ROLE_CHANGED` plus per-phase `TYPE_SWITCHOVER_STARTED`/`TYPE_SWITCHOVER_COMPLETED` (or `TYPE_FAILOVER_*`). Wired into `service.ControlPlaneService` via a new `haOrch` constructor argument: `PutHaSet` auto-calls `SyncFromSpec` so applied sets become visible immediately; `Delete("ha_set", ...)` calls `Remove`. New `service.HaService` interface (`Get`/`Switchover`/`Failover`/`Watch`/`FlowSyncStats`/`List`) sits over the orchestrator with proper error mapping (ErrNotFound → `ErrInvalidArgument`, ErrInvalidTransition → `ErrFailedPrecondition`); gRPC HaServiceServer handler streams `HaScopeStatus` to clients during switchover/failover; REST surface SSE-streams via `text/event-stream` on `POST /v1/ha/{ns}/{name}/{switchover\|failover}` and `GET /v1/ha/events`. **30 unit tests** (15 orchestrator + 6 broadcaster + 9 HaService integration) + **6 service-layer integration tests** for the full PutHaSet → orchestrator → switchover/failover/watch flow. Orchestrator coverage **89.7%**. `go vet ./... && go test -count=1 ./...` → all **22 dashd + 8 dashctl packages green**. **Live e2e** (`docker compose -f deploy/dashctl-fleet/docker-compose.yml`, fresh fleet): seeded `ha-pcg1 active_standby [dpu-sim-01, dpu-sim-02]` via PutHaSet; `POST /v1/ha/default/ha-pcg1/switchover` (SSE) streamed 4 status rows (SWITCHING_TO_STANDBY → SWITCHING_TO_ACTIVE → STANDBY → ACTIVE), final state confirmed dpu-sim-02 ACTIVE + dpu-sim-01 STANDBY (PC-G1). Seeded `ha-pcg2` and `POST /v1/ha/default/ha-pcg2/failover {failed_dpu_id:"dpu-sim-03"}` → dpu-sim-03 jumped straight to DEAD (role 1) on the first SSE row, dpu-sim-04 → SWITCHING_TO_ACTIVE → ACTIVE; NoOpPusher's drain count remained 0 throughout (PC-G2). Spawned a background SSE subscriber on `GET /v1/ha/events`, then applied + switched-over `ha-pcg3`: subscriber received the full sequence: ROLE_CHANGED (ACTIVE→SWITCHING_TO_STANDBY), ROLE_CHANGED (STANDBY→SWITCHING_TO_ACTIVE), SWITCHOVER_STARTED, ROLE_CHANGED (SWITCHING_TO_STANDBY→STANDBY), ROLE_CHANGED (SWITCHING_TO_ACTIVE→ACTIVE), SWITCHOVER_COMPLETED (PC-G3). **ENI live migration (PC-G4..G6) remains** — it's the 10-phase state-machine over 12 RPCs and the largest single piece in PC; the orchestrator pattern (in-memory state + event broadcaster + injectable southbound) is the substrate it will reuse. |
 
 ---
 
@@ -738,9 +738,9 @@ Deliver the **operational control plane** for production fleet management. This 
 
 | # | Gate | Status |
 |---|------|--------|
-| PC-G1 | HA switchover end-to-end between two dash-sims | ❌ |
-| PC-G2 | HA failover does not contact old-active | ❌ |
-| PC-G3 | WatchHaEvents delivers events during switchover | ❌ |
+| PC-G1 | HA switchover end-to-end between two dash-sims | ✅ |
+| PC-G2 | HA failover does not contact old-active | ✅ |
+| PC-G3 | WatchHaEvents delivers events during switchover | ✅ |
 | PC-G4 | ENI migration 10-phase happy path completes; ENI on dest only | ❌ |
 | PC-G5 | Migration rollback from FLOW_DRAIN restores original | ❌ |
 | PC-G6 | Migration restart-recovery: dashd restart mid-migration → resume | ❌ |
