@@ -222,11 +222,16 @@ defer cancel()
 	}()
 
 	// 13. Leader-only subsystems — reconciler + per-DPU dispatch workers +
-	// per-DPU subscribe pumps. Phase 1 / single-node uses NoneElector which
-	// is permanent-leader, so this collapses to "run once and stay running
-	// until shutdown" — identical behaviour to the pre-PA-0 baseline. Phase 2
-	// PA-3 will swap in EtcdElector with zero changes to leaderLoop.
-	elector := &leader.NoneElector{NodeID: "dashd-local"}
+	// per-DPU subscribe pumps. Backend is selected by
+	// cfg.HA.Controller.Elector.Backend ("none" for single-node dev /
+	// today's behaviour, "etcd" for multi-node controller-mode clusters).
+	// leaderLoop's contract is identical regardless of backend.
+	elector, err := newElector(rootCtx, cfg)
+	if err != nil {
+		slog.Error("elector open failed",
+			"backend", cfg.HA.Controller.Elector.Backend, "error", err)
+		os.Exit(1)
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -421,5 +426,50 @@ func openStore(ctx context.Context, cfg *config.Config) (store.DesiredStore, err
 		})
 	default:
 		return nil, fmt.Errorf("openStore: unsupported backend %q (config validator should have caught this)", cfg.Storage.Backend)
+	}
+}
+
+// newElector picks the configured leader-election backend.
+//
+// PA-3 adds the "etcd" branch alongside the today-default "none"
+// (single-node dev / unit tests / dashctl-fleet smoke). Backend is
+// driven entirely by cfg.HA.Controller.Elector.Backend; the leaderLoop
+// downstream is identical for both implementations.
+//
+// Mode is implicit: when cfg.Mode == "controllerless" the config
+// validator rejects startup before we ever reach here.
+func newElector(ctx context.Context, cfg *config.Config) (leader.Elector, error) {
+	backend := cfg.HA.Controller.Elector.Backend
+	switch backend {
+	case "", config.ElectorBackendNone:
+		// NoneElector preserves pre-PA-0 single-node behaviour exactly.
+		// NodeID falls back to "dashd-local" only when cfg.NodeID is
+		// somehow empty (the config validator already rejects that, but
+		// we keep the fallback so a defaults-only Config still works in
+		// unit tests).
+		nodeID := cfg.NodeID
+		if nodeID == "" {
+			nodeID = "dashd-local"
+		}
+		return &leader.NoneElector{NodeID: nodeID}, nil
+
+	case config.ElectorBackendEtcd:
+		// Etcd-backed concurrency-session election. Multi-node controller
+		// mode: each dashd instance campaigns under the same LeaderKey;
+		// only the elected leader runs the reconciler + dispatch +
+		// subscribe goroutines.
+		return leader.NewEtcdElector(ctx, leader.EtcdConfig{
+			Endpoints:   cfg.HA.Controller.Elector.Endpoints,
+			NodeID:      cfg.NodeID,
+			LeaseTTL:    cfg.HA.Controller.Elector.LeaseTTL,
+			LeaderKey:   cfg.HA.Controller.Elector.LeaderKey,
+			DialTimeout: cfg.HA.Controller.Elector.DialTimeout,
+			CertFile:    cfg.HA.Controller.Elector.TLS.CertFile,
+			KeyFile:     cfg.HA.Controller.Elector.TLS.KeyFile,
+			CAFile:      cfg.HA.Controller.Elector.TLS.CAFile,
+		})
+
+	default:
+		return nil, fmt.Errorf("newElector: unsupported backend %q (config validator should have caught this)", backend)
 	}
 }
