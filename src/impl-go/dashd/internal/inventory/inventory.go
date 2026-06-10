@@ -24,6 +24,12 @@ Endpoint     string
 Labels       map[string]string
 State        dashcenterv1.DpuState
 Capabilities *dashcenterv1.DpuCapabilities
+// Limits is the advertised DpuCapacityLimits for this DPU. Consumed by
+// the capacity-admission tracker (internal/capacity, PB-1). nil means
+// "limits not yet known" — the tracker treats this as "no admission
+// check possible", allowing writes through with a log warning so a
+// half-configured cluster does not silently reject every Put.
+Limits       *dashcenterv1.DpuCapacityLimits
 LastSeen     time.Time
 ConsecErrors int
 }
@@ -165,6 +171,21 @@ if !ok {
 return ErrNotFound
 }
 entry.Capabilities = caps
+return nil
+}
+
+// SetLimits stores DpuCapacityLimits advertised by the DPU. Used by the
+// capacity-admission tracker (internal/capacity, PB-1). Pass nil to
+// clear (e.g. when a DPU has reset and is mid-handshake).
+func (inv *Inventory) SetLimits(id string, limits *dashcenterv1.DpuCapacityLimits) error {
+inv.mu.Lock()
+defer inv.mu.Unlock()
+
+entry, ok := inv.byID[id]
+if !ok {
+return ErrNotFound
+}
+entry.Limits = limits
 return nil
 }
 
