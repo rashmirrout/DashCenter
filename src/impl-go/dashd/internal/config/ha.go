@@ -176,9 +176,17 @@ func validateHA(mode string, ha HAConfig) error {
 		case ElectorBackendNone:
 			// always valid
 		case ElectorBackendEtcd:
-			errs = append(errs, errors.New(`ha.controller.elector.backend="etcd" is not yet implemented (planned for Phase 2 PA-3); use "none" until then`))
+			// PA-3: EtcdElector is now wired through cmd/dashd/main.go.
 			if len(ha.Controller.Elector.Endpoints) == 0 {
 				errs = append(errs, errors.New(`ha.controller.elector.backend="etcd" requires ha.controller.elector.endpoints`))
+			}
+			for i, ep := range ha.Controller.Elector.Endpoints {
+				if ep == "" {
+					errs = append(errs, fmt.Errorf("ha.controller.elector.endpoints[%d] is empty", i))
+				}
+			}
+			if (ha.Controller.Elector.TLS.CertFile == "") != (ha.Controller.Elector.TLS.KeyFile == "") {
+				errs = append(errs, errors.New("ha.controller.elector.tls.cert_file and ha.controller.elector.tls.key_file must be set together"))
 			}
 		default:
 			errs = append(errs, fmt.Errorf("ha.controller.elector.backend: unsupported value %q (allowed: none, etcd)", ha.Controller.Elector.Backend))

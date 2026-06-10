@@ -174,7 +174,10 @@ func TestHADefault(t *testing.T) {
 	}
 }
 
-func TestHAControllerEtcdRejected(t *testing.T) {
+func TestHAControllerEtcdAccepted(t *testing.T) {
+	// PA-3 landed: ha.controller.elector.backend=etcd is now a real
+	// elector wired through cmd/dashd/main.go. Validator must accept it
+	// when endpoints are supplied.
 	y := `
 mode: controller
 storage:
@@ -187,15 +190,29 @@ ha:
       backend: etcd
       endpoints: ["http://etcd-0:2379"]
 `
-	_, err := Load(writeTemp(t, "ha-etcd.yaml", y))
+	if _, err := Load(writeTemp(t, "ha-etcd.yaml", y)); err != nil {
+		t.Fatalf("unexpected error for ha.controller.elector.backend=etcd: %v", err)
+	}
+}
+
+func TestHAControllerEtcdMissingEndpoints(t *testing.T) {
+	y := `
+mode: controller
+storage:
+  backend: file
+  file: { state_dir: /tmp/test }
+inventory: { source: api }
+ha:
+  controller:
+    elector:
+      backend: etcd
+`
+	_, err := Load(writeTemp(t, "ha-etcd-no-eps.yaml", y))
 	if err == nil {
-		t.Fatal("expected error for ha.controller.elector.backend=etcd")
+		t.Fatal("expected error for etcd elector without endpoints")
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("error should mention 'not yet implemented', got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "PA-3") {
-		t.Errorf("error should point at PA-3, got: %v", err)
+	if !strings.Contains(err.Error(), "endpoints") {
+		t.Errorf("error should mention endpoints, got: %v", err)
 	}
 }
 
