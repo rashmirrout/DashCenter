@@ -1,0 +1,65 @@
+# 5 ENIs — 2 app, 3 db, one pinned to each simulated DPU.
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-app-01
+  namespace: default
+  labels: { tier: app, app: web }
+spec:
+  vnet_name: vnet-app
+  mac_address: "00:11:22:00:00:01"
+  underlay_ip: "10.0.5.11"
+  admin_state: "up"
+  placement_hint_dpu_ids: ["dpu-sim-01"]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-app-02
+  namespace: default
+  labels: { tier: app, app: web }
+spec:
+  vnet_name: vnet-app
+  mac_address: "00:11:22:00:00:02"
+  underlay_ip: "10.0.5.12"
+  admin_state: "up"
+  placement_hint_dpu_ids: ["dpu-sim-02"]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-db-01
+  namespace: default
+  labels: { tier: db, app: postgres }
+spec:
+  vnet_name: vnet-db
+  mac_address: "00:11:22:00:00:03"
+  underlay_ip: "10.0.6.11"
+  admin_state: "up"
+  placement_hint_dpu_ids: ["dpu-sim-03"]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-db-02
+  namespace: default
+  labels: { tier: db, app: postgres }
+spec:
+  vnet_name: vnet-db
+  mac_address: "00:11:22:00:00:04"
+  underlay_ip: "10.0.6.12"
+  admin_state: "up"
+  placement_hint_dpu_ids: ["dpu-sim-04"]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-db-03
+  namespace: default
+  labels: { tier: db, app: postgres }
+spec:
+  vnet_name: vnet-db
+  mac_address: "00:11:22:00:00:05"
+  underlay_ip: "10.0.6.13"
+  admin_state: "up"
+  placement_hint_dpu_ids: ["dpu-sim-05"]

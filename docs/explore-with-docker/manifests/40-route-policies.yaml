@@ -1,0 +1,44 @@
+# Route policies — overlay routes for the app tier and db tier ENIs.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: routes-app
+  namespace: default
+  labels: { tier: app }
+spec:
+  eni_names: ["eni-app-01", "eni-app-02"]
+  routes:
+    - prefix: "10.10.0.0/16"
+      next_hop_type: "vnet"
+      next_hop_target: "vnet-app"
+      metric: 10
+    - prefix: "10.20.0.0/16"
+      next_hop_type: "vnet"
+      next_hop_target: "vnet-db"
+      metric: 20
+    - prefix: "0.0.0.0/0"
+      next_hop_type: "drop"
+      next_hop_target: ""
+      metric: 9999
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: routes-db
+  namespace: default
+  labels: { tier: db }
+spec:
+  eni_names: ["eni-db-01", "eni-db-02", "eni-db-03"]
+  routes:
+    - prefix: "10.20.0.0/16"
+      next_hop_type: "vnet"
+      next_hop_target: "vnet-db"
+      metric: 10
+    - prefix: "10.10.0.0/16"
+      next_hop_type: "vnet"
+      next_hop_target: "vnet-app"
+      metric: 20
+    - prefix: "0.0.0.0/0"
+      next_hop_type: "drop"
+      next_hop_target: ""
+      metric: 9999

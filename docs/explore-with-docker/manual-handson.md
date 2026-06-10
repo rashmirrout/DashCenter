@@ -195,8 +195,9 @@ DashCenter\
 │       ├── cmd\dashctl\main.go  ← entry point
 │       ├── Makefile             ← build / test / image targets
 │       └── bin\                 ← where make build writes dashctl.exe
-└── explore-with-docker\
-    └── manual-handson.md        ← THIS FILE
+└── docs\explore-with-docker\
+    ├── manual-handson.md        ← THIS FILE
+    └── manifests\               ← inlined experiment manifests (5 files)
 ```
 
 Everything you need to run the lab is under `deploy\dashctl-fleet\` and
@@ -1495,6 +1496,779 @@ $bin = "C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dashctl\bin\dashctl.ex
 docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl version
 docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl dpu list -o table
 ```
+
+---
+
+# Experiment 2 — Provision VNets / ENIs / VnetMappings / ACLs / Routes, then play with a new ENI on a DPU
+
+> **Goal of this experiment.** Take a brand-new DashCenter laptop, deploy
+> the full fleet, push a realistic policy set across **every spec kind
+> dashd ships in Phase 1** (VNets, ENIs, VnetMappings, AclPolicies,
+> RoutePolicies), inspect each kind from multiple angles, then go
+> off-script and **create a brand-new ENI on a specific DPU, attach an
+> ACL policy to just that ENI, and verify dashd places it correctly**.
+> Finish by repeating the same flow from inside a container, and tear
+> the lab down cleanly.
+>
+> **Who this is for.** Anyone who has never touched the codebase before
+> and wants a 30-minute, copy-paste-ready exploration. Every command
+> below was executed live on **2026-06-10** against a fresh fleet on a
+> Windows laptop and the output is **verbatim**.
+>
+> **What's new vs. Experiment 1 (§1-§11 above).** Experiment 1 covers
+> the canonical 36-step `dashctl` walkthrough with VNets + ENIs only.
+> Experiment 2 expands the scope to **all 5 Phase-1 spec kinds**, adds a
+> custom **policy-attach playground** (Step E2.7), and explains the
+> **end-to-end flow from `dashctl` → REST → dashd's store → dispatcher →
+> dash-sim** so you understand what each command actually causes the
+> control plane to do.
+
+## E2.0 — Mental model: how a `dashctl apply` becomes DPU state
+
+Before any commands, this is the data path you are about to drive
+end-to-end:
+
+```
+   you, at the keyboard
+        │
+        │  PowerShell process
+        ▼
+   bin/dashctl.exe ────► HTTP PUT  /v1/<ns>/<plural>/<name>
+                                                ▲
+                                                │ TCP :8443 (REST)
+                                                ▼
+                                  ┌─────────────────────────────────┐
+                                  │  dc-ctl-dashd  (control plane)  │
+                                  │                                 │
+                                  │  1. REST handler validates JSON │
+                                  │  2. Service layer applies CAS   │
+                                  │  3. File store writes           │
+                                  │       /var/lib/dashd/<ns>/<kind>/<name>.json
+                                  │  4. Reconciler enqueues diff    │
+                                  │  5. Dispatcher fans out per-DPU │
+                                  └────────────┬────────────────────┘
+                                               │  gRPC ApplyBatch :50051
+                                               │  on the dc-ctl-fleet bridge
+                                               ▼
+                              ┌──────────────────────────────────────┐
+                              │ dc-ctl-sim-1 … dc-ctl-sim-5 (DPUs)  │
+                              │                                      │
+                              │  In-memory "observed state" updated  │
+                              │  Drift = (desired − observed) = ∅    │
+                              └──────────────────────────────────────┘
+```
+
+Key insight: **every spec you `apply` is durable in dashd's named volume
+within milliseconds, but it does not affect a DPU until the reconciler
+sees a non-empty diff and the dispatcher delivers it.** The
+`dashctl reconcile` verb is what guarantees the next inspect command
+sees a converged state.
+
+## E2.1 — Deploy the fleet (one command, one minute)
+
+```powershell
+PS> cd C:\WorkSpace\PS\PublicRepo\DashCenter
+PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml up -d --build
+```
+
+What this does:
+
+| Container | Role |
+|---|---|
+| `dc-ctl-sim-1` … `dc-ctl-sim-5` | Five **simulated DPUs**. Each speaks `dashapi.v1` on `:50051` (in-network) and an admin HTTP on `:8080` (host: `8181..8185`). |
+| `dc-ctl-dashd-init` | One-shot `chown -R 65532:65532 /var/lib/dashd`. Required because dashd runs as nonroot but Docker creates volumes as root. Exits 0 then disappears from `docker ps`. |
+| `dc-ctl-dashd` | The **control plane**. REST on `:8443`, gRPC on `:9443`, admin on `:7443`. |
+
+Smoke check:
+
+```powershell
+PS> Start-Sleep 8
+PS> docker ps --filter "name=dc-ctl-" --format "table {{.Names}}\t{{.Status}}"
+NAMES          STATUS
+dc-ctl-dashd   Up 20 seconds
+dc-ctl-sim-2   Up 21 seconds
+dc-ctl-sim-3   Up 21 seconds
+dc-ctl-sim-1   Up 21 seconds
+dc-ctl-sim-5   Up 21 seconds
+dc-ctl-sim-4   Up 21 seconds
+
+PS> curl.exe -s http://localhost:7443/admin/health
+{"status":"ok","leader":true,"dpus":[{"id":"dpu-sim-01","state":"DPU_STATE_UP",...},...]}
+```
+
+`status: ok` + 5 DPUs in `DPU_STATE_UP` means the prober has tcp-dialed
+every sim and they answered. You're ready for the next step.
+
+## E2.2 — Set the operator shell
+
+Run this **once** in your PowerShell session. Every command in this
+experiment uses `$bin` and the two `DASHCTL_*` env vars.
+
+```powershell
+PS> $env:Path = "C:\Users\rashmirout\go-sdk\go\bin;C:\Users\rashmirout\go\bin;$env:Path"
+PS> $env:DASHCTL_ENDPOINT       = "http://localhost:8443"
+PS> $env:DASHCTL_ADMIN_ENDPOINT = "http://localhost:7443"
+PS> $bin = "c:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dashctl\bin\dashctl.exe"
+PS> & $bin version
+Client: dashctl 0.1.0-dev (commit 3c3d8277877c, built 2026-06-10T09:42:07Z)
+Server: dashd  dashd (transport=rest endpoint=http://localhost:8443) leader=true
+```
+
+> **What `dashctl version` actually does.** Two calls in parallel:
+> (1) returns the binary's stamped build info (no network), and
+> (2) `GET http://localhost:7443/admin/health` to read dashd's reported
+> name and leader status. If the second call fails, the client section
+> still prints and `version` exits 0 (every other verb returns exit 7 =
+> UNAVAILABLE on a dead server).
+
+## E2.3 — Inspect the inventory (DPUs only)
+
+```powershell
+PS> & $bin dpu list -o table
+ID           ENDPOINT   STATE          LAST_SEEN
+dpu-sim-01              DPU_STATE_UP   2026-06-10T09:41:28Z
+dpu-sim-02              DPU_STATE_UP   2026-06-10T09:41:28Z
+dpu-sim-03              DPU_STATE_UP   2026-06-10T09:41:28Z
+dpu-sim-04              DPU_STATE_UP   2026-06-10T09:41:28Z
+dpu-sim-05              DPU_STATE_UP   2026-06-10T09:41:28Z
+```
+
+**What this command does.** `dpu list` calls `GET :7443/admin/inventory`
+(not the REST API). The admin surface always returns
+`DPU_STATE_*` as a string (B1-fix on the REST surface made the two
+align). The `ENDPOINT` column is empty here only because the table
+view uses the **admin** projection; the REST projection
+(`dashctl inventory get -o table`) shows it.
+
+## E2.4 — Apply the full Phase-1 policy set in one shot
+
+The repo ships a complete manifest set at
+`docs/explore-with-docker/manifests/`. Five files, applied in lexicographic
+order:
+
+| File | Specs | Lines |
+|---|---|---|
+| `00-vnets.yaml` | 2 VNets (`vnet-app`, `vnet-db`) | 16 |
+| `10-enis.yaml` | 5 ENIs, one per DPU | 60 |
+| `20-vnet-mappings.yaml` | 4 overlay→underlay rewrites | 48 |
+| `30-acl-policies.yaml` | 3 ACL policies (app-in, app-out, db-in) | 65 |
+| `40-route-policies.yaml` | 2 route policies (one per tier) | 45 |
+
+Apply them all at once:
+
+```powershell
+PS> & $bin -n default apply -f c:\WorkSpace\PS\PublicRepo\DashCenter\docs\explore-with-docker\manifests
+vnet/vnet-app apply in namespace default (generation 1)
+vnet/vnet-db apply in namespace default (generation 1)
+eni/eni-app-01 apply in namespace default (generation 1)
+eni/eni-app-02 apply in namespace default (generation 1)
+eni/eni-db-01 apply in namespace default (generation 1)
+eni/eni-db-02 apply in namespace default (generation 1)
+eni/eni-db-03 apply in namespace default (generation 1)
+vnetmapping/map-app-10 apply in namespace default (generation 1)
+vnetmapping/map-app-11 apply in namespace default (generation 1)
+vnetmapping/map-db-20 apply in namespace default (generation 1)
+vnetmapping/map-db-21 apply in namespace default (generation 1)
+aclpolicy/acl-app-in apply in namespace default (generation 1)
+aclpolicy/acl-app-out apply in namespace default (generation 1)
+aclpolicy/acl-db-in apply in namespace default (generation 1)
+routepolicy/routes-app apply in namespace default (generation 1)
+routepolicy/routes-db apply in namespace default (generation 1)
+```
+
+**What just happened, step by step:**
+
+1. `dashctl` walked the directory in lexicographic order
+   (`00-…` → `40-…`), parsed each YAML as a multi-document stream, and
+   wrapped each document in a kind-aware envelope.
+2. For every envelope, dashctl PUT to
+   `http://localhost:8443/v1/default/<plural>/<name>` —
+   plural is derived from the kind registry
+   (`Vnet` → `vnets`, `Eni` → `enis`, `VnetMapping` → `vnet-mappings`,
+   `AclPolicy` → `acl-policies`, `RoutePolicy` → `route-policies`).
+3. Dashd's REST handler validated each JSON body, called the in-process
+   `service.ControlPlane.Put*` for that kind, which wrote the JSON to
+   `/var/lib/dashd/default/<store_kind>/<name>.json` and bumped the
+   generation.
+4. The reconciler picked up the diff and the dispatcher fanned out
+   gRPC `ApplyBatch` calls to every sim that should host any of those
+   specs (placement-hint driven: every ENI has a
+   `placement_hint_dpu_ids` list, and VnetMappings/ACLs/Routes follow
+   their parent ENI's placement).
+
+**Sanity check the counts:**
+
+```powershell
+PS> foreach ($k in @("vnet","eni","vnetmapping","aclpolicy","routepolicy")) {
+>>   $n = (& $bin -n default get $k -o name | Measure-Object).Count
+>>   Write-Host ("  {0,-12} = {1}" -f $k, $n)
+>> }
+  vnet         = 2
+  eni          = 5
+  vnetmapping  = 4
+  aclpolicy    = 3
+  routepolicy  = 2
+```
+
+**Trigger one reconcile so the inspect commands below see a converged
+state:**
+
+```powershell
+PS> & $bin reconcile
+Triggered reconcile on all DPUs.
+
+PS> Start-Sleep 6
+PS> foreach ($d in @("dpu-sim-01","dpu-sim-02","dpu-sim-03","dpu-sim-04","dpu-sim-05")) {
+>>     Write-Host "  $d :" -NoNewline; & $bin dpu drift --dpu $d
+>> }
+  dpu-sim-01 :0 drift items.
+  dpu-sim-02 :0 drift items.
+  dpu-sim-03 :0 drift items.
+  dpu-sim-04 :0 drift items.
+  dpu-sim-05 :0 drift items.
+```
+
+**0 drift on every DPU** means every spec dashd thinks should be on a
+DPU is in fact present in that DPU's observed state. From here on, you
+can read the state from either side and the answers will match.
+
+## E2.5 — Inspect the provisioned policy set (with explanations)
+
+Each subsection shows a verb, what dashd actually does, and the live
+output.
+
+### E2.5.1 — VNets
+
+```powershell
+PS> & $bin -n default get vnet -o table
+NAMESPACE   NAME       VNI    GENERATION   LABELS
+default     vnet-app   1001   1            tier=app
+default     vnet-db    1002   1            tier=db
+```
+
+`get vnet` → `GET /v1/default/vnets` → dashd reads
+`/var/lib/dashd/default/vnet/*.json` and returns an `items` array.
+The render layer projects to the `VnetColumns` table.
+
+YAML view of one:
+
+```powershell
+PS> & $bin -n default get vnet vnet-app -o yaml
+```
+
+`get vnet vnet-app` → `GET /v1/default/vnets/vnet-app` (singular, no
+list path) → same store file, single object.
+
+Selector:
+
+```powershell
+PS> & $bin -n default get vnet -l tier=db -o name
+vnet/vnet-db
+```
+
+Selectors today are **client-side**: dashctl pulls the full list, then
+filters in-process. Server-side push-down is a Phase-2 enhancement
+(see [specs/Impl-Plan/dashctl-impl-phases.md](../../specs/Impl-Plan/dashctl-impl-phases.md) §"Honest open items").
+
+### E2.5.2 — ENIs (the most interesting kind)
+
+```powershell
+PS> & $bin -n default get eni -o wide
+NAMESPACE   NAME         VNET       MAC                 UNDERLAY    ADMIN   PLACED-ON    GEN
+default     eni-app-01   vnet-app   00:11:22:00:00:01   10.0.5.11   up      dpu-sim-01   2
+default     eni-app-02   vnet-app   00:11:22:00:00:02   10.0.5.12   up      dpu-sim-02   1
+default     eni-db-01    vnet-db    00:11:22:00:00:03   10.0.6.11   up      dpu-sim-03   1
+default     eni-db-02    vnet-db    00:11:22:00:00:04   10.0.6.12   up      dpu-sim-04   1
+default     eni-db-03    vnet-db    00:11:22:00:00:05   10.0.6.13   up      dpu-sim-05   1
+```
+
+`-o wide` is the same `GET …/enis` but the table includes the wide-only
+`PLACED-ON` column (read from the spec's `placement_hint_dpu_ids[0]`).
+`eni-app-01` shows generation **2** because Experiment-1 mutated it
+once; the rest are still at gen 1.
+
+```powershell
+PS> & $bin -n default describe eni eni-app-01
+Name:        eni-app-01
+Namespace:   default
+Kind:        Eni
+Generation:  2
+Labels:      app=web,tier=app
+Spec:
+  admin_state: up
+  mac_address: 00:11:22:00:00:01
+  placement_hint_dpu_ids: [dpu-sim-01]
+  underlay_ip: 10.0.5.11
+  vnet_name: vnet-app
+```
+
+`describe` is just a human renderer over the same `GET` — it does not
+issue extra calls and does not (yet) cross-reference attached ACLs or
+routes (that's a Phase-2 enhancement; see Phase 3.A.7 in the tracker).
+
+Label match across two dimensions:
+
+```powershell
+PS> & $bin -n default get eni -l tier=db -o name
+eni/eni-db-01
+eni/eni-db-02
+eni/eni-db-03
+```
+
+### E2.5.3 — VnetMappings
+
+```powershell
+PS> & $bin -n default get vnetmapping -o table
+NAMESPACE   NAME                  VNET       OVERLAY      UNDERLAY    ACTION       GEN
+default     vnet-app-10.10.0.10   vnet-app   10.10.0.10   10.0.5.11   vnet_encap   2
+default     vnet-app-10.10.0.11   vnet-app   10.10.0.11   10.0.5.12   vnet_encap   2
+default     vnet-db-10.20.0.10    vnet-db    10.20.0.10   10.0.6.11   vnet_encap   2
+default     vnet-db-10.20.0.11    vnet-db    10.20.0.11   10.0.6.12   vnet_encap   2
+```
+
+**Interesting detail.** The manifest authored the mappings with logical
+names like `map-app-10`, but dashd's `VnetMappingService` keys them by
+`<vnet_name>-<ip_address>` because the (vnet, overlay-IP) pair is the
+true unique identity of a mapping. The `metadata.name` you wrote is
+honoured for the apply request, but the **canonical store key** is the
+synthesised one — that's what `get` returns. If you re-apply the same
+overlay-IP under a different `metadata.name`, you'll bump the gen of
+the existing row instead of creating a duplicate.
+
+Aliases the kind registry accepts: `vnetmapping`, `vnet-mapping`,
+`mapping`, `mappings`.
+
+```powershell
+PS> & $bin -n default get mapping -o name
+vnet-mapping/vnet-app-10.10.0.10
+vnet-mapping/vnet-app-10.10.0.11
+vnet-mapping/vnet-db-10.20.0.10
+vnet-mapping/vnet-db-10.20.0.11
+```
+
+### E2.5.4 — ACL policies
+
+```powershell
+PS> & $bin -n default get aclpolicy -o table
+NAMESPACE   NAME          STAGE      ENIs                            RULES   GEN
+default     acl-app-in    inbound    eni-app-01,eni-app-02           2       1
+default     acl-app-out   outbound   eni-app-01,eni-app-02           2       1
+default     acl-db-in     inbound    eni-db-01,eni-db-02,eni-db-03   2       1
+```
+
+The `ENIs` column is the `eni_names` list from the spec — i.e. **the set
+of ENIs this policy is bound to**. dashd uses this list to compute, for
+each DPU, the union of ACL policies that apply to any ENI hosted on
+that DPU, and ships that union in the gRPC ApplyBatch.
+
+Drill into one policy to see the rules:
+
+```powershell
+PS> & $bin -n default describe aclpolicy acl-app-in
+Name:        acl-app-in
+Namespace:   default
+Kind:        AclPolicy
+Generation:  1
+Labels:      dir=in,tier=app
+Spec:
+  eni_names: [eni-app-01 eni-app-02]
+  rules: [map[action:allow description:permit web from db tier dst_ports:[80 443] priority:100 protocols:[tcp] src_prefixes:[10.20.0.0/16]] map[action:deny description:default deny priority:200 src_prefixes:[0.0.0.0/0]]]
+  stage: inbound
+```
+
+The render layer collapses the rule list to a single line (Phase-1
+limitation, kubectl-describe-style multiline render is a Phase-3 item).
+For a cleaner read, use `-o yaml`:
+
+```powershell
+PS> & $bin -n default get aclpolicy acl-app-in -o yaml
+```
+
+### E2.5.5 — Route policies
+
+```powershell
+PS> & $bin -n default get routepolicy -o table
+NAMESPACE   NAME         ENIs                            ROUTES   GEN
+default     routes-app   eni-app-01,eni-app-02           3        1
+default     routes-db    eni-db-01,eni-db-02,eni-db-03   3        1
+
+PS> & $bin -n default describe routepolicy routes-app
+Name:        routes-app
+Namespace:   default
+Kind:        RoutePolicy
+Generation:  1
+Labels:      tier=app
+Spec:
+  eni_names: [eni-app-01 eni-app-02]
+  routes: [map[metric:10 next_hop_target:vnet-app next_hop_type:vnet prefix:10.10.0.0/16] map[metric:20 next_hop_target:vnet-db next_hop_type:vnet prefix:10.20.0.0/16] map[metric:9999 next_hop_type:drop prefix:0.0.0.0/0]]
+```
+
+Routes follow the same binding model as ACLs: a `RoutePolicy.eni_names`
+list pins the policy to a set of ENIs, and dashd ships the union to the
+hosting DPU.
+
+### E2.5.6 — The persistent store on disk (proof of durability)
+
+```powershell
+PS> docker run --rm -v dashd-state-ctl-fleet:/data alpine find /data -type f
+/data/default/acl_policy/acl-app-out.json
+/data/default/acl_policy/acl-db-in.json
+/data/default/acl_policy/acl-app-in.json
+/data/default/route_policy/routes-db.json
+/data/default/route_policy/routes-app.json
+/data/default/vnet/vnet-db.json
+/data/default/vnet/vnet-app.json
+/data/default/eni/eni-db-03.json
+/data/default/eni/eni-app-02.json
+/data/default/eni/eni-db-02.json
+/data/default/eni/eni-app-01.json
+/data/default/eni/eni-db-01.json
+/data/default/vnet_mapping/vnet-app-10.10.0.11.json
+/data/default/vnet_mapping/vnet-db-10.20.0.11.json
+/data/default/vnet_mapping/vnet-db-10.20.0.10.json
+/data/default/vnet_mapping/vnet-app-10.10.0.10.json
+```
+
+Every spec lives as one JSON file under
+`/var/lib/dashd/<namespace>/<store_kind>/<name>.json`. The named volume
+`dashd-state-ctl-fleet` survives `docker compose down` (without `-v`),
+so the next `up` resumes from the same state.
+
+### E2.5.7 — What the dispatcher actually sent
+
+```powershell
+PS> docker logs --tail 12 dc-ctl-dashd 2>&1
+{"time":"...","level":"INFO","msg":"dispatch: reconcile complete","dpu":"dpu-sim-03"}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile complete","dpu":"dpu-sim-01"}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile complete","dpu":"dpu-sim-04"}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile","dpu":"dpu-sim-04","add":9,"update":0,"remove":0}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile complete","dpu":"dpu-sim-04"}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile","dpu":"dpu-sim-03","add":11,"update":0,"remove":0}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile complete","dpu":"dpu-sim-03"}
+```
+
+The `add: N` field tells you **how many specs that DPU received in the
+last batch** (ENI + its mappings + its ACL + its routes). `update: 0,
+remove: 0` means the batch was a pure add — first-time placement.
+
+## E2.6 — Playground: create a brand-new ENI on a chosen DPU, attach an ACL, verify end-to-end
+
+This is the "I want to actually feel the system respond" step. We will:
+
+1. Create a **new ENI** called `eni-app-99`, **pinned to `dpu-sim-04`**,
+   in `vnet-app`.
+2. Create a **new ACL policy** called `acl-eni99-in` bound **only** to
+   `eni-app-99`.
+3. Apply both.
+4. Verify dashd placed them on `dpu-sim-04` (and **only** `dpu-sim-04`)
+   by reading the dispatcher counts and the per-DPU drift.
+5. Then delete both so the fleet returns to the canonical state.
+
+### E2.6.1 — Author the two manifests in-place
+
+```powershell
+PS> @"
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-app-99
+  namespace: default
+  labels: { tier: app, app: web, owner: explore }
+spec:
+  vnet_name: vnet-app
+  mac_address: "00:11:22:00:00:99"
+  underlay_ip: "10.0.5.99"
+  admin_state: "up"
+  placement_hint_dpu_ids: ["dpu-sim-04"]
+"@ | Set-Content -Path C:\Temp\new-eni.yaml -Encoding ascii
+
+PS> @"
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-eni99-in
+  namespace: default
+  labels: { tier: app, owner: explore }
+spec:
+  stage: "inbound"
+  eni_names: ["eni-app-99"]
+  rules:
+    - priority: 100
+      action: "allow"
+      src_prefixes: ["10.10.0.0/16"]
+      dst_ports:    ["8080"]
+      protocols:    ["tcp"]
+      description:  "permit 8080 from app overlays"
+    - priority: 200
+      action: "deny"
+      src_prefixes: ["0.0.0.0/0"]
+      description:  "default deny"
+"@ | Set-Content -Path C:\Temp\new-acl.yaml -Encoding ascii
+```
+
+**Why label everything `owner=explore`?** So you can later select and
+delete just the experimental objects with `-l owner=explore` without
+touching the canonical fleet.
+
+### E2.6.2 — Apply
+
+```powershell
+PS> & $bin -n default apply -f C:\Temp\new-eni.yaml
+eni/eni-app-99 apply in namespace default (generation 1)
+
+PS> & $bin -n default apply -f C:\Temp\new-acl.yaml
+aclpolicy/acl-eni99-in apply in namespace default (generation 1)
+```
+
+**Flow:**
+
+1. dashctl PUT `/v1/default/enis/eni-app-99` with the YAML→JSON envelope.
+2. dashd's `ControlPlane.PutEni` validated, wrote
+   `/var/lib/dashd/default/eni/eni-app-99.json`, generation 1.
+3. Reconciler saw a new ENI bound to `dpu-sim-04` → dispatcher queued an
+   ApplyBatch for sim-4 only.
+4. Same flow for the ACL: `/v1/default/acl-policies/acl-eni99-in` →
+   `/var/lib/dashd/default/acl_policy/acl-eni99-in.json` → because its
+   `eni_names = [eni-app-99]` and that ENI is placed on `dpu-sim-04`,
+   the ACL goes to **sim-4 only**.
+
+### E2.6.3 — Verify placement and attachment
+
+```powershell
+PS> & $bin -n default get eni -o wide
+NAMESPACE   NAME         VNET       MAC                 UNDERLAY    ADMIN   PLACED-ON    GEN
+default     eni-app-01   vnet-app   00:11:22:00:00:01   10.0.5.11   up      dpu-sim-01   2
+default     eni-app-02   vnet-app   00:11:22:00:00:02   10.0.5.12   up      dpu-sim-02   1
+default     eni-app-99   vnet-app   00:11:22:00:00:99   10.0.5.99   up      dpu-sim-04   1
+default     eni-db-01    vnet-db    00:11:22:00:00:03   10.0.6.11   up      dpu-sim-03   1
+default     eni-db-02    vnet-db    00:11:22:00:00:04   10.0.6.12   up      dpu-sim-04   1
+default     eni-db-03    vnet-db    00:11:22:00:00:05   10.0.6.13   up      dpu-sim-05   1
+```
+
+`eni-app-99` is in the table, pinned to `dpu-sim-04` (which already
+hosts `eni-db-02`, so sim-4 now hosts 2 ENIs).
+
+```powershell
+PS> & $bin -n default get acl -l owner=explore -o table
+NAMESPACE   NAME           STAGE     ENIs         RULES   GEN
+default     acl-eni99-in   inbound   eni-app-99   2       1
+```
+
+Label-selector confirms only **one** policy carries the `owner=explore`
+label — the one we just created. Its `ENIs` column proves it is bound
+solely to `eni-app-99`.
+
+```powershell
+PS> & $bin -n default describe eni eni-app-99
+Name:        eni-app-99
+Namespace:   default
+Kind:        Eni
+Generation:  1
+Labels:      app=web,owner=explore,tier=app
+Spec:
+  admin_state: up
+  mac_address: 00:11:22:00:00:99
+  placement_hint_dpu_ids: [dpu-sim-04]
+  underlay_ip: 10.0.5.99
+  vnet_name: vnet-app
+```
+
+### E2.6.4 — Reconcile and verify dashd actually shipped them
+
+```powershell
+PS> & $bin reconcile
+Triggered reconcile on all DPUs.
+
+PS> Start-Sleep 6
+PS> foreach ($d in @("dpu-sim-01","dpu-sim-02","dpu-sim-03","dpu-sim-04","dpu-sim-05")) {
+>>     Write-Host "  $d :" -NoNewline; & $bin dpu drift --dpu $d
+>> }
+  dpu-sim-01 :0 drift items.
+  dpu-sim-02 :0 drift items.
+  dpu-sim-03 :0 drift items.
+  dpu-sim-04 :0 drift items.
+  dpu-sim-05 :0 drift items.
+```
+
+The dispatcher log proves where the new specs went:
+
+```powershell
+PS> docker logs --tail 4 dc-ctl-dashd 2>&1
+{"time":"...","level":"INFO","msg":"dispatch: reconcile","dpu":"dpu-sim-04","add":4,"update":0,"remove":0}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile complete","dpu":"dpu-sim-04"}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile","dpu":"dpu-sim-04","add":3,"update":0,"remove":0}
+{"time":"...","level":"INFO","msg":"dispatch: reconcile complete","dpu":"dpu-sim-04"}
+```
+
+**Only `dpu-sim-04` got a non-zero `add` count.** The other four sims
+saw a no-op reconcile (no new specs apply to them). This is the
+placement-hint working: dashd is fan-out-aware, not broadcast.
+
+### E2.6.5 — Clean up just the experimental objects
+
+```powershell
+PS> & $bin -n default delete aclpolicy acl-eni99-in
+acl_policy/acl-eni99-in deleted
+
+PS> & $bin -n default delete eni eni-app-99
+eni/eni-app-99 deleted
+```
+
+Verify:
+
+```powershell
+PS> & $bin -n default get eni -o name
+eni/eni-app-01
+eni/eni-app-02
+eni/eni-db-01
+eni/eni-db-02
+eni/eni-db-03
+
+PS> & $bin -n default get aclpolicy -o name
+acl_policy/acl-app-in
+acl_policy/acl-app-out
+acl_policy/acl-db-in
+```
+
+Both gone. The fleet is back to the canonical 16-object state. A
+follow-up `reconcile` would log a `remove: N` line on `dpu-sim-04` —
+that's the dispatcher pushing the deletion down so the DPU's observed
+state catches up.
+
+> **Pro tip.** Because both experimental objects share `owner=explore`,
+> you can wipe them in one shot once the **Phase 2 `--selector` flag**
+> on `delete` lands. For now, delete by name as above.
+
+## E2.7 — Do the whole thing from inside a container
+
+The host-side binary is the easiest UX, but for CI pipelines, ops
+toolchains, or "I don't want to install Go on this laptop" scenarios,
+the containerised `dashctl` is the right answer.
+
+The `dashctl` service in the compose file is **profile-gated**
+(`profiles: [cli]`), so `compose up` does NOT start it. You invoke it
+on demand:
+
+### E2.7.1 — Container `version`
+
+```powershell
+PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl version
+Client: dashctl 0.1.0-dev (commit none, built unknown)
+Server: dashd  dashd (transport=rest endpoint=http://dashd:8443) leader=true
+```
+
+Three things to notice:
+
+1. **Server endpoint is `http://dashd:8443`** (not `localhost`) — the
+   container reaches dashd over the Docker bridge by its compose name.
+2. **No `--insecure` flag was passed.** dashctl normally refuses
+   plaintext HTTP to non-localhost targets, but the compose file sets
+   `DASHCTL_INSECURE: "true"` so the in-net call goes through. (This is
+   the B5 fix.)
+3. **`commit none, built unknown`** because the image was built without
+   the `make build` ldflags. The host binary stamps them; the
+   distroless image does not.
+
+### E2.7.2 — Container `get` for each kind
+
+```powershell
+PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl get eni -o table
+NAMESPACE   NAME         VNET       MAC                 UNDERLAY    ADMIN   GEN
+default     eni-app-01   vnet-app   00:11:22:00:00:01   10.0.5.11   up      2
+default     eni-app-02   vnet-app   00:11:22:00:00:02   10.0.5.12   up      1
+default     eni-db-01    vnet-db    00:11:22:00:00:03   10.0.6.11   up      1
+default     eni-db-02    vnet-db    00:11:22:00:00:04   10.0.6.12   up      1
+default     eni-db-03    vnet-db    00:11:22:00:00:05   10.0.6.13   up      1
+
+PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl get aclpolicy -o table
+NAMESPACE   NAME           STAGE      ENIs                            RULES   GEN
+default     acl-app-in     inbound    eni-app-01,eni-app-02           2       1
+default     acl-app-out    outbound   eni-app-01,eni-app-02           2       1
+default     acl-db-in      inbound    eni-db-01,eni-db-02,eni-db-03   2       1
+```
+
+These are full round trips through the Docker bridge:
+`dc-ctl-dashctl` → `dc-ctl-dashd:8443` → store → response.
+
+### E2.7.3 — Container apply with a bind-mount
+
+Mount the manifest directory into the container and `apply` it just
+like you would on the host:
+
+```powershell
+PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm `
+>>   -v "${PWD}/docs/explore-with-docker/manifests:/work:ro" `
+>>   --entrypoint /usr/local/bin/dashctl `
+>>   dashctl -n default apply -f /work
+```
+
+(Bumps the generation by 1 on every spec — dashd has no
+`equals`-guard, so a no-op-content apply still increments gen.)
+
+> **Why `--entrypoint`?** The compose `dashctl` service already sets
+> `entrypoint: ["/usr/local/bin/dashctl"]` and the default `command:`
+> from the image. When you pass `-v` and `apply -f /work`, you need to
+> re-state the entrypoint so the args land in the right slot of the
+> docker CLI.
+
+## E2.8 — Tear down cleanly
+
+When you're done exploring:
+
+```powershell
+# Stop the containers but keep the store (next 'up' resumes from current state)
+PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml down
+
+# Stop AND wipe the named volume for a true clean slate next time
+PS> docker compose -f deploy/dashctl-fleet/docker-compose.yml down -v
+```
+
+What happens behind the scenes:
+
+| Action | Effect on dashd | Effect on store |
+|---|---|---|
+| `docker compose down`  | All 6 containers stopped + removed; bridge network removed | Named volume `dashd-state-ctl-fleet` survives |
+| `docker compose down -v` | Same as above | Named volume **deleted**; next `up -d --build` starts from empty state and re-runs `dc-ctl-dashd-init` to pre-chown the new volume |
+
+A useful intermediate cleanup if you only want to drop the experimental
+ENI/ACL but keep the canonical 16 specs is to delete them by name
+(§ E2.6.5) and skip the `compose down -v`.
+
+## E2.9 — Quick troubleshooting (Experiment-2 specific)
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `apply` returns `internal` 500 on a fresh volume | Volume created as root, dashd runs as UID 65532 | Should never happen — `dc-ctl-dashd-init` runs `chown` first. If it didn't, see § 11.1 above. |
+| `get vnetmapping` shows synthesized names (`vnet-app-10.10.0.10`) instead of `map-app-10` | **By design** — VnetMapping store key is `<vnet>-<overlayip>`, not `metadata.name` | None — read § E2.5.3 |
+| `dpu drift --dpu …` returns a non-zero count after `apply` | Reconcile didn't run yet | `& $bin reconcile; Start-Sleep 6` |
+| `docker compose run --rm dashctl …` errors `plaintext HTTP refused` | `DASHCTL_INSECURE` env not picked up | Make sure you're using the dashctl-fleet compose — it sets the env var. Or pass `-e DASHCTL_INSECURE=true` to the run command. |
+| `delete eni X` returns `not found` even though the table showed it | You're in a different namespace context | Always pass `-n default` if your `dashctl config view` shows a different `namespace:` field |
+| Volume contents listing is empty after `up -d --build` | Init container ran *after* dashd or didn't run | `docker ps -a --filter "name=dc-ctl-dashd-init"` should show `Exited (0)`. If it shows `Created` only, your compose file is missing the `depends_on: dashd-init: { condition: service_completed_successfully }` clause. |
+
+## E2.10 — What you learned
+
+By the end of Experiment 2 you have:
+
+- Brought up a 6-container DashCenter fleet from scratch.
+- Pushed **every Phase-1 spec kind** (Vnet, Eni, VnetMapping,
+  AclPolicy, RoutePolicy) through dashctl in one `apply` call.
+- Confirmed every spec landed durably in dashd's named-volume store.
+- Reconciled the cluster and confirmed all 5 DPUs report **0 drift**.
+- Inspected each kind with `get`/`describe`/`-o yaml`/`-o name`/`-l`
+  selectors, and seen the kind-aware column projections.
+- **Created a brand-new ENI** on a specific DPU, **attached a
+  brand-new ACL policy** to just that ENI, watched the dispatcher
+  ship **only** to the targeted DPU, then surgically cleaned it back
+  out.
+- Repeated the inspect step from inside a container, proving the same
+  binary works in CI pipelines and air-gapped operator workstations.
+- Torn the lab down cleanly with both "keep state" and "wipe state"
+  options.
+
+You can now point to any line of [src/impl-go/dashd/](../../src/impl-go/dashd/) or
+[src/impl-go/dashctl/](../../src/impl-go/dashctl/) and have a concrete mental model
+of what request, what file, what response, what dispatch the code is
+producing.
 
 ---
 

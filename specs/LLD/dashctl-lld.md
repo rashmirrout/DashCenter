@@ -353,6 +353,7 @@ flowchart TD
     root --> completion
     root --> config
     root --> dpu
+    root --> debug[debug • hidden]
     root --> ha[ha • Phase 2]
     root --> migration[migration • Phase 2]
     root --> trace[trace • Phase 2]
@@ -379,6 +380,13 @@ flowchart TD
     config --> cfg_cur[current-context]
     config --> cfg_del[delete-context]
     config --> cfg_ren[rename-context]
+
+    debug --> dbg_putraw[put-raw]
+    debug --> dbg_getraw[get-raw]
+    debug --> dbg_curl[curl]
+    debug --> dbg_admin[admin]
+    debug --> dbg_grpcstream[grpc-stream • Phase 2]
+    debug --> dbg_parity[parity • Phase 2]
 ```
 
 ### 5.2 Persistent (global) flags
@@ -593,6 +601,31 @@ Wraps `OperationsService` (gated on dashd Phase 2 PC). `drain` streams `DrainPro
 
 ---
 
+### 5.4 `debug` subcommand group
+
+The `debug` group is a **hidden** top-level Cobra command (`Hidden: true`)
+providing raw-protocol escape hatches. It does NOT appear in
+`dashctl --help` but is accessible via `dashctl debug --help`.
+
+Full spec — per-command flags, output format, architecture impact,
+quality gates, and integration tests — is in the standalone companion
+document:
+
+> **[`specs/LLD/dashctl-debug.md`](dashctl-debug.md)**
+
+Summary of subcommands:
+
+| Command | Phase | Purpose |
+|---|---|---|
+| `debug put-raw` | Phase 1 ext | Bypass envelope codec; send raw JSON to `Put<Kind>` |
+| `debug get-raw` | Phase 1 ext | Dump raw `PolicyObject.spec` protojson (no envelope) |
+| `debug curl` | Phase 1 ext | Print equivalent `curl` / `grpcurl` command (offline) |
+| `debug admin` | Phase 1 ext | Raw GET to dashd admin `:7443` |
+| `debug grpc-stream` | 2A | Open a named gRPC server-stream; dump NDJSON |
+| `debug parity` | 2A | Compare REST vs gRPC `Get` response; diff on mismatch |
+
+---
+
 ## 6. Client SDK (`pkg/client`)
 
 The SDK is **the only place where a transport choice is made**. Subcommand
@@ -655,10 +688,14 @@ type Client interface {
     AdminHealth(ctx context.Context) (AdminHealth, error)
     AdminEniPlacement(ctx context.Context) ([]EniPlacementRow, error)
     AdminDrift(ctx context.Context, dpuID string) ([]DriftItem, error)
+    AdminRaw(ctx context.Context, path string, params map[string]string) (json.RawMessage, error) // debug admin
 
     // ---- Phase 2 additions ----
     ApplyBatch(ctx context.Context) (ApplyBatchSender, error)            // client-stream; Phase 2 only
     SimulateApply(ctx context.Context, req *dashcenterv1.PolicyApplyRequest) (*dashcenterv1.SimulateApplyResult, error)
+
+    // Debug (Phase 2 / 2A)
+    DebugStream(ctx context.Context, key string, requestJSON json.RawMessage) (stream.Stream[json.RawMessage], error) // debug grpc-stream
 
     // Operations
     CordonDpu(ctx context.Context, dpuID string) (*dashcenterv1.Ack, error)
@@ -1333,6 +1370,7 @@ stateDiagram-v2
 | HaService | * | ⬜ | ✅ | `ha *` |
 | MigrationService | * | ⬜ | ✅ | `migration *` |
 | DiagnosticsService | * | ⬜ | ✅ | `trace *` |
+| — (debug) | n/a (uses existing RPCs) | ✅ `debug put-raw/get-raw/curl/admin` | ✅ `debug grpc-stream/parity` | see [`dashctl-debug.md`](dashctl-debug.md) |
 
 ### 18.2 Env vars (complete)
 

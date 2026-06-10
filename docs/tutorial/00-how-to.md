@@ -26,7 +26,16 @@ to a section by name.
 | 7 | [dash-sim-client CLI](07-dash-sim-client.md) | 20 min | Use every CLI subcommand against the running services |
 | 8 | [Docker Compose](08-docker-compose.md) | 15 min | Stand the whole fleet up under Docker on Windows and Linux |
 | 9 | [Multi-DPU test infra](09-multi-dpu-test-infra.md) | 15 min | Drive an N-DPU fleet from one config file across three topologies |
+| 10 | [dashd build](10-dashd-build.md) | 10 min | Build `dashd` from source on Windows + Linux |
+| 11 | [dashd unit tests](11-dashd-unit-tests.md) | 10 min | Run dashd's full unit suite + read the coverage report |
+| 12 | [dashd integration tests](12-dashd-integration-tests.md) | 20 min | Drive dashd + dash-sim end-to-end by hand, then via the Go suite |
+| 13 | [dashd single-node experiment](13-dashd-single-node.md) | 15 min | Configure dashd, walk every listener and the on-disk store |
+| 14 | [dashd in Docker (single-DPU e2e)](14-dashd-docker-e2e.md) | 10 min | Compose-up `dashd-e2e/`, run the 8-step verifier |
+| 15 | [dashd fleet (5 DPUs)](15-dashd-fleet.md) | 15 min | Compose-up `dashd-fleet/`, see fan-out + targeted placement |
+| 16 | [dashctl quickstart](16-dashctl-quickstart.md) | 20 min | Build and drive the operator CLI; contexts, formats, CAS |
+| 17 | [full-fleet experiments](17-full-fleet-experiments.md) | 25 min | Two end-to-end experiments incl. a custom ENI + ACL playground |
 |   | [Modules deep-dives](modules/) |   | One markdown per module — internals + extension points |
+|   | [Contributing to the tutorial](CONTRIBUTING-TO-TUTORIAL.md) | 5 min | The template and quality bar every new page must meet |
 
 ---
 
@@ -100,6 +109,29 @@ Pick one — each has a recommended reading path.
 2. [09 — Multi-DPU test infra](09-multi-dpu-test-infra.md) — pick a topology
 3. The matching hands-on walkthrough in [deploy/test-setup/](../../deploy/test-setup/) — step by step with expected logs
 4. [07 — CLI](07-dash-sim-client.md) — drive the fleet
+
+### 🖥️ "I'm a new dashd contributor"
+
+1. [03 — Build setup](03-build-setup.md)
+2. [10 — dashd build](10-dashd-build.md) — your first build
+3. [11 — dashd unit tests](11-dashd-unit-tests.md) — the bar new code must clear
+4. [12 — dashd integration tests](12-dashd-integration-tests.md) — end-to-end by hand
+5. [13 — single-node experiment](13-dashd-single-node.md) — the reference for every listener + on-disk file
+
+### 🏛️ "I want to run a full DashCenter fleet"
+
+1. [03 — Build setup](03-build-setup.md)
+2. [10 — dashd build](10-dashd-build.md)
+3. [14 — dashd in Docker, single-DPU e2e](14-dashd-docker-e2e.md)
+4. [15 — dashd fleet (5 DPUs)](15-dashd-fleet.md)
+5. [17 — full-fleet experiments](17-full-fleet-experiments.md)
+
+### 🧑‍🔧 "I'm an operator / SRE driving dashctl"
+
+1. [03 — Build setup](03-build-setup.md)
+2. [15 — dashd fleet](15-dashd-fleet.md) — stand up the cluster you'll talk to
+3. [16 — dashctl quickstart](16-dashctl-quickstart.md)
+4. [17 — full-fleet experiments](17-full-fleet-experiments.md)
 ---
 
 ## A note on naming
