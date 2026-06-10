@@ -321,6 +321,7 @@ dashctl
 ├── logs           stream dashd audit log entries (subset of events)
 ├── version        client + server versions
 ├── config         context management (current-context, use-context, view, set)
+├── debug          raw-protocol escape hatches (hidden; see dashctl-debug.md)
 ├── completion     shell completion (bash/zsh/fish/pwsh)
 └── help           per-command help
 ```
@@ -337,6 +338,30 @@ dashctl ha-set          put | get | list | delete
 dashctl service-tunnel  put | get | list | delete       # Phase 2 (capability-gated)
 dashctl inventory       put | get | list
 ```
+
+### 7.4 Debug / escape hatches (hidden)
+
+```
+dashctl debug
+├── put-raw        bypass envelope codec; send raw JSON to dashd ControlPlane
+├── get-raw        dump raw protojson stored in dashd (no envelope wrapping)
+├── curl           print equivalent curl / grpcurl command (offline, no RPC)
+├── admin          raw GET to dashd admin :7443
+├── grpc-stream    open a named gRPC server-stream RPC; dump NDJSON (Phase 2)
+└── parity         compare REST vs gRPC Get; diff on mismatch (Phase 2)
+```
+
+The `debug` group is **hidden from `dashctl --help`** but accessible via
+`dashctl debug --help`. It provides raw-protocol escape hatches for
+operators and maintainers who need to step outside the typed CLI. Full
+spec is in [`specs/LLD/dashctl-debug.md`](../LLD/dashctl-debug.md).
+
+Key invariants:
+- **No business logic** — calls dashd northbound APIs only; never talks
+  `dashapi.v1` southbound to DPU agents (use `dash-sim-client` for that).
+- **No hidden writes** — only `put-raw` mutates; everything else is
+  read-only or offline.
+- **Same exit codes** as all other dashctl commands.
 
 These are **thin wrappers around the generic verbs** — same SDK call,
 better discoverability. Inspired by `kubectl get pods` vs `kubectl get pod`.
@@ -608,7 +633,10 @@ Build is reproducible: `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main
 
 - Cluster lifecycle (etcd bring-up, dashd HA election, bootstrap).
 - Web Console functionality.
-- Direct DPU debugging (use `dash-sim-client`).
+- Direct DPU debugging (use `dash-sim-client`). Note: `dashctl debug`
+  is an escape hatch for dashd's **northbound** APIs; it does NOT talk
+  `dashapi.v1` southbound to DPU agents. Single-DPU southbound debugging
+  remains the job of `dash-sim-client`.
 - Saga/transaction recovery UI (dashd internal concern).
 - Schema reflection (`dashctl explain` uses an embedded proto descriptor; no live reflection in v1).
 

@@ -114,6 +114,20 @@ no native streaming, no `ApplyBatch`.
 | 27 | `Makefile` | Reproducible builds; cross-compile matrix (linux/darwin/windows × amd64/arm64); `image`, `test-cover`, `tidy`, `clean` targets. | ✅ [`src/impl-go/dashctl/Makefile`](../../src/impl-go/dashctl/Makefile) |
 | 28 | `deploy/dashctl-fleet/` (compose walkthrough) + `test/integration/` (Go suite) | Container e2e walkthrough (13 steps, POSIX + PowerShell) AND Go-built `//go:build integration` suite (13 scenarios run via `make test-integration`). The Go suite builds dashctl once, spawns a private dashd + dash-sim per scenario on dynamic ports, exercises every Phase-1 verb, and tears down with Windows-safe `taskkill /T /F`. | ✅ Full suite green on Windows: `--- PASS` for all 13 scenarios (`165s` total). Logs land in `C:\Temp\dashctl-it-logs` when `DASHCTL_IT_LOG_DIR` is set. |
 
+### Phase 1 extension — `debug` subcommand (REST-compatible subset)
+
+> **Scope.** Four `debug` subcommands that work against dashd's REST and
+> Admin surfaces today, requiring no gRPC backend. Ships as a follow-up
+> PR to Phase 1 completion. Full spec:
+> [`specs/LLD/dashctl-debug.md`](../LLD/dashctl-debug.md).
+
+| # | Module | Description | Status | Tests |
+|---|---|---|---|---|
+| 29 | `internal/cmd/debug.go` | Cobra `debug` group (hidden from top-level help) + `debug put-raw` subcommand. Bypasses envelope codec; sends raw JSON to `Put<Kind>` via REST or gRPC. Supports `--dry-run`, `--expected-generation`. | ❌ | unit (dry-run, round-trip) |
+| 30 | `internal/cmd/debug.go` | `debug get-raw` subcommand. Calls `client.Get()` and emits raw `PolicyObject.spec` protojson — no envelope wrapping, no column filtering. | ❌ | unit (raw vs envelope diff) |
+| 31 | `internal/cmd/debug.go` | `debug curl` subcommand. Generates a `curl` command from the resolved context (endpoint, auth, TLS). gRPC contexts emit `grpcurl` form. Offline — no RPC issued. | ❌ | unit (REST form, auth redaction) |
+| 32 | `internal/cmd/debug.go` + `pkg/client/client.go` | `debug admin` subcommand. Raw GET to dashd admin `:7443`. Adds `AdminRaw(ctx, path, params)` to `Client` interface; REST backend implements, gRPC returns `ErrUnimplemented`. | ❌ | unit (health, unknown-path 404) |
+
 ### Phase 1 quality gates
 
 | # | Gate | Criterion | Status |
@@ -130,6 +144,18 @@ no native streaming, no `ApplyBatch`.
 | C1-G10 | Streaming Ctrl-C | `events --watch` cancels within 250 ms of SIGINT | ⚬ Deferred to Phase 2 — `events` is a clean Unimplemented stub in Phase 1 |
 | C1-G11 | Cross-platform build | `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, `windows/amd64` | ✅ [`make -C src/impl-go/dashctl build-all`](../../src/impl-go/dashctl/Makefile) covers all 5 platforms |
 | C1-G12 | Integration suite | 13 scenarios pass via `go test -tags=integration` | ✅ **All 13 scenarios PASS** in `165s` on Windows with chocolatey `GNU Make 4.4.1`. Run via `make test-integration` or [`src/impl-go/dashctl/test/integration/`](../../src/impl-go/dashctl/test/integration/). |
+
+### Phase 1 extension quality gates (`debug`)
+
+| # | Gate | Criterion | Status |
+|---|---|---|---|
+| CD-G1 | `put-raw` round-trip | `put-raw` + `get-raw` produces byte-equal spec to `apply` + `get -o json` | ❌ |
+| CD-G2 | `put-raw` schema rejection | invalid field → `INVALID_ARGUMENT` exit 5 | ❌ |
+| CD-G3 | `put-raw --dry-run` | prints URL + body, makes zero HTTP calls | ❌ |
+| CD-G4 | `curl` REST form | emitted `curl`, when executed, gives identical JSON to `get -o json` | ❌ |
+| CD-G6 | `admin` health | `debug admin --path /admin/health` exits 0 with valid JSON | ❌ |
+| CD-G7 | `admin` unknown path | non-existent path → `404` surfaced with exit 3 | ❌ |
+| CD-G12 | Coverage | `internal/cmd/debug.go` ≥ 80 % statements | ❌ |
 
 ### Honest open items ("production tag" checklist)
 
@@ -283,6 +309,8 @@ src/impl-go/dashctl/
 | 2A.5 | `internal/cmd/root.go` | Force-import `pkg/client/grpc` so its `init()` registers `TransportGRPC`. | ❌ |
 | 2A.6 | `internal/config/config.go` | Reject mixed configs (`transport: grpc` + `https://…` endpoint → error). | ❌ |
 | 2A.7 | `pkg/client/grpc/grpc_test.go` | bufconn-driven unit tests; every method exercised including status-code mapping table. Target ≥ 90 %. | ❌ |
+| 2A.8 | `internal/cmd/debug.go` + `pkg/client/grpc/grpc.go` | `debug grpc-stream` subcommand. Opens a named gRPC server-stream RPC and dumps messages as NDJSON. Adds `DebugStream(ctx, key, reqJSON)` to `Client` interface; gRPC implements, REST returns `ErrUnimplemented`. Compile-time dispatch table for supported RPCs. Full spec: [`dashctl-debug.md § 4.5`](../LLD/dashctl-debug.md#45-debug-grpc-stream). | ❌ |
+| 2A.9 | `internal/cmd/debug.go` | `debug parity` subcommand. Dials both REST and gRPC backends, issues same `Get`, normalises protojson, diffs. Exits 0 on match, 1 on mismatch with unified diff. `--all` flag iterates every kind. No new `Client` methods. Full spec: [`dashctl-debug.md § 4.6`](../LLD/dashctl-debug.md#46-debug-parity). | ❌ |
 
 #### 2A quality gates
 
@@ -294,6 +322,11 @@ src/impl-go/dashctl/
 | C2A-G4 | Plaintext safety | `transport: grpc` to non-localhost without `--insecure` and without TLS material → config error (mirrors REST) | ❌ |
 | C2A-G5 | Coverage | `pkg/client/grpc/` ≥ 90 % statements | ❌ |
 | C2A-G6 | Cold start | `dashctl get vnet -o json` (LAN) ≤ 300 ms p99 over gRPC | ❌ |
+| CD-G5 | `curl` gRPC form | emitted `grpcurl` command contains correct `dashcenter.v1.ControlPlane/Get` service path | ❌ |
+| CD-G8 | `grpc-stream` cancel | `SIGINT` during `debug grpc-stream` → exit 0 within 250 ms, prints event count | ❌ |
+| CD-G9 | `grpc-stream` REST reject | `debug grpc-stream` on REST context → exit 9 with transport hint | ❌ |
+| CD-G10 | `parity` match | after `apply`, `debug parity` exits 0 (REST = gRPC) | ❌ |
+| CD-G11 | `parity` mismatch | injected codec drift → `debug parity` exits 1 with unified diff | ❌ |
 
 ---
 
@@ -436,6 +469,16 @@ Builds on Phase 1's 13 scenarios; lives in the same `src/impl-go/dashctl/test/in
 | # | Test | Sub-phase | Verifies |
 |---|---|---|---|
 | 14 | `TestIntegration_GRPC_PutVnet_Parity_REST` | 2A | identical Put result over REST and gRPC against the same dashd |
+| 24 | `TestIntegration_Debug_PutRaw_RoundTrip` | 1 ext | `put-raw` + `get-raw` byte-equals `apply` + `get -o json` |
+| 25 | `TestIntegration_Debug_PutRaw_InvalidField` | 1 ext | invalid field → INVALID_ARGUMENT exit 5 |
+| 26 | `TestIntegration_Debug_PutRaw_DryRun` | 1 ext | prints request, makes zero HTTP calls |
+| 27 | `TestIntegration_Debug_Curl_REST` | 1 ext | emitted curl runs correctly |
+| 28 | `TestIntegration_Debug_Admin_Health` | 1 ext | admin health exits 0 |
+| 29 | `TestIntegration_Debug_Admin_UnknownPath` | 1 ext | unknown admin path → exit 3 |
+| 30 | `TestIntegration_Debug_GrpcStream_Cancel` | 2A | SIGINT cancels within 250 ms |
+| 31 | `TestIntegration_Debug_GrpcStream_REST_Reject` | 2A | REST context → exit 9 |
+| 32 | `TestIntegration_Debug_Parity_Match` | 2A | REST = gRPC after apply |
+| 33 | `TestIntegration_Debug_Parity_Mismatch` | 2A | codec drift → exit 1 with diff |
 | 15 | `TestIntegration_GRPC_Get_Stream` | 2A | server-stream `List` returns ordered envelopes; client cancel works |
 | 16 | `TestIntegration_DryRun_Server_OverCapacity` | 2B | `--dry-run=server` on a known-over-cap manifest → `RESOURCE_EXHAUSTED` with limit detail |
 | 17 | `TestIntegration_ApplyBatch_Atomic_Rollback` | 2B | 50-item batch with item #25 failing → 0 specs survive |
@@ -767,3 +810,4 @@ src/impl-go/dashctl/
 | 2026-06-09 | Phase 1 ✅ | Closed C1-G12 by adding [`src/impl-go/dashctl/test/integration/`](../../src/impl-go/dashctl/test/integration/) (`//go:build integration`, 13 scenarios). Builds dashctl once, brings up a private dashd + dash-sim per scenario (`go run`), exercises every Phase-1 verb, and tears down with Windows-safe `taskkill /T /F`. **Full suite PASS in 165s on Windows** — covers offline (version/explain), live happy-paths (apply/get/describe/delete/reconcile/dpu list/drift), 5 output-format sub-tests, label-selector filtering, idempotent delete, and CAS-on-replace exit 4. Hardened Makefile for portable Windows (`SHELL=cmd.exe` + native `md`/`rmdir` when `OS=Windows_NT`) and verified `make` works in **both pwsh and Git Bash**. Tracker advances to **12/12 gates green**. Phase 1 ready for release tag. |
 | 2026-06-09 | Phase 2 tracker rewrite | Phase 2 rewritten in contributor-friendly, OSS-grade form: split into **5 sub-phases 2A–2E** matched to dashd PA–PE; **31 gates** (was 10) covering each sub-phase + 10 overall exit gates; **full RPC → verb matrix** for all dashcenter.v1 services; performance budgets table; 10 open design questions; first-time contributor task ladder (🟢🟡🟠🔴); target file layout; integration suite expansion to **23 scenarios** (13 Phase 1 + 10 Phase 2). No code change — tracker only. |
 | 2026-06-09 | Future-roadmap section | Added comprehensive **"Phase 3+ — future enhancements"** section organising post-Phase 2 work into 12 themes (3.A operator UX · 3.B auth · 3.C GitOps · 3.D observability · 3.E plugins · 3.F Console parity · 3.G performance · 3.H distribution · 3.I protocol/compat · 3.J test quality · 3.K docs · 3.L safety). **62 enhancement items** with audience, effort tier (🟢🟡🟠🔴), dependency, and status — each crisp enough to file as a GitHub issue. Plus 6 cross-cutting principles. No code change — tracker only. |
+| 2026-06-10 | `dashctl debug` spec | Added **`dashctl debug` subcommand group**: standalone spec ([`specs/LLD/dashctl-debug.md`](../LLD/dashctl-debug.md)), **Phase 1 extension steps 29–32** (`put-raw`, `get-raw`, `curl`, `admin`), **sub-phase 2A tasks 2A.8–2A.9** (`grpc-stream`, `parity`), **12 quality gates** (CD-G1–CD-G12), **10 integration tests** (#24–#33). Cross-referenced in HLD §7 and LLD §5.4/§6.1. No code change — spec/tracker only. |
