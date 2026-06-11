@@ -31,9 +31,9 @@ export default function DashboardView() {
           Array.from({ length: 4 }, (_, i) => <CardSkeleton key={i} />)
         ) : (
           <>
-            <StatsCard label="DPUs" value={fs?.total_dpus ?? 0} icon={<span className="text-2xl">⬡</span>} />
-            <StatsCard label="ENIs" value={formatNumber(fs?.total_enis ?? 0)} icon={<span className="text-2xl">◈</span>} />
-            <StatsCard label="Vnets" value={fs?.total_vnets ?? 0} icon={<span className="text-2xl">◉</span>} />
+            <StatsCard label="DPUs" value={fs?.dpu_count ?? fs?.total_dpus ?? 0} icon={<span className="text-2xl">⬡</span>} />
+            <StatsCard label="ENIs" value={formatNumber(fs?.eni_count ?? fs?.total_enis ?? 0)} icon={<span className="text-2xl">◈</span>} />
+            <StatsCard label="Vnets" value={fs?.vnet_count ?? fs?.total_vnets ?? 0} icon={<span className="text-2xl">◉</span>} />
             <StatsCard label="Drift Items" value={fs?.drift_count ?? 0} icon={<span className="text-2xl">⚠</span>} />
           </>
         )}
@@ -46,15 +46,15 @@ export default function DashboardView() {
           <p className="text-xs text-text-secondary uppercase tracking-wider mb-3">Fleet Health</p>
           <div className="flex gap-6">
             <div className="text-center">
-              <span className="text-2xl font-bold text-accent-green">{fs?.healthy_dpus ?? '—'}</span>
+              <span className="text-2xl font-bold text-accent-green">{fs?.dpus_by_state?.['DPU_STATE_UP'] ?? fs?.healthy_dpus ?? '—'}</span>
               <p className="text-[10px] text-text-muted">Healthy</p>
             </div>
             <div className="text-center">
-              <span className="text-2xl font-bold text-accent-amber">{fs?.degraded_dpus ?? '—'}</span>
+              <span className="text-2xl font-bold text-accent-amber">{fs?.dpus_by_state?.['DPU_STATE_DEGRADED'] ?? fs?.degraded_dpus ?? 0}</span>
               <p className="text-[10px] text-text-muted">Degraded</p>
             </div>
             <div className="text-center">
-              <span className="text-2xl font-bold text-accent-red">{fs?.disconnected_dpus ?? '—'}</span>
+              <span className="text-2xl font-bold text-accent-red">{fs?.dpus_by_state?.['DPU_STATE_DISCONNECTED'] ?? fs?.disconnected_dpus ?? 0}</span>
               <p className="text-[10px] text-text-muted">Disconnected</p>
             </div>
           </div>
@@ -64,13 +64,13 @@ export default function DashboardView() {
         <GlassCard>
           <p className="text-xs text-text-secondary uppercase tracking-wider mb-3">DPU States</p>
           <div className="flex flex-wrap gap-2">
-            {fs?.dpu_states && Object.entries(fs.dpu_states).map(([state, count]) => (
+            {(fs?.dpus_by_state || fs?.dpu_states) && Object.entries(fs.dpus_by_state || fs.dpu_states || {}).map(([state, count]) => (
               <div key={state} className="flex items-center gap-1.5">
                 <StatusBadge status={state} />
-                <span className="text-sm font-mono">{count}</span>
+                <span className="text-sm font-mono">{count as number}</span>
               </div>
             ))}
-            {!fs?.dpu_states && <span className="text-text-muted text-sm">No data</span>}
+            {!fs?.dpus_by_state && !fs?.dpu_states && <span className="text-text-muted text-sm">No data</span>}
           </div>
         </GlassCard>
 
@@ -111,23 +111,23 @@ export default function DashboardView() {
           <div className="flex flex-wrap justify-around gap-4">
             <CapacityGauge
               label="ENIs"
-              used={cs.fleet_totals.total_enis}
-              max={cs.fleet_totals.max_enis}
+              used={cs.fleet?.total_enis ?? 0}
+              max={cs.fleet?.max_enis ?? 100}
             />
             <CapacityGauge
               label="Routes"
-              used={cs.fleet_totals.total_routes}
-              max={cs.fleet_totals.max_routes}
+              used={cs.fleet?.total_routes ?? 0}
+              max={cs.fleet?.max_routes ?? 1000}
             />
             <CapacityGauge
               label="ACL Rules"
-              used={cs.fleet_totals.total_acl_rules}
-              max={cs.fleet_totals.max_acl_rules}
+              used={cs.fleet?.total_acl_rules ?? 0}
+              max={cs.fleet?.max_acl_rules ?? 1000}
             />
             <CapacityGauge
               label="Flows"
-              used={cs.fleet_totals.total_flows}
-              max={cs.fleet_totals.max_flows}
+              used={cs.fleet?.total_flows ?? 0}
+              max={cs.fleet?.max_flows ?? 10000}
             />
           </div>
         ) : (
@@ -141,19 +141,19 @@ export default function DashboardView() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
             <span className="text-text-muted">ACL Policies</span>
-            <p className="font-mono text-lg">{fs?.total_acl_policies ?? '—'}</p>
+            <p className="font-mono text-lg">{fs?.acl_policy_count ?? fs?.total_acl_policies ?? '—'}</p>
           </div>
           <div>
             <span className="text-text-muted">Route Policies</span>
-            <p className="font-mono text-lg">{fs?.total_route_policies ?? '—'}</p>
+            <p className="font-mono text-lg">{fs?.route_policy_count ?? fs?.total_route_policies ?? '—'}</p>
           </div>
           <div>
             <span className="text-text-muted">Service Tunnels</span>
-            <p className="font-mono text-lg">{fs?.total_service_tunnels ?? '—'}</p>
+            <p className="font-mono text-lg">{fs?.service_tunnel_count ?? fs?.total_service_tunnels ?? '—'}</p>
           </div>
           <div>
             <span className="text-text-muted">HA Sets</span>
-            <p className="font-mono text-lg">{fs?.total_ha_sets ?? '—'}</p>
+            <p className="font-mono text-lg">{fs?.ha_set_count ?? fs?.total_ha_sets ?? '—'}</p>
           </div>
         </div>
       </GlassCard>

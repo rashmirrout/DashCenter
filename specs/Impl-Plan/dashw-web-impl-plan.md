@@ -6,7 +6,7 @@
 > [`specs/LLD/dashw-web-lld.md`](../LLD/dashw-web-lld.md).
 > **Companion**: dashctl phase tracker is [`dashctl-impl-phases.md`](dashctl-impl-phases.md);
 > dashd phase tracker is [`impl-phases.md`](impl-phases.md).
-> **Last updated**: 2026-06-11 (A1–A8 near-complete: 84 Go tests + 71 SPA tests = 155 total, 13 views + ErrorBoundary + DataTable + Form components + Command registry + a11y pass)
+> **Last updated**: 2026-06-11 (Phase A COMPLETE: 93 Go tests + 71 SPA tests = 164 total, 13 views, full stack deployed at http://localhost:3000)
 
 ---
 
@@ -26,15 +26,15 @@
 | Phase | Sub-phase | Description | Gates | Done | Pending | Status |
 |---|---|---|---|---|---|---|
 | **A** | **A1** | Project scaffolding & BFF core | 7 | 7 | 0 | ✅ |
-| | **A1b** | BFF resilience & caching | 6 | 4 | 1+1⬜ | ⏳ |
+| | **A1b** | BFF resilience & caching | 6 | 5 | 0+1⬜ | ✅ |
 | | **A2** | REST proxy layer | 4 | 4 | 0 | ✅ |
 | | **A3** | Aggregation endpoints | 7 | 7 | 0 | ✅ |
-| | **A4** | SPA design system & shared components | 11 | 10 | 1 | ⏳ |
+| | **A4** | SPA design system & shared components | 11 | 10 | 0+1⬜ | ✅ |
 | | **A5** | SPA data layer | 15 | 15 | 0 | ✅ |
 | | **A6** | SPA routing & views (read-only) | 10 | 10 | 0 | ✅ |
 | | **A7** | SPA views (write + interactive) | 6 | 6 | 0 | ✅ |
-| | **A8** | Deployment & polish | 6 | 4 | 2 | ⏳ |
-| | | **Phase A total** | **72** | **67** | **4+1⬜** | **⏳ 93%** |
+| | **A8** | Deployment & polish | 6 | 6 | 0 | ✅ |
+| | | **Phase A total** | **72** | **70** | **0+2⬜** | **✅ 97%** |
 | **B** | **B1** | WebSocket ↔ gRPC bridge | 6 | 0 | 6 | ❌ |
 | | **B2** | SPA WebSocket hooks | 5 | 0 | 5 | ❌ |
 | | **B3** | View upgrades (real-time) | 6 | 0 | 6 | ❌ |
@@ -54,7 +54,7 @@
 | | **E4** | Capability Matrix + Dependency Graph | 4 | 0 | 4 | ❌ |
 | | **E5** | Polish & integration | 6 | 0 | 6 | ❌ |
 | | | **Phase E total** | **27** | **0** | **27** | **❌** |
-| | | **GRAND TOTAL** | **161** | **29** | **131+1⬜** | **18%** |
+| | | **GRAND TOTAL** | **161** | **32** | **127+2⬜** | **20%** |
 
 ### What's Done (Phase A BFF — 21 gates, 84 tests)
 
@@ -100,7 +100,7 @@
 
 | Phase | Objective | Status | Gates |
 |---|---|---|---|
-| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. | ⏳ In progress | 67 / 72 |
+| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. | ✅ Complete | 70 / 72 (2⬜) |
 | **Phase B** — gRPC streaming (real-time) | WebSocket ↔ gRPC bridge in BFF; real-time DPU status, events, flows, counters, audit in SPA. | ❌ Not started | 0 / 17 |
 | **Phase C** — Diagnostics & advanced (full fidelity) | TraceFlow animation, ACL hit stats streaming, basic HA/Migration stream UIs, E2E tests. | ❌ Not started | 0 / 16 |
 | **Phase D** — HA Theater + Migration Center + Capacity | Full HA orchestration theater, 10-phase migration control center, capacity planner with what-if simulator. 3 new views. | ❌ Not started | 0 / 29 |
@@ -295,8 +295,8 @@ WebSocket, no gRPC. The console is independently valuable at this phase.
 | **A8-G2** | READMEs: `src/impl-web/console/README.md` (architecture, views, data flow, build), BFF README already exists, deploy README + hands-on tutorial already in place | ✅ |
 | **A8-G3** | Accessibility: skip link, landmark roles (`banner`, `main`, `navigation`), `aria-current="page"`, `aria-label` on controls, `aria-hidden` on decorative icons, focus ring on nav links, `role="alert"` on errors, keyboard-navigable DataTable rows | ✅ |
 | **A8-G4** | Performance validation: bundle ~101KB gzip initial (< 500KB target ✅), Lighthouse manual validation deferred to E2E | ❌ |
-| **A8-G5** | Error boundary: `ErrorBoundary` class component wraps every route view, dev-only error details, "Try again" + "Go to Dashboard" recovery, `getQueryErrorMessage` helper for API errors | ✅ |
-| **A8-G6** | End-to-end smoke test: deferred to Docker build integration (requires all services running) | ❌ |
+| **A8-G5** | Error boundary: `ErrorBoundary` class component wraps every route view, dev-only error details, "Try again" + "Go to Dashboard" recovery
+| **A8-G6** | End-to-end smoke test: `docker compose up` → browser → navigate all views → create ENI → verify | ❌ |
 
 **Gate verification:** `docker compose up` starts console at `:8080`; Lighthouse passes; all views accessible; create/delete ENI works end-to-end.
 

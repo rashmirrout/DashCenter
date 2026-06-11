@@ -91,10 +91,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             An unexpected error occurred. You can try again or navigate to another view.
           </p>
 
-          {import.meta.env.DEV && (
-            <details className="text-left w-full max-w-lg mb-4">
+          {(
+            <details className="text-left w-full max-w-lg mb-4" open>
               <summary className="text-xs text-text-muted cursor-pointer hover:text-text-secondary">
-                Error details (dev only)
+                Error details
               </summary>
               <pre className="mt-2 p-3 bg-bg-elevated rounded-lg text-xs text-accent-red font-mono overflow-auto max-h-48 border border-border">
                 {error.message}

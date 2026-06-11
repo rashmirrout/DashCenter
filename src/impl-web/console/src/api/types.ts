@@ -218,18 +218,33 @@ export interface EniPlacement {
 /* ── BFF Aggregation types ─────────────────────────────────── */
 
 export interface FleetSummary {
-  total_dpus: number;
-  healthy_dpus: number;
-  degraded_dpus: number;
-  disconnected_dpus: number;
-  total_enis: number;
-  total_vnets: number;
-  total_acl_policies: number;
-  total_route_policies: number;
-  total_service_tunnels: number;
-  total_ha_sets: number;
-  dpu_states: Record<string, number>;
-  drift_count: number;
+  /* BFF aggregation field names */
+  timestamp?: string;
+  cluster_healthy?: boolean;
+  leader_node?: string;
+  is_leader?: boolean;
+  dpu_count?: number;
+  eni_count?: number;
+  vnet_count?: number;
+  dpus_by_state?: Record<string, number>;
+  dpus?: Array<{ id: string; state: string; last_seen?: string }>;
+  /* Legacy/alias field names (for compatibility) */
+  total_dpus?: number;
+  healthy_dpus?: number;
+  degraded_dpus?: number;
+  disconnected_dpus?: number;
+  total_enis?: number;
+  total_vnets?: number;
+  total_acl_policies?: number;
+  total_route_policies?: number;
+  total_service_tunnels?: number;
+  total_ha_sets?: number;
+  dpu_states?: Record<string, number>;
+  drift_count?: number;
+  acl_policy_count?: number;
+  route_policy_count?: number;
+  service_tunnel_count?: number;
+  ha_set_count?: number;
 }
 
 export interface DpuDetail {
@@ -321,8 +336,21 @@ export interface TunnelInfo {
 }
 
 export interface CapacityStats {
-  dpus: DpuCapacityEntry[];
-  fleet_totals: {
+  timestamp?: string;
+  dpus?: DpuCapacityEntry[];
+  per_dpu?: DpuCapacityEntry[];
+  fleet?: {
+    total_dpus?: number;
+    total_enis?: number;
+    max_enis?: number;
+    total_routes?: number;
+    max_routes?: number;
+    total_acl_rules?: number;
+    max_acl_rules?: number;
+    total_flows?: number;
+    max_flows?: number;
+  };
+  fleet_totals?: {
     total_enis: number;
     max_enis: number;
     total_routes: number;

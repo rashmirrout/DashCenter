@@ -24,13 +24,8 @@ RUN apk add --no-cache git
 
 WORKDIR /app
 
-# Copy Go workspace and module files first (cache dependencies)
-COPY src/impl-go/go.work src/impl-go/go.work.sum ./src/impl-go/
-COPY src/impl-go/gen/go/go.mod src/impl-go/gen/go/go.sum ./src/impl-go/gen/go/
+# Copy module files (console is stdlib-only, no external deps)
 COPY src/impl-go/console/go.mod ./src/impl-go/console/
-
-# Download dependencies
-RUN cd src/impl-go/console && go mod download 2>/dev/null || true
 
 # Copy source code
 COPY src/impl-go/gen/ ./src/impl-go/gen/
@@ -39,7 +34,8 @@ COPY src/impl-go/console/ ./src/impl-go/console/
 # Copy SPA build output into the Go embed directory
 COPY --from=web-builder /app/web/dist ./src/impl-go/console/web/dist/
 
-# Build the binary
+# Build the binary (GOWORK=off bypasses workspace — console has no external deps)
+ENV GOWORK=off
 RUN cd src/impl-go/console && \
 CGO_ENABLED=0 GOOS=linux go build \
 -trimpath \
