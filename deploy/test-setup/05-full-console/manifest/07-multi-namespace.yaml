@@ -1,0 +1,152 @@
+# 07-multi-namespace.yaml — second namespace `edge` for cross-namespace
+# isolation testing + a `staging` namespace for env separation.
+#
+# dashd rejects cross-namespace references at admission time.
+# Try: dashctl -A get vnet   (list across all namespaces)
+#      dashctl -n edge get eni
+
+# ===== edge namespace: CDN PoP =====
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: cdn-pop, namespace: edge, labels: { tenant: edge-cdn, env: prod } }
+spec: { vni: 2001 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: cdn-origin, namespace: edge, labels: { tenant: edge-cdn, env: prod } }
+spec: { vni: 2002 }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: edge-cdn-01, namespace: edge, labels: { tenant: edge-cdn } }
+spec:
+  namespace: edge
+  vnet_name: cdn-pop
+  mac_address: aa:bb:cc:f0:00:01
+  underlay_ip: 10.20.1.11
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-04]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: edge-cdn-02, namespace: edge, labels: { tenant: edge-cdn } }
+spec:
+  namespace: edge
+  vnet_name: cdn-pop
+  mac_address: aa:bb:cc:f0:00:02
+  underlay_ip: 10.20.1.12
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-05]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: edge-origin-01, namespace: edge, labels: { tenant: edge-cdn } }
+spec:
+  namespace: edge
+  vnet_name: cdn-origin
+  mac_address: aa:bb:cc:f0:00:03
+  underlay_ip: 10.20.2.11
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-04]
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-edge-pop-11, namespace: edge }
+spec: { namespace: edge, vnet_name: cdn-pop, ip_address: 192.168.201.11, underlay_ip: 10.20.1.11, mac_address: aa:bb:cc:f0:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-edge-pop-12, namespace: edge }
+spec: { namespace: edge, vnet_name: cdn-pop, ip_address: 192.168.201.12, underlay_ip: 10.20.1.12, mac_address: aa:bb:cc:f0:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-edge-origin-11, namespace: edge }
+spec: { namespace: edge, vnet_name: cdn-origin, ip_address: 192.168.202.11, underlay_ip: 10.20.2.11, mac_address: aa:bb:cc:f0:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-edge-cdn-default, namespace: edge, labels: { tenant: edge-cdn } }
+spec:
+  namespace: edge
+  eni_names: [edge-cdn-01, edge-cdn-02]
+  routes:
+    - { prefix: 192.168.201.0/24, next_hop_type: vnet, next_hop_target: cdn-pop,    metric: 10 }
+    - { prefix: 192.168.202.0/24, next_hop_type: vnet, next_hop_target: cdn-origin, metric: 20 }
+    - { prefix: 0.0.0.0/0,        next_hop_type: drop,                              metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-edge-cdn-inbound, namespace: edge }
+spec:
+  namespace: edge
+  stage: inbound
+  eni_names: [edge-cdn-01, edge-cdn-02]
+  rules:
+    - { priority: 100, action: allow,              src_prefixes: [0.0.0.0/0],    dst_ports: ["443"], protocols: [tcp], description: "public https" }
+    - { priority: 110, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp],                   description: "ops icmp continues" }
+    - { priority: 120, action: allow,              src_prefixes: [10.20.2.0/24], dst_ports: ["6379"], protocols: [tcp], description: "redis cache fetch" }
+    - { priority: 130, action: deny,               src_prefixes: [0.0.0.0/0],    dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 1000, action: deny,              src_prefixes: [0.0.0.0/0],                                          description: "catch-all" }
+
+# ===== staging namespace: bank staging =====
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: bank-staging-web, namespace: staging, labels: { tenant: bank, tier: web, env: staging } }
+spec: { vni: 3001 }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-stg-01, namespace: staging, labels: { tenant: bank, env: staging } }
+spec:
+  namespace: staging
+  vnet_name: bank-staging-web
+  mac_address: aa:bb:cc:e0:00:01
+  underlay_ip: 10.30.1.11
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-06]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-stg-02, namespace: staging, labels: { tenant: bank, env: staging } }
+spec:
+  namespace: staging
+  vnet_name: bank-staging-web
+  mac_address: aa:bb:cc:e0:00:02
+  underlay_ip: 10.30.1.12
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-07]
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-stg-01, namespace: staging }
+spec: { namespace: staging, vnet_name: bank-staging-web, ip_address: 192.168.131.1, underlay_ip: 10.30.1.11, mac_address: aa:bb:cc:e0:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-stg-02, namespace: staging }
+spec: { namespace: staging, vnet_name: bank-staging-web, ip_address: 192.168.131.2, underlay_ip: 10.30.1.12, mac_address: aa:bb:cc:e0:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-bank-stg-default, namespace: staging, labels: { tenant: bank, env: staging } }
+spec:
+  namespace: staging
+  eni_names: [eni-bank-stg-01, eni-bank-stg-02]
+  routes:
+    - { prefix: 192.168.131.0/24, next_hop_type: vnet, next_hop_target: bank-staging-web, metric: 10 }
+    - { prefix: 0.0.0.0/0,        next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-bank-stg-inbound, namespace: staging, labels: { tenant: bank, env: staging } }
+spec:
+  namespace: staging
+  stage: inbound
+  eni_names: [eni-bank-stg-01, eni-bank-stg-02]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [10.0.0.0/8],   dst_ports: ["443","80"], protocols: [tcp], description: "internal only" }
+    - { priority: 110, action: allow, src_prefixes: [10.255.0.0/16], protocols: [icmp], description: "ops icmp" }
+    - { priority: 120, action: deny,  src_prefixes: [0.0.0.0/0],     dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],     description: "catch-all" }

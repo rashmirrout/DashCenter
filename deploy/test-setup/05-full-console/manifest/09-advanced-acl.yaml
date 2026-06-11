@@ -1,0 +1,45 @@
+# 09-advanced-acl.yaml — advanced ACL patterns not in baseline 05:
+#   - Numeric protocol matchers (6=tcp, 17=udp, 1=icmp, 58=icmpv6)
+#   - Platform-wide allow_and_continue chains (priorities 1-10)
+#   - Port ranges + src_port matching
+
+# Platform prom allow chain — runs before tenant ACLs.
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-platform-prom-allow, labels: { class: platform } }
+spec:
+  stage: inbound
+  eni_names:
+    - eni-bank-web-01
+    - eni-bank-web-02
+    - eni-retail-web-01
+    - eni-retail-web-02
+    - eni-media-stream-01
+    - eni-iot-edge-01
+    - eni-gaming-lobby-01
+  rules:
+    - { priority: 1,  action: allow_and_continue, src_prefixes: [10.255.0.0/16], dst_ports: ["9100","9200","9090"], protocols: ["6"], description: "prom scrape (numeric proto)" }
+    - { priority: 2,  action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: ["1","58"],                                   description: "icmp + icmpv6 from ops" }
+    - { priority: 10, action: deny,               src_prefixes: [0.0.0.0/0],     dst_ports: ["111","2049"], protocols: [tcp,udp],         description: "block NFS at platform" }
+---
+# IoT rate-limit hint chain.
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-iot-edge-rate-limit, labels: { class: platform, tenant: iot } }
+spec:
+  stage: inbound
+  eni_names: [eni-iot-edge-01, eni-iot-edge-02, eni-iot-edge-03]
+  rules:
+    - { priority: 3, action: allow_and_continue, src_prefixes: [0.0.0.0/0], dst_ports: ["1024-65535"], protocols: [tcp,udp], description: "ephemeral ports — log + continue" }
+    - { priority: 4, action: deny,               src_prefixes: [0.0.0.0/0], dst_ports: ["1900","5353","11211"], protocols: [udp], description: "amplification ports — platform deny" }
+---
+# Egress platform policy with src_port matching.
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-platform-egress-tag, labels: { class: platform } }
+spec:
+  stage: outbound
+  eni_names: [eni-bank-web-01, eni-retail-web-01, eni-media-stream-01, eni-gaming-lobby-01]
+  rules:
+    - { priority: 1, action: allow_and_continue, dst_prefixes: [10.255.0.0/16], src_ports: ["32768-60999"], protocols: [tcp], description: "egress to ops (ephemeral src range)" }
+    - { priority: 2, action: allow_and_continue, dst_prefixes: [0.0.0.0/0],     dst_ports: ["53"], protocols: ["17"],         description: "DNS (numeric proto)" }
