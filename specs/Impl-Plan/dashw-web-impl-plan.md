@@ -25,7 +25,7 @@
 
 | Phase | Objective | Status | Gates |
 |---|---|---|---|
-| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. | ❌ Not started | 0 / 24 |
+| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. | ⏳ In progress | 10 / 24 |
 | **Phase B** — gRPC streaming (real-time) | WebSocket ↔ gRPC bridge in BFF; real-time DPU status, events, flows, counters, audit in SPA. | ❌ Not started | 0 / 12 |
 | **Phase C** — Diagnostics & advanced (full fidelity) | TraceFlow animation, ACL hit stats streaming, basic HA/Migration stream UIs, E2E tests. | ❌ Not started | 0 / 10 |
 | **Phase D** — HA Theater + Migration Center + Capacity | Full HA orchestration theater, 10-phase migration control center, capacity planner with what-if simulator. 3 new views. | ❌ Not started | 0 / 16 |
@@ -94,13 +94,13 @@ WebSocket, no gRPC. The console is independently valuable at this phase.
 
 | Gate | Task | Status |
 |---|---|---|
-| **A1-G1** | Initialize `src/impl-go/console/` Go module: `go.mod`, `cmd/dashw/main.go`, `internal/config/config.go` | ❌ |
+| **A1-G1** | Initialize `src/impl-go/console/` Go module: `go.mod`, `cmd/dashw/main.go`, `internal/config/config.go`, `config_test.go` (9 tests) | ✅ |
 | **A1-G2** | Initialize `src/impl-web/console/` SPA: `package.json`, Vite config, TypeScript config, Tailwind config, `index.html`, `main.tsx` | ❌ |
-| **A1-G3** | BFF server core: `server.go`, `router.go`, `middleware.go` (logging, recovery, CORS, request-id) | ❌ |
-| **A1-G4** | SPA `go:embed` handler: `spa.go`, `embed.go`, serves `index.html` for all non-API paths | ❌ |
-| **A1-G5** | BFF health endpoint: `GET /healthz` with dashd connectivity check | ❌ |
-| **A1-G6** | Dockerfile multi-stage build: node → go → distroless | ❌ |
-| **A1-G7** | Makefile: `web-build`, `bff-build`, `docker-console` targets | ❌ |
+| **A1-G3** | BFF server core: `server.go`, `router.go`, `middleware.go` (logging, recovery, CORS, request-id), `server_test.go` (12 tests) | ✅ |
+| **A1-G4** | SPA `go:embed` handler: `spa.go`, `web/embed.go`, placeholder fallback, serves `index.html` for all non-API paths | ✅ |
+| **A1-G5** | BFF health endpoints: `GET /healthz` (liveness) + `GET /readyz` (readiness with dashd check), `health_test.go` (6 tests) | ✅ |
+| **A1-G6** | Dockerfile multi-stage build: node → go → distroless | ✅ |
+| **A1-G7** | Makefile: `web-build`, `bff-build`, `full-build`, `docker-console`, `test`, `test-cover` targets | ✅ |
 
 **Gate verification:** `make bff-build` produces `dashw` binary; `./dashw` serves blank SPA on `:8080`; `/healthz` returns JSON.
 
