@@ -7,6 +7,7 @@ import (
 "github.com/go-chi/chi/v5"
 "github.com/go-chi/cors"
 "github.com/rashmirrout/DashCenter/src/impl-go/console/internal/config"
+"github.com/rashmirrout/DashCenter/src/impl-go/console/internal/aggregation"
 "github.com/rashmirrout/DashCenter/src/impl-go/console/internal/health"
 "github.com/rashmirrout/DashCenter/src/impl-go/console/internal/proxy"
 )
@@ -51,8 +52,13 @@ r.Get("/readyz", health.ReadinessHandler(cfg))
 		}
 	})
 
-	// ── Aggregation routes (Phase A3) ───────────────────────────
-	// Placeholder: aggregation endpoints registered in A3.
+// ── Aggregation routes ──────────────────────────────────────
+agg := aggregation.New(cfg, logger)
+r.Get("/api/console/fleet/summary", agg.FleetSummary)
+r.Get("/api/console/dpu/{dpuId}/detail", agg.DpuDetail)
+r.Get("/api/console/topology", agg.Topology)
+r.Get("/api/console/vnet/{vnetName}/detail", agg.VnetDetail)
+r.Get("/api/console/stats/capacity", agg.CapacityStats)
 
 // ── WebSocket bridges (Phase B) ─────────────────────────────
 // Placeholder: WS routes are registered in B1.

@@ -1,0 +1,112 @@
+@import 'tailwindcss';
+
+:root {
+  /* ── Background ──────────────────────────────────────────── */
+  --bg-primary: #0A0E1A;
+  --bg-surface: #111827;
+  --bg-elevated: #1F2937;
+  --bg-overlay: rgba(17, 24, 39, 0.8);
+
+  /* ── Border ──────────────────────────────────────────────── */
+  --border: #374151;
+  --border-focus: #00D4FF;
+
+  /* ── Text ────────────────────────────────────────────────── */
+  --text-primary: #F9FAFB;
+  --text-secondary: #9CA3AF;
+  --text-muted: #6B7280;
+
+  /* ── Accent colors ───────────────────────────────────────── */
+  --accent-cyan: #00D4FF;
+  --accent-cyan-dim: rgba(0, 212, 255, 0.15);
+  --accent-green: #00FF88;
+  --accent-green-dim: rgba(0, 255, 136, 0.15);
+  --accent-amber: #FFB800;
+  --accent-amber-dim: rgba(255, 184, 0, 0.15);
+  --accent-red: #FF3860;
+  --accent-red-dim: rgba(255, 56, 96, 0.15);
+  --accent-purple: #A855F7;
+
+  /* ── Shadows ─────────────────────────────────────────────── */
+  --shadow-glow-cyan: 0 0 20px rgba(0, 212, 255, 0.15);
+}
+
+/* ── Base styles ─────────────────────────────────────────────── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── Animations ──────────────────────────────────────────────── */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes pulse-medium {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes pulse-fast {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(0, 212, 255, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.6); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-pulse-slow { animation: pulse-slow 3s ease-in-out infinite; }
+.animate-pulse-medium { animation: pulse-medium 2s ease-in-out infinite; }
+.animate-pulse-fast { animation: pulse-fast 1s ease-in-out infinite; }
+.animate-glow { animation: glow 2s ease-in-out infinite; }
+.animate-fade-in { animation: fade-in 0.3s ease-out; }
+
+/* ── Utility classes for design tokens ───────────────────────── */
+.bg-bg-primary { background-color: var(--bg-primary); }
+.bg-bg-surface { background-color: var(--bg-surface); }
+.bg-bg-elevated { background-color: var(--bg-elevated); }
+.text-text-primary { color: var(--text-primary); }
+.text-text-secondary { color: var(--text-secondary); }
+.text-text-muted { color: var(--text-muted); }
+.text-accent-cyan { color: var(--accent-cyan); }
+.text-accent-green { color: var(--accent-green); }
+.text-accent-amber { color: var(--accent-amber); }
+.text-accent-red { color: var(--accent-red); }
+.border-border { border-color: var(--border); }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
