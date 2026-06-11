@@ -66,7 +66,11 @@ if opts.AuditWriter != nil {
 handlerChain = audit.HTTPMiddleware(audit.InterceptorConfig{Writer: opts.AuditWriter, Roles: auth.DefaultRoleMap})(handlerChain)
 }
 if opts.Authorizer != nil {
-handlerChain = auth.NewHTTPMiddleware(opts.Authorizer)(handlerChain)
+var authOpts []auth.MiddlewareOption
+if opts.AuditWriter != nil {
+authOpts = append(authOpts, auth.WithDenyAuditor(audit.DenyAuditor(opts.AuditWriter)))
+}
+handlerChain = auth.NewHTTPMiddleware(opts.Authorizer, authOpts...)(handlerChain)
 }
 return &Server{
 srv: &http.Server{

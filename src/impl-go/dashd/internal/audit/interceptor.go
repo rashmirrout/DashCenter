@@ -169,3 +169,35 @@ func httpCodeString(s int) string {
 	}
 	return "Unknown"
 }
+
+// DenyAuditor returns an auth.DenyAuditor closure bound to the given
+// Writer. Use this to wire deny-side auditing into the auth middleware
+// / interceptors:
+//
+//	authMW := auth.NewHTTPMiddleware(authz,
+//	  auth.WithDenyAuditor(audit.DenyAuditor(auditWriter)))
+//
+// Each call emits one Entry with OK=false and a Code derived from the
+// HTTP-equivalent status. nil writer returns a nil DenyAuditor so the
+// auth middleware's nil-guard skips the call.
+func DenyAuditor(w *Writer) auth.DenyAuditor {
+	if w == nil {
+		return nil
+	}
+	return func(method string, code int, actor string, err error) {
+		role := ""
+		// Best effort: bearer/cn prefix in actor — no Subject ctx yet
+		// because deny happened before the ctx was enriched.
+		e := Entry{
+			Actor:  actor,
+			Role:   role,
+			Method: method,
+			OK:     false,
+			Code:   httpCodeString(code),
+		}
+		if err != nil {
+			e.Error = truncate(err.Error(), 256)
+		}
+		_ = w.Append(e)
+	}
+}

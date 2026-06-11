@@ -69,8 +69,12 @@ func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilitySer
 	unaryChain := []grpc.UnaryServerInterceptor{recoveryInterceptor, loggingInterceptor}
 	streamChain := []grpc.StreamServerInterceptor{}
 	if opts.Authorizer != nil {
-		unaryChain = append(unaryChain, auth.NewUnaryServerInterceptor(opts.Authorizer))
-		streamChain = append(streamChain, auth.NewStreamServerInterceptor(opts.Authorizer))
+		var authOpts []auth.MiddlewareOption
+		if opts.AuditWriter != nil {
+			authOpts = append(authOpts, auth.WithDenyAuditor(audit.DenyAuditor(opts.AuditWriter)))
+		}
+		unaryChain = append(unaryChain, auth.NewUnaryServerInterceptor(opts.Authorizer, authOpts...))
+		streamChain = append(streamChain, auth.NewStreamServerInterceptor(opts.Authorizer, authOpts...))
 	}
 	if opts.AuditWriter != nil {
 		acfg := audit.InterceptorConfig{Writer: opts.AuditWriter, Roles: auth.DefaultRoleMap}
