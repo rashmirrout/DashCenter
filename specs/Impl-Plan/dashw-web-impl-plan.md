@@ -686,9 +686,83 @@ dashd already exposes but was previously under-visualized.
 
 ---
 
+## Post-v1 Roadmap (v2 and beyond)
+
+Items explicitly deferred from Phases A–E. Each has a **trigger
+condition** — the signal that tells us it's time to invest.
+
+### Infrastructure scaling (v2-INFRA)
+
+| ID | Feature | Trigger | Requirements | Source |
+|---|---|---|---|---|
+| **v2-I1** | **Redis shared cache** | >3 BFF replicas OR >500 concurrent users OR cross-region deployment | Replace in-process `cache.Cache` with a `CacheBackend` interface; add `redis.Backend` implementation using `go-redis/redis`. Config: `DASHW_CACHE_BACKEND=redis`, `DASHW_REDIS_ADDR`. Same TTL/invalidation semantics. | Scale analysis §3.2 Option B |
+| **v2-I2** | **Redis PubSub for cache invalidation** | >3 BFF replicas (invalidation must propagate across instances) | On mutation, BFF publishes `cache:invalidate:{pattern}` to Redis PubSub. All instances subscribe and flush matching keys. | Scale analysis §3.4 |
+| **v2-I3** | **Horizontal autoscaling** | >100 concurrent users per instance | Kubernetes HPA on CPU/memory + custom WS connection count metric. BFF exports `dashw_ws_connections_total` Prometheus gauge. | Scale analysis §8 |
+| **v2-I4** | **Multi-cluster federation** | Operator manages >1 dashd cluster from a single console | BFF accepts multiple dashd targets via config. SPA adds "cluster selector" in TopBar. Each cluster has its own cache namespace. | HLD §16 (out of scope) |
+
+### Authentication & authorization (v2-AUTH)
+
+| ID | Feature | Trigger | Requirements | Source |
+|---|---|---|---|---|
+| **v2-A1** | **Browser → BFF token auth** | Production deployment with multiple operators | Login page → `POST /auth/login` → `httpOnly` cookie. BFF validates cookie on every request. Token refresh flow. | HLD §10 |
+| **v2-A2** | **RBAC-aware UI** | dashd RBAC enforcement is active | BFF fetches operator's role/permissions from dashd. SPA disables buttons/views the operator cannot access. "Permission Denied" toast on 403 with the specific action name. | HLD §10 |
+| **v2-A3** | **mTLS between BFF and dashd** | Security compliance requirement | BFF loads `DASHD_TLS_CERT/KEY/CA` and dials dashd with mutual TLS. Already partially wired in `config.go`. | LLD §7 |
+| **v2-A4** | **SSO integration (OIDC)** | Enterprise deployment with corporate IdP | BFF acts as OIDC relying party. Login redirects to IdP. Callback sets session cookie. Token exchanged for dashd auth. | HLD §10 |
+
+### Observability & operations (v2-OPS)
+
+| ID | Feature | Trigger | Requirements | Source |
+|---|---|---|---|---|
+| **v2-O1** | **Prometheus metrics endpoint** | Production monitoring requirement | BFF exposes `/metrics` with: `dashw_http_requests_total`, `dashw_http_request_duration_seconds`, `dashw_ws_connections_total`, `dashw_grpc_streams_total`, `dashw_cache_hits_total`, `dashw_cache_misses_total`, `dashw_circuit_breaker_state`. | HLD §15 |
+| **v2-O2** | **Distributed tracing (OpenTelemetry)** | Cross-service debugging requirement | BFF propagates `X-Request-Id` / W3C `traceparent` to dashd. SPA sends correlation ID in `X-Request-Id` header. Full trace: browser → BFF → dashd → DPU. | HLD §15 |
+| **v2-O3** | **SPA error tracking integration** | Production SPA crash debugging | Optional Sentry/Application Insights integration point. Error boundary reports to external service with stack trace, route, user action. | HLD §15 |
+| **v2-O4** | **Audit logging in BFF** | Compliance requirement for console access | BFF logs every operator action (who, what, when, from where). Separate from dashd audit — covers UI-specific actions (view navigated, resource inspected, command executed). | — |
+
+### User experience (v2-UX)
+
+| ID | Feature | Trigger | Requirements | Source |
+|---|---|---|---|---|
+| **v2-U1** | **Internationalization (i18n)** | Non-English operator base | `react-i18next` with locale files. All UI strings externalized. Date/number formatting locale-aware. | HLD §16 |
+| **v2-U2** | **Custom dashboard builder** | Operators want personalized landing pages | Drag-and-drop widget framework. Widgets: any existing panel (gauge, chart, table, topology). Layout saved per user in localStorage. | HLD §16 |
+| **v2-U3** | **Plugin / extension system** | Third-party integrations needed | Plugin API: register custom views, sidebar items, command palette entries. Loaded from `/plugins/` directory or remote URL. Sandboxed iframe. | HLD §16 |
+| **v2-U4** | **Offline mode / service worker** | Intermittent connectivity environments | Service worker caches SPA shell + last-known data. Offline indicator. Queues mutations for replay on reconnect. | HLD §16 |
+| **v2-U5** | **Mobile-native app** | Field operators need mobile access | React Native or PWA. Subset of views: Dashboard, DPU status, alerts, reconcile. | HLD §16 |
+
+### Advanced analytics (v2-ANALYTICS)
+
+| ID | Feature | Trigger | Requirements | Source |
+|---|---|---|---|---|
+| **v2-AN1** | **Historical counter database** | Operators need >2 min counter history | BFF writes counter samples to TimescaleDB/InfluxDB. SPA queries historical ranges. Counter Matrix shows hours/days, not just 120s. | Vision §3.7 |
+| **v2-AN2** | **Anomaly detection ML model** | Simple σ-based detection has too many false positives | Train a lightweight model (isolation forest / LSTM) on counter time series. Run inference in BFF or sidecar. Replace hardcoded 2σ threshold. | Vision §3.7, Risk register |
+| **v2-AN3** | **Change impact prediction** | Operators want "what will happen if I apply this?" beyond SimulateApply | ML model trained on historical (change → counter delta) pairs. Predicts: "this ACL change will increase drop_acl_in by ~15% on DPU-3". | Vision §3.1 |
+| **v2-AN4** | **Capacity forecasting** | Operators need "when will we run out?" | Linear/seasonal extrapolation of capacity usage over weeks. Dashboard widget: "ENI capacity exhaustion in ~45 days at current growth rate". | Vision §8.3.3 |
+
+### Testing & quality (v2-TEST)
+
+| ID | Feature | Trigger | Requirements | Source |
+|---|---|---|---|---|
+| **v2-T1** | **Visual regression testing** | UI changes cause unintended visual breaks | Playwright screenshot comparison on every PR. Baseline images per view. Diff > 0.1% = fail. | — |
+| **v2-T2** | **Load testing** | Need to verify capacity claims (50-100 users/instance) | k6 or Locust script: simulate N users polling + N WS connections. Measure: dashd call count, BFF memory, response latency, WS message delay. | Scale analysis §8.1 |
+| **v2-T3** | **Chaos testing** | Need to verify fault tolerance claims | Kill dashd mid-request, kill etcd, network partition between BFF and dashd. Verify: stale-while-revalidate works, circuit breaker opens, WS reconnects. | Scale analysis §6 |
+
+---
+
+### v2 priority matrix
+
+| Priority | Items | Rationale |
+|---|---|---|
+| **P0 (do first)** | v2-I1 (Redis cache), v2-A1 (auth), v2-O1 (Prometheus) | Required for any production deployment beyond dev |
+| **P1 (do when needed)** | v2-I2 (PubSub invalidation), v2-A2 (RBAC UI), v2-O2 (tracing), v2-T2 (load test) | Required for multi-operator production |
+| **P2 (nice to have)** | v2-I3 (autoscale), v2-A3 (mTLS), v2-AN1 (historical DB), v2-T1 (visual regression) | Improves operational maturity |
+| **P3 (future)** | v2-I4 (multi-cluster), v2-U1-U5 (i18n, plugins, offline, mobile), v2-AN2-AN4 (ML) | Enterprise features |
+
+---
+
 > **End of implementation plan.** For the architecture and design decisions
 > behind these phases, see [`specs/HLD/dashw-web-hld.md`](../HLD/dashw-web-hld.md).
 > For the next-generation vision behind Phases D and E, see
 > [`specs/HLD/dashw-web-vision.md`](../HLD/dashw-web-vision.md).
+> For the scalability analysis behind v2-INFRA decisions, see
+> [`specs/HLD/dashw-web-scale-design-req-analysis.md`](../HLD/dashw-web-scale-design-req-analysis.md).
 > For implementable-grade module/component specs, see
 > [`specs/LLD/dashw-web-lld.md`](../LLD/dashw-web-lld.md).
