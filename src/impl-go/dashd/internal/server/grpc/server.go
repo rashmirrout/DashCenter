@@ -31,10 +31,10 @@ mig  service.MigrationService
 
 // Options bundles the PD-G1..G4 wiring the gRPC server cares about:
 // TLS server identity (cert/key for token/mtls modes; nil for plain),
-// the Authorizer that's installed in the interceptor chain, and the
-// audit writer that records every mutating call. All fields are
-// optional — zero-value Options matches the pre-PD plaintext + AllowAll
-// behaviour exactly.
+// the Authorizer that's installed in the interceptor chain, the
+// audit writer that records every mutating call, and the optional
+// PE-1 DiagnosticsService. All fields are optional — zero-value
+// Options matches the pre-PD plaintext + AllowAll behaviour exactly.
 type Options struct {
 	// TLSConfig terminates the listener in TLS when non-nil.
 	// Production wires this from auth.ListenerConfig + the cert/key
@@ -47,6 +47,10 @@ type Options struct {
 
 	// AuditWriter logs every mutating RPC. nil disables auditing.
 	AuditWriter *audit.Writer
+
+	// Diagnostics registers the PE-1 DiagnosticsService when non-nil.
+	// nil leaves the service unregistered (codes.Unimplemented).
+	Diagnostics service.DiagnosticsService
 }
 
 // New creates a gRPC server wired to the shared service layer. ha and
@@ -99,6 +103,9 @@ func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilitySer
 
 	// Register MigrationService (PC-G4..G6).
 	registerMigration(gs, mig)
+
+	// Register DiagnosticsService (PE-1) when wired.
+	registerDiagnostics(gs, opts.Diagnostics)
 
 	// Enable gRPC server reflection for debugging tools like grpcurl.
 	reflection.Register(gs)

@@ -25,6 +25,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/flow"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/leader"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/orchestrator"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
@@ -195,6 +196,13 @@ migEffect.Rehomer = &service.ServiceEniRehomer{Svc: cpService, Store: st}
 migService := service.NewMigration(migCoord)
 obsService := service.NewObservability(inv, st, obs)
 
+// 8b. Diagnostics engine + service (PE-1). Pure-cache compute over
+// the desired-state store; uses NilHitStats today (PD-G5 wires the
+// real counter store) and a NopResimulator (PE-3 will swap in a
+// dispatch-backed implementation).
+diagEngine := flow.New(st, inv, flow.NilHitStats{}, &flow.NopResimulator{})
+diagService := service.NewDiagnostics(diagEngine)
+
 // --- Dry-run mode ---
 if *dryRun {
 slog.Info("dry-run: config loaded successfully")
@@ -237,11 +245,13 @@ restSrv := restserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch
 	Listener:    restListener,
 	Authorizer:  authz,
 	AuditWriter: auditWriter,
+	Diagnostics: diagService,
 })
 grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, grpcserver.Options{
 	TLSConfig:   grpcCreds,
 	Authorizer:  authz,
 	AuditWriter: auditWriter,
+	Diagnostics: diagService,
 })
 
 // 9b. Root context for elector + servers.

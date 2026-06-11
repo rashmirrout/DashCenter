@@ -26,7 +26,7 @@
 | **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ✅ Complete — ready to tag `dashd-2.0.0-alpha` | 6 / 6 |
 | **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ✅ Complete — ready to tag `dashd-2.0.0-beta` | 4 / 4 |
 | **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ✅ Complete — ready to tag `dashd-2.0.0-rc1` | 8 / 8 |
-| **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ❌ Not started (after PB+PC) | 0 / 5 |
+| **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge | ⏳ In progress (PE-1 Diagnostics ✅ PE-G1+G2; saga + gNMI pending) | 2 / 5 |
 | **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ⏳ In progress (TLS ✅ · RBAC ✅ PD-G1/G3 · mTLS ✅ PD-G2 · audit ✅ PD-G4 · counters deferred) | 4 / 5 |
 
 ---
@@ -797,7 +797,7 @@ Secure dashd for production with **TLS/mTLS on all listener ports**, **token-bas
 
 ---
 
-## Phase 2 · Milestone PE — Diagnostics & gNMI ❌
+## Phase 2 · Milestone PE — Diagnostics & gNMI ⏳
 
 ### Objective
 
@@ -812,10 +812,10 @@ Deliver **operator diagnostic tools** that run entirely in dashd's memory agains
 | Detail | Value |
 |--------|-------|
 | **Package** | `internal/flow/` |
-| **New files** | `trace.go`, `explain.go`, `stats.go`, `resim.go`, `flow_test.go` |
-| **RPCs implemented** | `TraceFlow`, `ExplainMatch`, `ExplainDrift`, `GetAclHitStats`, `TriggerResimulation` |
+| **New files** | `flow.go`, `match.go`, `trace.go`, `explain.go`, `drift.go`, `stats.go`, `resim.go`, `flow_test.go`, `coverage_test.go` |
+| **RPCs implemented** | `TraceFlow`, `ExplainMatch`, `ExplainDrift`, `GetAclHitStats`, `TriggerResimulation` (all 5 wired through both gRPC + REST) |
 | **Tests required** | 7 cases (permit verdict, deny verdict, no-match default, ExplainMatch reasons, GetAclHitStats zero-filter, ExplainDrift narrative, TriggerResimulation Apply flag) |
-| **Status** | ❌ Not started |
+| **Status** | ✅ 2026-06-11 — **PE-G1 + PE-G2 both landed.** New `internal/flow/` package (~1050 LOC across 7 source files): `Engine` (constructor-injected HitStatsSource + Resimulator dependencies, both with safe-default stubs `NilHitStats{}` + `NopResimulator{}` so unit tests don't need the dispatch wiring); pure-cache `TraceFlow` walks the DASH pipeline in 3 stages (ACL chain w/ allow/deny/allow_and_continue → longest-prefix route lookup w/ metric tie-break → vnet-mapping lookup), emitting MatchedAclRule + MatchedRoute + MatchedVnetMapping protos plus a free-form trace[] slice the operator reads top-to-bottom; route next-hop dispatch covers all 4 types (`vnet` → ENCAP via mapping, `service_tunnel` → ENCAP, `direct` → ALLOW, `drop` → DROP_NO_ROUTE with explicit trace reason); `ExplainMatch` returns per-candidate `MatchCandidate` rows for SUBJECT_ACL / SUBJECT_ROUTE / SUBJECT_VNET_MAPPING with selected_candidate_id pointing at the first terminal match; `ExplainDrift` returns presence + remediation hint (RECONCILE when declared exists, MANUAL when missing); `GetAclHitStats` filters by (dpu / namespace / policy_name) with `ZeroHitsOnly=true` dead-rule audit mode — NilHitStats default makes every rule "never observed" so the audit produces useful output even before PD-G5 wires the live counter store; `TriggerResimulation` rejects empty-scope requests (D14-style explicit-operator-input rule) then delegates to the injected Resimulator. Shared matcher helpers (`match.go`) cover IP-in-prefix (netip.ParsePrefix), port ranges (`1000-2000`), and numeric ⇔ string protocol equivalence (`6` ⇔ `tcp`, `17` ⇔ `udp`, `1` ⇔ `icmp`, `58` ⇔ `icmpv6`). Service-layer wrapper `service.NewDiagnostics(*flow.Engine)` maps `flow.ErrInvalidArgument` → `service.ErrInvalidArgument` and `flow.ErrNotFound` → `store.ErrNotFound` so the existing REST `handleServiceErr` / gRPC `serviceErrToStatus` mappers translate to HTTP 400/404 and `codes.InvalidArgument`/`NotFound` without flow-package leakage. gRPC handler in `internal/server/grpc/diagnostics.go` registers `DiagnosticsServiceServer`; the streaming `GetAclHitStats` adapter fans the service-layer slice into individual `stream.Send`s. REST handler in `internal/server/rest/diagnostics.go` wires 5 `POST /v1/diagnostics/{trace-flow,explain-match,explain-drift,acl-hit-stats,trigger-resimulation}` endpoints; bodies are the proto request shapes verbatim so `dashctl diag *` and curl speak the same JSON. main.go's step 8b builds `flow.New(st, inv, NilHitStats{}, &NopResimulator{})` and threads `service.NewDiagnostics(…)` through both `grpcserver.Options.Diagnostics` and `restserver.Options.Diagnostics`. **23 unit tests** (9 trace + 5 explain + 3 drift + 4 stats + 3 resim + helpers) covering: ALLOW (PE-G1), DROP_ACL deny, DROP_NO_ROUTE fall-through, DROP_NO_MAPPING, direct/service_tunnel/vnet/drop next-hop variants, metric tie-break, verdict_only-suppresses-trace, outbound allow_and_continue cascade, outbound deny, ExplainMatch ACL/Route/VnetMapping subjects, invalid-args, ENI-not-found, presence/absence drift, ZeroHitsOnly filter (PE-G2) hides policies with any hit, fakeHits source verification, NopResimulator error propagation, dirName UNKNOWN edge. **internal/flow coverage 91.2%**. All **25 dashd packages + 8 dashctl packages green**. `go vet` of new code clean (pre-existing PC vet warnings in ha.go/migration.go/control_plane.go unaffected). |
 
 ---
 
@@ -837,8 +837,8 @@ Deliver **operator diagnostic tools** that run entirely in dashd's memory agains
 
 | # | Gate | Status |
 |---|------|--------|
-| PE-G1 | TraceFlow: deny verdict + matched rule for known-deny ACL | ❌ |
-| PE-G2 | GetAclHitStats `zero_hits_only` surfaces unused rules | ❌ |
+| PE-G1 | TraceFlow: deny verdict + matched rule for known-deny ACL | ✅ |
+| PE-G2 | GetAclHitStats `zero_hits_only` surfaces unused rules | ✅ |
 | PE-G3 | Saga: 10-item batch with #5 failing → all 10 absent from store | ❌ |
 | PE-G4 | Saga recovery: restart mid-rollback → completes rollback | ❌ |
 | PE-G5 | gNMI Subscribe receives Notification on PutVnet | ❌ |
