@@ -7,6 +7,7 @@ import type {
   VnetDetail,
   VnetCanvasData,
   CapacityStats,
+  ServiceTopologyResponse,
 } from './types';
 
 const C = API_BASE.CONSOLE;
@@ -20,4 +21,6 @@ export const consoleApi = {
   vnetCanvas: (vnetName: string) =>
     api.get<VnetCanvasData>(`${C}/vnet/${vnetName}/canvas`),
   capacityStats: () => api.get<CapacityStats>(`${C}/stats/capacity`),
+  serviceTopology: () =>
+    api.get<ServiceTopologyResponse>(`${C}/service-topology`),
 };

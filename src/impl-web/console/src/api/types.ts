@@ -457,6 +457,73 @@ export interface DpuCapacityEntry {
   bps_max?: number;
 }
 
+/* ── Service Topology (BFF aggregated) ─────────────────────── */
+
+export interface ServiceTopologyResponse {
+  timestamp: string;
+  cluster: ClusterInfo;
+  appliances: ApplianceTopInfo[];
+  zones: ZoneTopInfo[];
+  summary: TopologySummary;
+}
+
+export interface ClusterInfo {
+  healthy: boolean;
+  leader_id: string;
+  node_count: number;
+  nodes: ClusterNodeInfo[];
+}
+
+export interface ClusterNodeInfo {
+  addr: string;
+  node_id: string;
+  status: string;
+  is_leader: boolean;
+  leader_id: string;
+  dpu_count: number;
+  latency_ms: string;
+}
+
+export interface ApplianceTopInfo {
+  id: string;
+  zone?: string;
+  tier?: string;
+  dpus: DpuTopInfo[];
+}
+
+export interface DpuTopInfo {
+  id: string;
+  slot: number;
+  state: string;
+  last_seen?: string;
+  eni_count: number;
+  enis?: EniTopInfo[];
+}
+
+export interface EniTopInfo {
+  name: string;
+  vnet_name?: string;
+  mac_address?: string;
+  admin_state?: string;
+}
+
+export interface ZoneTopInfo {
+  zone: string;
+  appliance_count: number;
+  dpu_count: number;
+  eni_count: number;
+}
+
+export interface TopologySummary {
+  total_nodes: number;
+  total_appliances: number;
+  total_dpus: number;
+  total_enis: number;
+  healthy_dpus: number;
+  degraded_dpus: number;
+  offline_dpus: number;
+}
+
 /* ── Counter Report (Phase B — stubbed types for Phase A) ── */
 
 export interface CounterReport {

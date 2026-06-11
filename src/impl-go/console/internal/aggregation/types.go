@@ -139,6 +139,83 @@ DpuID      string `json:"dpu_id"`
 AdminState string `json:"admin_state"`
 }
 
+// ── Service Topology types ──────────────────────────────────
+
+// ServiceTopologyResponse is the response for GET /api/console/service-topology.
+// Merges cluster health fan-out + inventory + eni-placement into a
+// hierarchical view: cluster → appliances → DPUs → ENIs.
+type ServiceTopologyResponse struct {
+	Timestamp  time.Time        `json:"timestamp"`
+	Cluster    ClusterInfo      `json:"cluster"`
+	Appliances []ApplianceInfo  `json:"appliances"`
+	Zones      []ZoneInfo       `json:"zones"`
+	Summary    TopologySummary  `json:"summary"`
+}
+
+// ClusterInfo describes the dashd controller cluster.
+type ClusterInfo struct {
+	Healthy   bool              `json:"healthy"`
+	LeaderID  string            `json:"leader_id"`
+	NodeCount int               `json:"node_count"`
+	Nodes     []ClusterNodeInfo `json:"nodes"`
+}
+
+// ClusterNodeInfo is a single dashd controller node.
+type ClusterNodeInfo struct {
+	Addr       string `json:"addr"`
+	NodeID     string `json:"node_id"`
+	Status     string `json:"status"`     // "ok" | "degraded" | "unreachable"
+	IsLeader   bool   `json:"is_leader"`
+	LeaderID   string `json:"leader_id"`
+	DpuCount   int    `json:"dpu_count"`
+	Latency    string `json:"latency_ms"` // round-trip fetch time
+}
+
+// ApplianceInfo groups DPUs that share the same appliance (rack label).
+type ApplianceInfo struct {
+	ID     string       `json:"id"`
+	Zone   string       `json:"zone,omitempty"`
+	Tier   string       `json:"tier,omitempty"`
+	Dpus   []DpuTopInfo `json:"dpus"`
+}
+
+// DpuTopInfo is a per-DPU entry within an appliance for the topology view.
+type DpuTopInfo struct {
+	ID         string        `json:"id"`
+	Slot       int           `json:"slot"`
+	State      string        `json:"state"`
+	LastSeen   string        `json:"last_seen,omitempty"`
+	EniCount   int           `json:"eni_count"`
+	Enis       []EniTopInfo  `json:"enis,omitempty"`
+}
+
+// EniTopInfo is a per-ENI entry within a DPU for the topology view.
+type EniTopInfo struct {
+	Name       string `json:"name"`
+	VnetName   string `json:"vnet_name,omitempty"`
+	MacAddress string `json:"mac_address,omitempty"`
+	AdminState string `json:"admin_state,omitempty"`
+}
+
+// ZoneInfo aggregates counts per availability zone.
+type ZoneInfo struct {
+	Zone           string `json:"zone"`
+	ApplianceCount int    `json:"appliance_count"`
+	DpuCount       int    `json:"dpu_count"`
+	EniCount       int    `json:"eni_count"`
+}
+
+// TopologySummary provides fleet-wide rollup numbers.
+type TopologySummary struct {
+	TotalNodes      int `json:"total_nodes"`
+	TotalAppliances int `json:"total_appliances"`
+	TotalDpus       int `json:"total_dpus"`
+	TotalEnis       int `json:"total_enis"`
+	HealthyDpus     int `json:"healthy_dpus"`
+	DegradedDpus    int `json:"degraded_dpus"`
+	OfflineDpus     int `json:"offline_dpus"`
+}
+
 // CapacityStats is the response for GET /api/console/stats/capacity.
 type CapacityStats struct {
 Timestamp time.Time       `json:"timestamp"`

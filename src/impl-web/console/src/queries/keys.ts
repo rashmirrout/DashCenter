@@ -5,6 +5,10 @@ export const queryKeys = {
     summary: () => [...queryKeys.fleet.all, 'summary'] as const,
     topology: () => [...queryKeys.fleet.all, 'topology'] as const,
   },
+  topology: {
+    all: ['topology'] as const,
+    service: () => [...queryKeys.topology.all, 'service'] as const,
+  },
   dpu: {
     all: ['dpu'] as const,
     detail: (dpuId: string) => [...queryKeys.dpu.all, 'detail', dpuId] as const,

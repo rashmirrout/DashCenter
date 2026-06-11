@@ -5,10 +5,11 @@
 package config
 
 import (
-	"flag"
-	"log/slog"
-	"os"
-	"time"
+"flag"
+"log/slog"
+"os"
+"strings"
+"time"
 )
 
 // Config holds all dashw BFF settings.
@@ -17,10 +18,11 @@ type Config struct {
 	Listen string // BFF HTTP listen address (default ":8080")
 
 	// ── dashd backends ──────────────────────────────────────────
-	DashdRestAddr  string // dashd REST :8443
-	DashdGrpcAddr  string // dashd gRPC :9443
-	DashdAdminAddr string // dashd Admin :7443
-	SimBaseAddr    string // dash-sim URL template (e.g. "http://sim-{id}:8080")
+	DashdRestAddr     string   // dashd REST :8443
+	DashdGrpcAddr     string   // dashd gRPC :9443
+	DashdAdminAddr    string   // dashd Admin :7443
+	DashdClusterAddrs []string // all dashd admin addrs for cluster health fan-out
+	SimBaseAddr       string   // dash-sim URL template (e.g. "http://sim-{id}:8080")
 
 	// ── Timeouts ────────────────────────────────────────────────
 	ProxyTimeout    time.Duration // reverse-proxy timeout
@@ -138,6 +140,10 @@ func Parse(args []string) *Config {
 	fs.BoolVar(&cfg.EnableCORS, "cors", envBool("DASHW_CORS", cfg.EnableCORS), "enable CORS")
 	fs.BoolVar(&cfg.DashdInsecure, "dashd-insecure", cfg.DashdInsecure, "skip dashd TLS verify")
 
+	// dashd cluster (multi-node fan-out)
+	var clusterAddrs string
+	fs.StringVar(&clusterAddrs, "dashd-cluster", env("DASHD_CLUSTER_ADDRS", ""), "comma-separated dashd admin addresses for cluster health")
+
 	// Logging
 	var logLvl string
 	fs.StringVar(&logLvl, "log-level", env("DASHW_LOG_LEVEL", "info"), "log level (debug|info|warn|error)")
@@ -145,6 +151,19 @@ func Parse(args []string) *Config {
 	_ = fs.Parse(args)
 
 	cfg.LogLevel = parseLevel(logLvl)
+
+	// Parse cluster addresses — fallback to single DashdAdminAddr
+	if clusterAddrs != "" {
+		for _, addr := range strings.Split(clusterAddrs, ",") {
+			addr = strings.TrimSpace(addr)
+			if addr != "" {
+				cfg.DashdClusterAddrs = append(cfg.DashdClusterAddrs, addr)
+			}
+		}
+	}
+	if len(cfg.DashdClusterAddrs) == 0 {
+		cfg.DashdClusterAddrs = []string{cfg.DashdAdminAddr}
+	}
 
 	// Auth (env-only — never on the command line)
 	cfg.DashdAuthToken = os.Getenv("DASHD_AUTH_TOKEN")

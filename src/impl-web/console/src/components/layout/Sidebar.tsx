@@ -2,6 +2,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Network,
+  Waypoints,
   Route,
   Cable,
   Shield,
@@ -46,6 +47,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Observe",
     items: [
       { path: "/fleet", label: "Fleet", icon: Network },
+      { path: "/topology", label: "Topology", icon: Waypoints },
       { path: "/routing", label: "Routing", icon: Route },
       { path: "/tunnels", label: "Tunnels", icon: Cable },
       { path: "/policies", label: "Policies", icon: Shield },

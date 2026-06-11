@@ -18,6 +18,8 @@ topology uses it.
 | 02 | [Single docker](02-single-docker/README.md) — one DPU container   | Validating the container image before promoting it.                                      |
 | 03 | [Multi-docker fleet](03-multi-docker-fleet/README.md) — compose   | Multi-DPU integration tests against a single `dashd`.                                    |
 | 04 | [HA fleet](04-ha-fleet/README.md) — compose + etcd + 3× dashd     | HA + failover demos, multi-controller integration, CI, the [HA tutorial](../../docs/tutorial/10-ha-and-migration-handson.md). |
+| 05 | [Full console](05-full-console/README.md) — 04 + 10 sims + dashw  | End-to-end demo of the web console against a realistic 157-object fleet.                 |
+| 06 | [Fleet UI + diagnostics](06-fleet-ui-diagnostics/README.md) — 05 clone + diagnostics fixtures | DiagnosticsService deep-dive lab (5 PE-1 RPCs end-to-end). Runs alongside 05 on different ports. |
 
 > **First time?** Each topology has a **hands-on, step-by-step guide**
 > with every command, expected log, and clean-up rescue path —
@@ -27,6 +29,8 @@ topology uses it.
 > - [02-single-docker/manual-handson.md](02-single-docker/manual-handson.md)
 > - [03-multi-docker-fleet/manual-handson.md](03-multi-docker-fleet/manual-handson.md)
 > - [04-ha-fleet/manual-handson.md](04-ha-fleet/manual-handson.md)
+> - [05-full-console/manual-handson.md](05-full-console/manual-handson.md)
+> - [06-fleet-ui-diagnostics/manual-handson.md](06-fleet-ui-diagnostics/manual-handson.md) — **Lab 13: DiagnosticsService deep dive**
 
 
 ## How the pieces fit together

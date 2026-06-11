@@ -59,6 +59,7 @@ r.Get("/api/console/dpu/{dpuId}/detail", agg.DpuDetail)
 r.Get("/api/console/topology", agg.Topology)
 r.Get("/api/console/vnet/{vnetName}/detail", agg.VnetDetail)
 r.Get("/api/console/stats/capacity", agg.CapacityStats)
+r.Get("/api/console/service-topology", agg.ServiceTopology)
 
 // ── WebSocket bridges (Phase B) ─────────────────────────────
 // Placeholder: WS routes are registered in B1.

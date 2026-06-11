@@ -193,6 +193,14 @@ export function useEniPlacement() {
   });
 }
 
+export function useServiceTopology() {
+  return useQuery({
+    queryKey: queryKeys.topology.service(),
+    queryFn: consoleApi.serviceTopology,
+    refetchInterval: POLL_INTERVALS.FLEET,
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════
  * MUTATION HOOKS (A5-G8) — write operations with toast + invalidation
  * ═══════════════════════════════════════════════════════════ */

@@ -163,6 +163,7 @@ describe("Sidebar · NAV_GROUPS", () => {
     expect(flat).toEqual([
       "/dashboard",
       "/fleet",
+      "/topology",
       "/routing",
       "/tunnels",
       "/policies",

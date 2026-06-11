@@ -404,6 +404,363 @@ State: dpu.State,
 writeJSON(w, http.StatusOK, stats)
 }
 
+// ServiceTopology handles GET /api/console/service-topology.
+// Fan-out: cluster health (all nodes) + inventory + eni-placement.
+func (a *Aggregator) ServiceTopology(w http.ResponseWriter, r *http.Request) {
+ctx := r.Context()
+
+type nodeHealthResp struct {
+Status   string `json:"status"`
+Leader   bool   `json:"leader"`
+LeaderID string `json:"leader_id"`
+Dpus     []struct {
+ID       string `json:"id"`
+State    string `json:"state"`
+LastSeen string `json:"last_seen"`
+} `json:"dpus"`
+}
+
+type inventoryItem struct {
+Identity struct {
+DpuID       string `json:"dpu_id"`
+ApplianceID string `json:"appliance_id"`
+Slot        int    `json:"slot"`
+} `json:"identity"`
+Zone   string            `json:"zone"`
+Tier   string            `json:"tier"`
+Labels map[string]string `json:"labels"`
+}
+
+type eniPlacementItem struct {
+Name       string `json:"name"`
+VnetName   string `json:"vnet_name"`
+MacAddress string `json:"mac_address"`
+AdminState string `json:"admin_state"`
+DpuID      string `json:"dpu_id"`
+Placements []struct {
+DpuID string `json:"dpu_id"`
+} `json:"placements"`
+}
+
+addrs := a.cfg.DashdClusterAddrs
+nodeCount := len(addrs)
+
+// --- Fan-out: cluster health per node ---
+type nodeResult struct {
+addr    string
+health  nodeHealthResp
+latency time.Duration
+err     error
+}
+
+nodeResults := make([]nodeResult, nodeCount)
+var wg sync.WaitGroup
+
+// Fan out to each cluster node
+for i, addr := range addrs {
+wg.Add(1)
+go func(idx int, nodeAddr string) {
+defer wg.Done()
+start := time.Now()
+data, err := a.fetchJSON(ctx, nodeAddr, "/admin/health")
+elapsed := time.Since(start)
+nodeResults[idx].addr = nodeAddr
+nodeResults[idx].latency = elapsed
+if err != nil {
+nodeResults[idx].err = err
+return
+}
+nodeResults[idx].err = json.Unmarshal(data, &nodeResults[idx].health)
+}(i, addr)
+}
+
+// Fan out: inventory
+var inventory []inventoryItem
+var inventoryErr error
+wg.Add(1)
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdAdminAddr, "/admin/inventory")
+if err != nil {
+inventoryErr = err
+return
+}
+var resp struct {
+Items []inventoryItem `json:"items"`
+}
+if err := json.Unmarshal(data, &resp); err != nil {
+// Try as raw array
+inventoryErr = json.Unmarshal(data, &inventory)
+return
+}
+inventory = resp.Items
+}()
+
+// Fan out: eni-placement
+var eniPlacements []eniPlacementItem
+var eniErr error
+wg.Add(1)
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdAdminAddr, "/admin/eni-placement")
+if err != nil {
+eniErr = err
+return
+}
+var resp struct {
+Items []eniPlacementItem `json:"items"`
+}
+if err := json.Unmarshal(data, &resp); err != nil {
+// Try as raw array
+eniErr = json.Unmarshal(data, &eniPlacements)
+return
+}
+eniPlacements = resp.Items
+}()
+
+wg.Wait()
+
+// --- Build cluster info ---
+cluster := ClusterInfo{
+Healthy:   true,
+NodeCount: nodeCount,
+Nodes:     make([]ClusterNodeInfo, 0, nodeCount),
+}
+
+// Collect all DPU states from the first successful node
+dpuStateMap := make(map[string]string)    // dpuID → state
+dpuLastSeen := make(map[string]string)    // dpuID → last_seen
+
+// Use leader election: the leader_id that appears most wins
+leaderVotes := make(map[string]int)
+
+for i, nr := range nodeResults {
+node := ClusterNodeInfo{
+Addr:    nr.addr,
+NodeID:  fmt.Sprintf("node-%d", i+1),
+Latency: fmt.Sprintf("%.1f", float64(nr.latency.Microseconds())/1000.0),
+}
+
+if nr.err != nil {
+node.Status = "unreachable"
+cluster.Healthy = false
+a.logger.Warn("service-topology: node unreachable",
+"addr", nr.addr, "error", nr.err)
+} else {
+node.Status = nr.health.Status
+node.IsLeader = nr.health.Leader
+node.LeaderID = nr.health.LeaderID
+node.DpuCount = len(nr.health.Dpus)
+
+if nr.health.LeaderID != "" {
+leaderVotes[nr.health.LeaderID]++
+}
+
+// Collect DPU states from this node
+for _, dpu := range nr.health.Dpus {
+dpuStateMap[dpu.ID] = dpu.State
+dpuLastSeen[dpu.ID] = dpu.LastSeen
+}
+}
+
+cluster.Nodes = append(cluster.Nodes, node)
+}
+
+// Determine leader — most-voted leader_id
+bestLeader := ""
+bestVotes := 0
+for lid, votes := range leaderVotes {
+if votes > bestVotes {
+bestLeader = lid
+bestVotes = votes
+}
+}
+cluster.LeaderID = bestLeader
+
+// Mark which node is the real leader based on consensus
+for i := range cluster.Nodes {
+if cluster.Nodes[i].LeaderID == bestLeader && cluster.Nodes[i].IsLeader {
+// This node claims to be leader AND its leader_id matches consensus
+cluster.Nodes[i].IsLeader = true
+} else {
+cluster.Nodes[i].IsLeader = false
+}
+}
+
+// --- Build inventory lookup ---
+type invEntry struct {
+applianceID string
+slot        int
+zone        string
+tier        string
+}
+invMap := make(map[string]invEntry) // dpuID → invEntry
+if inventoryErr != nil {
+a.logger.Warn("service-topology: inventory fetch failed", "error", inventoryErr)
+} else {
+for _, item := range inventory {
+invMap[item.Identity.DpuID] = invEntry{
+applianceID: item.Identity.ApplianceID,
+slot:        item.Identity.Slot,
+zone:        item.Zone,
+tier:        item.Tier,
+}
+// Also check labels for rack/zone/tier if top-level fields are empty
+if invMap[item.Identity.DpuID].applianceID == "" && item.Labels != nil {
+e := invMap[item.Identity.DpuID]
+if v, ok := item.Labels["rack"]; ok {
+e.applianceID = v
+}
+if v, ok := item.Labels["zone"]; ok {
+e.zone = v
+}
+if v, ok := item.Labels["tier"]; ok {
+e.tier = v
+}
+invMap[item.Identity.DpuID] = e
+}
+}
+}
+
+// --- Build ENI lookup: dpuID → []EniTopInfo ---
+eniByDpu := make(map[string][]EniTopInfo)
+if eniErr != nil {
+a.logger.Warn("service-topology: eni-placement fetch failed", "error", eniErr)
+} else {
+for _, ep := range eniPlacements {
+dpuID := ep.DpuID
+if dpuID == "" && len(ep.Placements) > 0 {
+dpuID = ep.Placements[0].DpuID
+}
+if dpuID == "" {
+continue
+}
+eniByDpu[dpuID] = append(eniByDpu[dpuID], EniTopInfo{
+Name:       ep.Name,
+VnetName:   ep.VnetName,
+MacAddress: ep.MacAddress,
+AdminState: ep.AdminState,
+})
+}
+}
+
+// --- Group DPUs into appliances ---
+type appBuilder struct {
+zone string
+tier string
+dpus map[string]*DpuTopInfo
+}
+appMap := make(map[string]*appBuilder) // applianceID → builder
+
+for dpuID, state := range dpuStateMap {
+inv, hasInv := invMap[dpuID]
+appID := "unassigned"
+slot := 0
+zone := ""
+tier := ""
+if hasInv {
+appID = inv.applianceID
+if appID == "" {
+appID = "unassigned"
+}
+slot = inv.slot
+zone = inv.zone
+tier = inv.tier
+}
+
+ab, ok := appMap[appID]
+if !ok {
+ab = &appBuilder{zone: zone, tier: tier, dpus: make(map[string]*DpuTopInfo)}
+appMap[appID] = ab
+}
+
+enis := eniByDpu[dpuID]
+ab.dpus[dpuID] = &DpuTopInfo{
+ID:       dpuID,
+Slot:     slot,
+State:    state,
+LastSeen: dpuLastSeen[dpuID],
+EniCount: len(enis),
+Enis:     enis,
+}
+}
+
+// Convert to sorted slice
+appliances := make([]ApplianceInfo, 0, len(appMap))
+for appID, ab := range appMap {
+dpus := make([]DpuTopInfo, 0, len(ab.dpus))
+for _, d := range ab.dpus {
+dpus = append(dpus, *d)
+}
+appliances = append(appliances, ApplianceInfo{
+ID:   appID,
+Zone: ab.zone,
+Tier: ab.tier,
+Dpus: dpus,
+})
+}
+
+// --- Build zone summary ---
+zoneMap := make(map[string]*ZoneInfo)
+for _, app := range appliances {
+z := app.Zone
+if z == "" {
+z = "unknown"
+}
+zi, ok := zoneMap[z]
+if !ok {
+zi = &ZoneInfo{Zone: z}
+zoneMap[z] = zi
+}
+zi.ApplianceCount++
+zi.DpuCount += len(app.Dpus)
+for _, d := range app.Dpus {
+zi.EniCount += d.EniCount
+}
+}
+zones := make([]ZoneInfo, 0, len(zoneMap))
+for _, zi := range zoneMap {
+zones = append(zones, *zi)
+}
+
+// --- Build summary ---
+totalEnis := 0
+healthyDpus := 0
+degradedDpus := 0
+offlineDpus := 0
+for _, state := range dpuStateMap {
+switch state {
+case "DPU_STATE_UP":
+healthyDpus++
+case "DPU_STATE_REGISTERING", "DPU_STATE_RECONCILING":
+degradedDpus++
+default:
+offlineDpus++
+}
+}
+for _, enis := range eniByDpu {
+totalEnis += len(enis)
+}
+
+resp := ServiceTopologyResponse{
+Timestamp:  time.Now().UTC(),
+Cluster:    cluster,
+Appliances: appliances,
+Zones:      zones,
+Summary: TopologySummary{
+TotalNodes:      nodeCount,
+TotalAppliances: len(appliances),
+TotalDpus:       len(dpuStateMap),
+TotalEnis:       totalEnis,
+HealthyDpus:     healthyDpus,
+DegradedDpus:    degradedDpus,
+OfflineDpus:     offlineDpus,
+},
+}
+
+writeJSON(w, http.StatusOK, resp)
+}
+
 // writeJSON marshals v as JSON and writes it.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 w.Header().Set("Content-Type", "application/json")

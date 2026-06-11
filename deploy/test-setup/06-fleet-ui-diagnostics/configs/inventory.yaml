@@ -1,0 +1,80 @@
+# Static DPU inventory — 10 simulated DPUs across 5 appliances.
+#
+# Appliance mapping (for physical-logical topology view):
+#   Appliance-1: dpu-sim-01 (slot 0), dpu-sim-02 (slot 1)
+#   Appliance-2: dpu-sim-03 (slot 0), dpu-sim-04 (slot 1)
+#   Appliance-3: dpu-sim-05 (slot 0), dpu-sim-06 (slot 1)
+#   Appliance-4: dpu-sim-07 (slot 0), dpu-sim-08 (slot 1)
+#   Appliance-5: dpu-sim-09 (slot 0), dpu-sim-10 (slot 1)
+
+dpus:
+  - id: dpu-sim-01
+    endpoint: dash-sim-01:50051
+    labels:
+      rack: appliance-1
+      slot: "0"
+      zone: us-west-2a
+      tier: gold
+  - id: dpu-sim-02
+    endpoint: dash-sim-02:50051
+    labels:
+      rack: appliance-1
+      slot: "1"
+      zone: us-west-2a
+      tier: gold
+  - id: dpu-sim-03
+    endpoint: dash-sim-03:50051
+    labels:
+      rack: appliance-2
+      slot: "0"
+      zone: us-west-2a
+      tier: silver
+  - id: dpu-sim-04
+    endpoint: dash-sim-04:50051
+    labels:
+      rack: appliance-2
+      slot: "1"
+      zone: us-west-2a
+      tier: silver
+  - id: dpu-sim-05
+    endpoint: dash-sim-05:50051
+    labels:
+      rack: appliance-3
+      slot: "0"
+      zone: us-west-2b
+      tier: gold
+  - id: dpu-sim-06
+    endpoint: dash-sim-06:50051
+    labels:
+      rack: appliance-3
+      slot: "1"
+      zone: us-west-2b
+      tier: silver
+  - id: dpu-sim-07
+    endpoint: dash-sim-07:50051
+    labels:
+      rack: appliance-4
+      slot: "0"
+      zone: us-west-2b
+      tier: gold
+  - id: dpu-sim-08
+    endpoint: dash-sim-08:50051
+    labels:
+      rack: appliance-4
+      slot: "1"
+      zone: us-west-2b
+      tier: silver
+  - id: dpu-sim-09
+    endpoint: dash-sim-09:50051
+    labels:
+      rack: appliance-5
+      slot: "0"
+      zone: us-west-2c
+      tier: bronze
+  - id: dpu-sim-10
+    endpoint: dash-sim-10:50051
+    labels:
+      rack: appliance-5
+      slot: "1"
+      zone: us-west-2c
+      tier: bronze
