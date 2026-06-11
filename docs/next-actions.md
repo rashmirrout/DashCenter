@@ -1,8 +1,8 @@
 # dashd — Next Actions Plan
 
-> **Purpose**: Ordered, trackable plan for the post-PD-partial work. Companion to [`specs/Impl-Plan/impl-phases.md`](../specs/Impl-Plan/impl-phases.md) (the milestone-level tracker). This file is the *operator's worklist* — what to do next, in what order, and why.
+> **Purpose**: Ordered, trackable plan for the post-PD-partial work. Companion to [`specs/Impl-Plan/impl-phases.md`](../specs/Impl-Plan/impl-phases.md) (the milestone-level tracker). This file is the *operator's worklist* — what to do next, in what order, and why. **This is the source of truth for next steps.**
 > **Created**: 2026-06-11
-> **Last updated**: 2026-06-11
+> **Last updated**: 2026-06-11 — rows 1–3 refreshed with full delivered scope (HA fleet grew to 120 objects × 2 namespaces, dashctl context auto-setup, lab-task appendices)
 
 ---
 
@@ -23,10 +23,13 @@
 - HA admin-leader status (admin handler was hardcoded `leader=true`) — fixed in [`src/impl-go/dashd/internal/server/admin/server.go`](../src/impl-go/dashd/internal/server/admin/server.go)
 - Stale config validator rejecting `ha.controller.elector.backend=etcd` — fixed in [`src/impl-go/dashd/internal/config/ha.go`](../src/impl-go/dashd/internal/config/ha.go)
 - `start-fleet.{ps1,sh}` IPv6 stall on Windows when probing `http://localhost:27443` — IPv6 lookup hits `::1` first, dashd binds IPv4-only, the connect blocks past the 2s timeout. Fixed in 04-ha-fleet by probing `127.0.0.1` directly with a 3s timeout.
+- `dashctl --endpoint` mandatory on the HA fleet — fixed by having `start-fleet` auto-configure a saved `ha-fleet` dashctl context (kubectl-style `config set-context` + `use-context`).
+- Mermaid diagrams failing to render — edge labels containing `.` `/` `(` `)` `:` `+` must be double-quoted; multi-word `subgraph` IDs need explicit aliases. Fixed in all 3 diagrams across README + manual-handson + tutorial 18.
 
 **Latent work documented but not in this plan**:
-- Denial auditing (4xx short-circuits never reach audit middleware) — 30-line cleanup, no PE/PF dependency, queued as a follow-up PR
-- goleak (P1B-G10) — housekeeping pass, separate slice
+- Denial auditing (4xx short-circuits never reach audit middleware) — 30-line cleanup, no PE/PF dependency. **Captured as row 9 below.**
+- goleak (P1B-G10) — housekeeping pass; separate slice, not tracked here.
+- `dashctl` survives losing its pinned dashd instance — documented as the **Lab task** in [`04-ha-fleet/manual-handson.md`](../deploy/test-setup/04-ha-fleet/manual-handson.md#lab-task--make-dashctl-survive-losing-its-target-dashd) with 3 solution options (HAProxy LB / multi-endpoint context / leader-aware routing anti-pattern). Production fix is solution 1; deferred until someone needs it.
 
 ---
 
@@ -165,9 +168,9 @@ fixture     ha+migration  diag+gNMI  + denial  GA tag
 
 | # | Action | Status | Started | Completed | Notes / links |
 |---|---|---|---|---|---|
-| 1 | Promote `tmp-fleet/` → `deploy/test-setup/04-ha-fleet/` (compose + configs + manifest + scripts + README + handson) | ✅ Done | 2026-06-11 | 2026-06-11 | 103-object pre-baked scenario (12 vnets, 4 service tunnels, 30 ENIs, 30 vnet mappings, 12 route policies, 12 ACL policies with 120 rules, 3 HA sets). Live smoke-test passed: leader elected, manifest applied, fan-out across 3 dashd verified, HA switchover SSE green, kill-leader failover preserves all 103 objects. |
+| 1 | Promote `tmp-fleet/` → `deploy/test-setup/04-ha-fleet/` (compose + configs + manifest + scripts + README + handson) | ✅ Done | 2026-06-11 | 2026-06-11 | **120-object pre-baked scenario across 2 namespaces** (12 vnets, 4 service tunnels, 31 ENIs incl. `eni-quarantine-01`, 30 vnet mappings, 15 route policies, 15 ACL policies with **~130 ACL rules total**, 3 HA sets in `default`; 2 vnets + 3 ENIs + 3 mappings + 1 route + 1 ACL in `edge`). Manifest split into 11 files under `manifest/` exercising every spec kind + every behavioural knob (admin_state up/down, resimulate_flows, 4 vnet-mapping actions, all 4 next-hop types including direct, 2/3-way ECMP with weights, numeric protocols `6`/`17`/`1`/`58`, port ranges, src_port matchers, allow_and_continue chains, active_standby + active_active HA modes). Also added `show-leader.{ps1,sh}` helper (uses `dashctl version` against each node). `start-fleet.{ps1,sh}` auto-configures a saved `ha-fleet` dashctl context so `--endpoint` is no longer required. Live smoke-test passed end-to-end: leader elected, 130 objects applied + verified in etcd (120 state keys + 10 edge ns), fan-out across 3 dashd verified, HA switchover SSE green, HA failover SSE green, kill-leader failover preserves all 120 objects. |
 | 2 | Add `test/integration/ha_fleet/` with `//go:build integration_ha_fleet` automation | ✅ Done | 2026-06-11 | 2026-06-11 | `src/impl-go/dashd/test/integration/ha_fleet/fleet_test.go` (~250 LOC) drives `start-fleet`, applies manifest via docker-run dashctl with bind-mount, asserts per-kind counts, exercises switchover SSE, kills the leader, asserts state survival on the new leader. `go vet -tags=integration_ha_fleet` clean; full run reserved for CI / on-demand. |
-| 3 | Write `docs/tutorial/18-ha-and-migration-handson.md` + update tutorial index | ✅ Done | 2026-06-11 | 2026-06-11 | Slot 18 not 10 (10–17 were occupied). 8-step walkthrough: prereqs → fleet up → inspect leader election → apply 103 objects → switchover SSE → failover SSE → 10-phase migration → kill-leader-mid-migration survival → cleanup. Cross-linked from `04-ha-fleet/README.md` and `deploy/test-setup/README.md`. |
+| 3 | Write `docs/tutorial/18-ha-and-migration-handson.md` + update tutorial index + add Appendix + Lab task to manual-handson | ✅ Done | 2026-06-11 | 2026-06-11 | Slot 18 not 10 (10–17 were occupied). Tutorial 18: 8-step walkthrough prereqs → fleet up → leader election → apply objects → switchover SSE → failover SSE → 10-phase migration → kill-leader-mid-migration survival → cleanup. `04-ha-fleet/manual-handson.md` rewritten with **Objective / Run / Expected output** per step (15 steps) + lab topology Mermaid + **Appendix A** "How dashctl finds dashd" (A.1 endpoint resolution, A.2 architecture diagram, A.3 always-dashd-1, A.4 switchover effects) + **Lab task** with reproducible failure recipe and 3 collapsible solutions (HAProxy LB / multi-endpoint context / leader-aware routing anti-pattern). Cross-linked from `04-ha-fleet/README.md` and `deploy/test-setup/README.md`. Mermaid label-escaping bug fixed in all 3 diagrams (manual-handson ×2, README ×1, tutorial ×1). |
 | 4 | PE-1 — `internal/flow/` Diagnostics (TraceFlow / ExplainMatch / ExplainDrift / GetAclHitStats / TriggerResimulation) | ⬜ Not started | — | — | PE-G1, PE-G2 |
 | 5 | PE-2 — Saga + EventBroadcaster + gNMI Subscribe bridge | ⬜ Not started | — | — | PE-G5; saga was already partially landed under PC-G8 — confirm reuse |
 | 6 | PE-3 — dash-sim per-ENI counter emission + dispatch.SnapshotCounters wiring | ⬜ Not started | — | — | unblocks #8 |
@@ -182,10 +185,16 @@ fixture     ha+migration  diag+gNMI  + denial  GA tag
 
 ## How to use this file
 
+**This is the source of truth for next steps.** Anyone landing PRs should:
+
 1. Pick the lowest-numbered ⬜ row in the tracker.
 2. Flip it to ⏳ and fill in `Started`.
 3. Land the work in a focused PR. Land code only — do not edit this file from the PR.
-4. After merge, edit this file: flip to ✅, fill `Completed`, link the PR in `Notes / links`.
-5. If you change scope, append a short note under the row (do not silently rewrite the description — the audit trail matters).
+4. After merge, edit this file: flip to ✅, fill `Completed`, link the PR in `Notes / links`. Keep the original description; **append** scope changes rather than rewriting them — the audit trail matters.
+5. If you discover follow-up work that doesn't fit the existing 10 rows, add a new row at the end with status ⬜. Don't smuggle it into an existing row's notes.
 
 When all rows are ✅, archive this file by renaming it to `docs/next-actions-2026-Q2.md` and open a fresh one for the next horizon (PF / `dashd-3.x`).
+
+### Immediate next step (as of 2026-06-11)
+
+**Pick row 4 — PE-1 Diagnostics** (`internal/flow/`). It has no prerequisites, ships PE-G1 + PE-G2, and the spec is in [`specs/Impl-Plan/impl-phases.md`](../specs/Impl-Plan/impl-phases.md) under § Milestone PE. Estimated 2–3 days; ~600 LOC + tests.
