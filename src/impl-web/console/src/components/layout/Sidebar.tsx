@@ -47,7 +47,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Observe",
     items: [
       { path: "/fleet", label: "Fleet", icon: Network },
-      { path: "/topology", label: "Topology", icon: Waypoints },
       { path: "/routing", label: "Routing", icon: Route },
       { path: "/tunnels", label: "Tunnels", icon: Cable },
       { path: "/policies", label: "Policies", icon: Shield },
@@ -67,6 +66,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/admin", label: "Admin Ops", icon: Settings },
       { path: "/commands", label: "Commands", icon: Terminal },
       { path: "/debug", label: "Debug", icon: Bug },
+    ],
+  },
+  {
+    label: "Service",
+    items: [
+      { path: "/topology", label: "Topology", icon: Waypoints },
     ],
   },
 ] as const;

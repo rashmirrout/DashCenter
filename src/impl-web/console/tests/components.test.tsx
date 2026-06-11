@@ -149,12 +149,13 @@ describe("GlassCard", () => {
 /* ──────────── Sidebar ──────────── */
 
 describe("Sidebar · NAV_GROUPS", () => {
-  it("has the four LLD groups in order", () => {
+  it("has the five nav groups in order", () => {
     expect(NAV_GROUPS.map((g) => g.label)).toEqual([
       null,
       "Observe",
       "Diagnostics",
       "Operate",
+      "Service",
     ]);
   });
 
@@ -163,7 +164,6 @@ describe("Sidebar · NAV_GROUPS", () => {
     expect(flat).toEqual([
       "/dashboard",
       "/fleet",
-      "/topology",
       "/routing",
       "/tunnels",
       "/policies",
@@ -173,6 +173,7 @@ describe("Sidebar · NAV_GROUPS", () => {
       "/admin",
       "/commands",
       "/debug",
+      "/topology",
     ]);
   });
 });
