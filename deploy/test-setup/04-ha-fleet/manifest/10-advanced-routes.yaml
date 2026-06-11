@@ -1,0 +1,46 @@
+# 10-advanced-routes.yaml — three RouteSpec patterns the baseline set
+# doesn't exercise:
+#
+#  1. next_hop_type: direct      → no encap; underlay forwarding
+#  2. 3-way weighted ECMP across distinct next-hop types (vnet + service_tunnel + drop)
+#  3. Multiple routes to the same prefix at different metrics — proves
+#     dashd's metric-based tie-break is honoured
+
+# 1) Direct-attached management network — bypasses vnet_encap.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-mgmt-direct, labels: { class: management } }
+spec:
+  eni_names: [eni-bank-web-01, eni-retail-web-01, eni-media-stream-01, eni-iot-edge-01, eni-shared-ingress-01]
+  routes:
+    - { prefix: 10.255.0.0/16, next_hop_type: direct, next_hop_target: "", metric: 5,  description: "ops underlay direct" }
+    - { prefix: 169.254.169.254/32, next_hop_type: direct, next_hop_target: "", metric: 5, description: "instance metadata" }
+---
+# 2) 3-way weighted ECMP. Note: mixing vnet + service_tunnel + drop
+# next-hop types in a single ECMP group exercises the hash → flow-pin →
+# next-hop dispatch in the placement function.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-analytics-ecmp-3way, labels: { tenant: analytics } }
+spec:
+  eni_names: [eni-spark-01, eni-spark-02, eni-spark-03]
+  routes:
+    - prefix: 10.200.0.0/16
+      ecmp_members:
+        - { next_hop_type: vnet,           next_hop_target: analytics-kafka,       weight: 60 }
+        - { next_hop_type: vnet,           next_hop_target: shared-ingress,        weight: 30 }
+        - { next_hop_type: service_tunnel, next_hop_target: st-privatelink-azuredb, weight: 10 }
+      metric: 10
+    - { prefix: 0.0.0.0/0, next_hop_type: drop, metric: 1000 }
+---
+# 3) Same prefix, two routes at different metrics — the lower metric wins.
+# Operator can verify by `describe`: the live route table shows both, but
+# only the metric=10 route is in the fast path.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-iot-backup-uplink, labels: { tenant: iot } }
+spec:
+  eni_names: [eni-iot-core-01, eni-iot-core-02]
+  routes:
+    - { prefix: 0.0.0.0/0, next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 10,  description: "primary uplink" }
+    - { prefix: 0.0.0.0/0, next_hop_type: service_tunnel, next_hop_target: st-vpn-corp,        metric: 100, description: "failback uplink (higher metric, only used if primary withdrawn)" }

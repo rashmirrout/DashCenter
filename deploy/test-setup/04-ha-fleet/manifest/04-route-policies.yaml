@@ -1,0 +1,127 @@
+# 04-route-policies.yaml — 12 RoutePolicies covering every route shape:
+# vnet next-hop, service_tunnel next-hop, drop, ECMP fan-out, and per-tenant
+# default routes.
+
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-bank-web-default, labels: { tenant: bank } }
+spec:
+  eni_names: [eni-bank-web-01, eni-bank-web-02, eni-bank-web-03, eni-bank-web-04]
+  routes:
+    - { prefix: 192.168.11.0/24, next_hop_type: vnet,           next_hop_target: bank-prod-web,    metric: 10 }
+    - { prefix: 192.168.12.0/24, next_hop_type: vnet,           next_hop_target: bank-prod-db,     metric: 10 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 100 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-bank-db-default, labels: { tenant: bank } }
+spec:
+  eni_names: [eni-bank-db-01, eni-bank-db-02]
+  routes:
+    - { prefix: 192.168.12.0/24, next_hop_type: vnet,           next_hop_target: bank-prod-db, metric: 10 }
+    - { prefix: 192.168.11.0/24, next_hop_type: vnet,           next_hop_target: bank-prod-web, metric: 20 }
+    - { prefix: 10.0.255.30/32,  next_hop_type: service_tunnel, next_hop_target: st-privatelink-azuredb, metric: 5 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: drop,           metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-retail-web-default, labels: { tenant: retail } }
+spec:
+  eni_names: [eni-retail-web-01, eni-retail-web-02, eni-retail-web-03, eni-retail-web-04]
+  routes:
+    - { prefix: 192.168.21.0/24, next_hop_type: vnet,           next_hop_target: retail-prod-web,  metric: 10 }
+    - { prefix: 192.168.22.0/24, next_hop_type: vnet,           next_hop_target: retail-prod-db,   metric: 10 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 100 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-retail-db-default, labels: { tenant: retail } }
+spec:
+  eni_names: [eni-retail-db-01, eni-retail-db-02]
+  routes:
+    - { prefix: 192.168.22.0/24, next_hop_type: vnet, next_hop_target: retail-prod-db, metric: 10 }
+    - { prefix: 192.168.21.0/24, next_hop_type: vnet, next_hop_target: retail-prod-web, metric: 20 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: drop, metric: 1000 }
+---
+# ECMP demo: media stream load-balanced across the two retail-web vnets via 2 ECMP members.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-media-stream-ecmp, labels: { tenant: media } }
+spec:
+  eni_names: [eni-media-stream-01, eni-media-stream-02, eni-media-stream-03, eni-media-stream-04]
+  routes:
+    - { prefix: 192.168.31.0/24, next_hop_type: vnet, next_hop_target: media-stream, metric: 10 }
+    - prefix: 10.100.0.0/16
+      ecmp_members:
+        - { next_hop_type: vnet, next_hop_target: retail-prod-web, weight: 50 }
+        - { next_hop_type: vnet, next_hop_target: bank-prod-web,   weight: 50 }
+      metric: 20
+    - { prefix: 0.0.0.0/0, next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 100 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-media-control, labels: { tenant: media } }
+spec:
+  eni_names: [eni-media-ctrl-01]
+  routes:
+    - { prefix: 192.168.32.0/24, next_hop_type: vnet,           next_hop_target: media-control, metric: 10 }
+    - { prefix: 192.168.31.0/24, next_hop_type: vnet,           next_hop_target: media-stream,  metric: 20 }
+    - { prefix: 192.0.2.0/24,    next_hop_type: service_tunnel, next_hop_target: st-vpn-corp,   metric: 30 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-iot-edge-uplink, labels: { tenant: iot } }
+spec:
+  eni_names: [eni-iot-edge-01, eni-iot-edge-02, eni-iot-edge-03]
+  routes:
+    - { prefix: 192.168.41.0/24, next_hop_type: vnet,           next_hop_target: iot-edge, metric: 10 }
+    - { prefix: 192.168.42.0/24, next_hop_type: vnet,           next_hop_target: iot-core, metric: 20 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 100 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-iot-core-default, labels: { tenant: iot } }
+spec:
+  eni_names: [eni-iot-core-01, eni-iot-core-02]
+  routes:
+    - { prefix: 192.168.42.0/24, next_hop_type: vnet, next_hop_target: iot-core, metric: 10 }
+    - { prefix: 192.168.41.0/24, next_hop_type: vnet, next_hop_target: iot-edge, metric: 20 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-spark-compute, labels: { tenant: analytics } }
+spec:
+  eni_names: [eni-spark-01, eni-spark-02, eni-spark-03]
+  routes:
+    - { prefix: 192.168.51.0/24, next_hop_type: vnet,           next_hop_target: analytics-spark, metric: 10 }
+    - { prefix: 192.168.52.0/24, next_hop_type: vnet,           next_hop_target: analytics-kafka, metric: 10 }
+    - { prefix: 10.0.255.30/32,  next_hop_type: service_tunnel, next_hop_target: st-privatelink-azuredb, metric: 5 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: drop,           metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-kafka-bus, labels: { tenant: analytics } }
+spec:
+  eni_names: [eni-kafka-01, eni-kafka-02]
+  routes:
+    - { prefix: 192.168.52.0/24, next_hop_type: vnet, next_hop_target: analytics-kafka, metric: 10 }
+    - { prefix: 192.168.51.0/24, next_hop_type: vnet, next_hop_target: analytics-spark, metric: 10 }
+    - { prefix: 0.0.0.0/0,       next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-shared-ingress, labels: { tenant: shared } }
+spec:
+  eni_names: [eni-shared-ingress-01, eni-shared-ingress-02]
+  routes:
+    - { prefix: 192.168.0.0/16,  next_hop_type: vnet,           next_hop_target: shared-ingress, metric: 10 }
+    - { prefix: 198.51.100.0/24, next_hop_type: service_tunnel, next_hop_target: st-nsg-shared,  metric: 20 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-shared-egress, labels: { tenant: shared } }
+spec:
+  eni_names: [eni-shared-egress-01]
+  routes:
+    - { prefix: 0.0.0.0/0, next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 10 }

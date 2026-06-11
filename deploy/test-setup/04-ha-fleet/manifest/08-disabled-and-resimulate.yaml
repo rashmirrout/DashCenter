@@ -1,0 +1,50 @@
+# 08-disabled-and-resimulate.yaml — three behavioral knobs on EniSpec
+# that aren't exercised by the baseline manifest:
+#
+#   admin_state: down       → policy still placed, datapath drops packets
+#   resimulate_flows: true  → on next Apply, dashd asks the DPU to
+#                             re-evaluate every existing flow against the
+#                             updated policy (slow-path re-run)
+#   labels                  → operator-visible selectors; queried via
+#                             `dashctl get eni -l tier=quarantine`
+#
+# Two scenarios are seeded:
+#
+#  1. eni-quarantine-01 — analytics ENI quarantined for incident response.
+#     `admin_state: down` (host can't send), label `quarantine=true` for
+#     selectors, placed on dpu-sim-05.
+#
+#  2. eni-bank-web-04 RESCOPED with resimulate_flows=true. Reuses the
+#     existing name → this REPLACES the version applied in 02-enis.yaml
+#     and bumps `generation` to 2. Operator can prove existing-flow
+#     re-evaluation by tailing the dispatch logs while applying.
+
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-quarantine-01
+  labels: { tenant: analytics, tier: compute, quarantine: "true" }
+spec:
+  vnet_name: analytics-spark
+  mac_address: aa:bb:cc:41:0f:01
+  underlay_ip: 10.4.1.99
+  admin_state: down
+  placement_hint_dpu_ids: [dpu-sim-05]
+  resimulate_flows: false
+---
+# Re-applies an existing ENI with resimulate_flows=true. After apply,
+# `dashctl describe eni eni-bank-web-04` shows generation=2 and the
+# dispatch worker on dpu-sim-02 will re-evaluate every flow for it on
+# the next reconcile tick.
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-bank-web-04
+  labels: { tenant: bank, tier: web, resimulated: "true" }
+spec:
+  vnet_name: bank-prod-web
+  mac_address: aa:bb:cc:01:00:04
+  underlay_ip: 10.0.1.14
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-02]
+  resimulate_flows: true

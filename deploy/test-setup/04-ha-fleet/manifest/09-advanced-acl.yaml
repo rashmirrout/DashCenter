@@ -1,0 +1,57 @@
+# 09-advanced-acl.yaml — three patterns the baseline ACL set doesn't show:
+#
+#  1. Numeric protocol matchers (proto=6 instead of tcp, proto=17 instead
+#     of udp). DASH/SAI accepts either; this proves the operator format
+#     is preserved end-to-end.
+#
+#  2. Multi-protocol single rule (allow icmp+icmpv6+tcp on the same row).
+#
+#  3. Layered allow_and_continue chain at multiple priorities — a
+#     "platform" policy (priorities 1..50) that runs BEFORE the existing
+#     tenant ACLs and applies platform-wide observability + rate-limit
+#     hints, then `allow_and_continue` falls through to the tenant rules.
+#
+# The new policies attach to ENIs that already have other ACLs in 05; the
+# stages combine (inbound + inbound is allowed, the stages process in
+# priority order across all attached policies).
+
+# Platform-wide ALLOW_AND_CONTINUE chain: every inbound ENI lets prom
+# scrape pass before its tenant ACL ever sees the packet.
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-platform-prom-allow, labels: { class: platform } }
+spec:
+  stage: inbound
+  eni_names:
+    - eni-bank-web-01
+    - eni-bank-web-02
+    - eni-retail-web-01
+    - eni-retail-web-02
+    - eni-media-stream-01
+    - eni-iot-edge-01
+  rules:
+    - { priority: 1,  action: allow_and_continue, src_prefixes: [10.255.0.0/16], dst_ports: ["9100","9200","9090"], protocols: ["6"], description: "prom scrape (numeric proto)" }
+    - { priority: 2,  action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: ["1","58"],                                   description: "icmp + icmpv6 from ops (numeric proto)" }
+    - { priority: 10, action: deny,               src_prefixes: [0.0.0.0/0],     dst_ports: ["111","2049"], protocols: [tcp,udp],         description: "block NFS at platform" }
+---
+# Single rule, multi-protocol, port range (1024-65535).
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-iot-edge-rate-limit, labels: { class: platform, tenant: iot } }
+spec:
+  stage: inbound
+  eni_names: [eni-iot-edge-01, eni-iot-edge-02, eni-iot-edge-03]
+  rules:
+    - { priority: 3, action: allow_and_continue, src_prefixes: [0.0.0.0/0], dst_ports: ["1024-65535"], protocols: [tcp,udp], description: "ephemeral ports — log + continue" }
+    - { priority: 4, action: deny,               src_prefixes: [0.0.0.0/0], dst_ports: ["1900","5353","11211"], protocols: [udp], description: "amplification ports — platform deny" }
+---
+# Egress platform policy with src_port matching (rare but legal).
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-platform-egress-tag, labels: { class: platform } }
+spec:
+  stage: outbound
+  eni_names: [eni-bank-web-01, eni-retail-web-01, eni-media-stream-01]
+  rules:
+    - { priority: 1, action: allow_and_continue, dst_prefixes: [10.255.0.0/16], src_ports: ["32768-60999"], protocols: [tcp], description: "egress to ops (ephemeral src range)" }
+    - { priority: 2, action: allow_and_continue, dst_prefixes: [0.0.0.0/0],     dst_ports: ["53"], protocols: ["17"],         description: "DNS (numeric proto)" }

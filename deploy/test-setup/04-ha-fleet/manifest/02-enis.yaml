@@ -1,0 +1,182 @@
+# 02-enis.yaml — 30 ENIs distributed across 12 vnets and 5 DPUs.
+#
+# Distribution (placement_hint_dpu_ids):
+#   dpu-sim-01 → bank-prod-web (2) + bank-prod-db (1) + shared-egress (1)        = 4 ENIs
+#   dpu-sim-02 → bank-prod-web (2) + bank-prod-db (1) + media-stream (1)         = 4 ENIs
+#   dpu-sim-03 → retail-prod-web (2) + retail-prod-db (1) + media-stream (1)     = 4 ENIs
+#   dpu-sim-04 → retail-prod-web (2) + retail-prod-db (1) + media-stream (1)     = 4 ENIs
+#   dpu-sim-05 → media-control (1) + media-stream (1) + iot-edge (3) + iot-core (2) + analytics-spark (3) + analytics-kafka (2) + shared-ingress (2) = 14 ENIs
+#   Total: 30 ENIs
+
+# ===== bank-prod-web (4) =====
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-web-01, labels: { tenant: bank, tier: web } }
+spec: { vnet_name: bank-prod-web, mac_address: aa:bb:cc:01:00:01, underlay_ip: 10.0.1.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-01] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-web-02, labels: { tenant: bank, tier: web } }
+spec: { vnet_name: bank-prod-web, mac_address: aa:bb:cc:01:00:02, underlay_ip: 10.0.1.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-01] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-web-03, labels: { tenant: bank, tier: web } }
+spec: { vnet_name: bank-prod-web, mac_address: aa:bb:cc:01:00:03, underlay_ip: 10.0.1.13, admin_state: up, placement_hint_dpu_ids: [dpu-sim-02] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-web-04, labels: { tenant: bank, tier: web } }
+spec: { vnet_name: bank-prod-web, mac_address: aa:bb:cc:01:00:04, underlay_ip: 10.0.1.14, admin_state: up, placement_hint_dpu_ids: [dpu-sim-02] }
+
+# ===== bank-prod-db (2) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-db-01, labels: { tenant: bank, tier: db } }
+spec: { vnet_name: bank-prod-db, mac_address: aa:bb:cc:02:00:01, underlay_ip: 10.0.2.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-01] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bank-db-02, labels: { tenant: bank, tier: db } }
+spec: { vnet_name: bank-prod-db, mac_address: aa:bb:cc:02:00:02, underlay_ip: 10.0.2.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-02] }
+
+# ===== retail-prod-web (4) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-retail-web-01, labels: { tenant: retail, tier: web } }
+spec: { vnet_name: retail-prod-web, mac_address: aa:bb:cc:11:00:01, underlay_ip: 10.1.1.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-03] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-retail-web-02, labels: { tenant: retail, tier: web } }
+spec: { vnet_name: retail-prod-web, mac_address: aa:bb:cc:11:00:02, underlay_ip: 10.1.1.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-03] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-retail-web-03, labels: { tenant: retail, tier: web } }
+spec: { vnet_name: retail-prod-web, mac_address: aa:bb:cc:11:00:03, underlay_ip: 10.1.1.13, admin_state: up, placement_hint_dpu_ids: [dpu-sim-04] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-retail-web-04, labels: { tenant: retail, tier: web } }
+spec: { vnet_name: retail-prod-web, mac_address: aa:bb:cc:11:00:04, underlay_ip: 10.1.1.14, admin_state: up, placement_hint_dpu_ids: [dpu-sim-04] }
+
+# ===== retail-prod-db (2) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-retail-db-01, labels: { tenant: retail, tier: db } }
+spec: { vnet_name: retail-prod-db, mac_address: aa:bb:cc:12:00:01, underlay_ip: 10.1.2.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-03] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-retail-db-02, labels: { tenant: retail, tier: db } }
+spec: { vnet_name: retail-prod-db, mac_address: aa:bb:cc:12:00:02, underlay_ip: 10.1.2.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-04] }
+
+# ===== media-stream (4) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-media-stream-01, labels: { tenant: media, tier: data } }
+spec: { vnet_name: media-stream, mac_address: aa:bb:cc:21:00:01, underlay_ip: 10.2.1.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-02] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-media-stream-02, labels: { tenant: media, tier: data } }
+spec: { vnet_name: media-stream, mac_address: aa:bb:cc:21:00:02, underlay_ip: 10.2.1.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-03] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-media-stream-03, labels: { tenant: media, tier: data } }
+spec: { vnet_name: media-stream, mac_address: aa:bb:cc:21:00:03, underlay_ip: 10.2.1.13, admin_state: up, placement_hint_dpu_ids: [dpu-sim-04] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-media-stream-04, labels: { tenant: media, tier: data } }
+spec: { vnet_name: media-stream, mac_address: aa:bb:cc:21:00:04, underlay_ip: 10.2.1.14, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+
+# ===== media-control (1) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-media-ctrl-01, labels: { tenant: media, tier: ctrl } }
+spec: { vnet_name: media-control, mac_address: aa:bb:cc:22:00:01, underlay_ip: 10.2.2.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+
+# ===== iot-edge (3) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-iot-edge-01, labels: { tenant: iot, tier: edge } }
+spec: { vnet_name: iot-edge, mac_address: aa:bb:cc:31:00:01, underlay_ip: 10.3.1.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-iot-edge-02, labels: { tenant: iot, tier: edge } }
+spec: { vnet_name: iot-edge, mac_address: aa:bb:cc:31:00:02, underlay_ip: 10.3.1.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-iot-edge-03, labels: { tenant: iot, tier: edge } }
+spec: { vnet_name: iot-edge, mac_address: aa:bb:cc:31:00:03, underlay_ip: 10.3.1.13, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+
+# ===== iot-core (2) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-iot-core-01, labels: { tenant: iot, tier: core } }
+spec: { vnet_name: iot-core, mac_address: aa:bb:cc:32:00:01, underlay_ip: 10.3.2.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-iot-core-02, labels: { tenant: iot, tier: core } }
+spec: { vnet_name: iot-core, mac_address: aa:bb:cc:32:00:02, underlay_ip: 10.3.2.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+
+# ===== analytics-spark (3) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-spark-01, labels: { tenant: analytics, tier: compute } }
+spec: { vnet_name: analytics-spark, mac_address: aa:bb:cc:41:00:01, underlay_ip: 10.4.1.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-spark-02, labels: { tenant: analytics, tier: compute } }
+spec: { vnet_name: analytics-spark, mac_address: aa:bb:cc:41:00:02, underlay_ip: 10.4.1.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-spark-03, labels: { tenant: analytics, tier: compute } }
+spec: { vnet_name: analytics-spark, mac_address: aa:bb:cc:41:00:03, underlay_ip: 10.4.1.13, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+
+# ===== analytics-kafka (2) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-kafka-01, labels: { tenant: analytics, tier: bus } }
+spec: { vnet_name: analytics-kafka, mac_address: aa:bb:cc:42:00:01, underlay_ip: 10.4.2.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-kafka-02, labels: { tenant: analytics, tier: bus } }
+spec: { vnet_name: analytics-kafka, mac_address: aa:bb:cc:42:00:02, underlay_ip: 10.4.2.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+
+# ===== shared-ingress (2) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-shared-ingress-01, labels: { tenant: shared, tier: ingress } }
+spec: { vnet_name: shared-ingress, mac_address: aa:bb:cc:91:00:01, underlay_ip: 10.9.1.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-shared-ingress-02, labels: { tenant: shared, tier: ingress } }
+spec: { vnet_name: shared-ingress, mac_address: aa:bb:cc:91:00:02, underlay_ip: 10.9.1.12, admin_state: up, placement_hint_dpu_ids: [dpu-sim-05] }
+
+# ===== shared-egress (1) =====
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-shared-egress-01, labels: { tenant: shared, tier: egress } }
+spec: { vnet_name: shared-egress, mac_address: aa:bb:cc:92:00:01, underlay_ip: 10.9.2.11, admin_state: up, placement_hint_dpu_ids: [dpu-sim-01] }
