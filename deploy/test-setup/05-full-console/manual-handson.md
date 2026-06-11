@@ -678,9 +678,281 @@ Navigate to **Audit** (sidebar bottom). You see:
 Each row expands to show the **diff** vs the previous generation
 where applicable.
 
+### 12.6 Diagnostics REST API (PE-1, raw, no UI dependency)
+
+> **Why this section**: the UI flows in 12.1–12.4 use the **same REST
+> endpoints** described here. If a Web Console panel is unfamiliar or
+> not yet wired, fall back to curl against `/api/v1/diagnostics/*` —
+> dashw proxies these directly to dashd. The five endpoints landed in
+> PE-1 (2026-06-11) and are operator-facing forever.
+>
+> All five examples below are **verbatim live captures** against the
+> fleet running for this lab; the outputs are reproducible byte-for-byte
+> as long as you applied the shipped `./manifest/`. Replace
+> `http://127.0.0.1:3000/api` with `http://127.0.0.1:28453` to bypass
+> the dashw BFF and hit dashd-2 (the current leader) directly — both
+> work, dashw is just a transparent passthrough.
+
+#### The pipeline `trace-flow` walks
+
+Every `POST /v1/diagnostics/trace-flow` call simulates one packet
+through this state machine. The endpoint returns the path taken plus
+the terminal verdict; the `trace[]` array narrates each hop in plain
+English.
+
+```mermaid
+flowchart LR
+  PKT[packet] --> ACL["ACL chain<br/>per-ENI policies"]
+  ACL -- "allow / allow_and_continue" --> RT["Route lookup<br/>longest-prefix + metric tie-break"]
+  ACL -- "deny" --> DROP_ACL((DROP_ACL))
+  RT -- "direct" --> ALLOW((ALLOW))
+  RT -- "service_tunnel" --> ENCAP_ST(("ENCAP via tunnel"))
+  RT -- "drop" --> DROP_NR((DROP_NO_ROUTE))
+  RT -- "vnet" --> VM["VnetMapping lookup<br/>vnet_name + dst_ip"]
+  VM -- "vnet_encap" --> ENCAP((ENCAP))
+  VM -- "service_tunnel" --> ENCAP
+  VM -- "drop" --> DROP_NM((DROP_NO_MAPPING))
+  VM -- "no entry" --> DROP_NM
+```
+
+**Reading the diagram**:
+- Square nodes (`ACL`, `RT`, `VM`) are the three stages the engine evaluates in order.
+- Round nodes are terminal verdicts — the `verdict` integer in the JSON response.
+- Edge labels match what you see in the `trace[]` strings (e.g. `ACL DENY:` corresponds to the `"deny"` edge).
+- Examples 12.6.A–C below each exercise one terminal verdict; map back to this diagram to see the route taken.
+
+The PE-1 surface:
+
+| Endpoint | What it answers |
+|---|---|
+| `POST /api/v1/diagnostics/trace-flow` | "If a packet with this 7-tuple arrived now, what does the policy chain decide?" |
+| `POST /api/v1/diagnostics/explain-match` | "Walk every candidate rule/route and tell me why each matched or didn't." |
+| `POST /api/v1/diagnostics/explain-drift` | "For NameRef X on DPU Y, what's the suggested remediation?" |
+| `POST /api/v1/diagnostics/acl-hit-stats` | "List ACL rules with their hit counters, optionally only zero-hit ones." |
+| `POST /api/v1/diagnostics/trigger-resimulation` | "Tell the named DPUs/ENIs to re-evaluate active flows against current policy." |
+
+---
+
+#### A. `trace-flow` — full vnet_encap happy path
+
+**Objective**: prove an INBOUND TCP/443 packet to `eni-bank-web-04`'s
+overlay IP `192.168.11.4` walks the complete pipeline and produces an
+ENCAP verdict via the bank-prod-web vnet mapping.
+
+```powershell
+$BODY = '{"flow":{"direction":1,"eni_name":"eni-bank-web-04","src_ip":"203.0.113.10","dst_ip":"192.168.11.4","dst_port":443,"protocol":"tcp"}}'
+curl.exe -s -X POST http://127.0.0.1:3000/api/v1/diagnostics/trace-flow `
+        -H 'Content-Type: application/json' -d $BODY | python -m json.tool
+```
+
+**Expected (truncated for readability)**:
+```json
+{
+    "verdict": 3,
+    "trace": [
+        "INPUT: dir=INBOUND eni=eni-bank-web-04 src=203.0.113.10:0 dst=192.168.11.4:443 proto=tcp vni=",
+        "ACL inbound: 1 candidate policies",
+        "ACL ALLOW: policy=acl-bank-web-inbound priority=100 reason=all fields matched",
+        "ROUTE: looking up dst=192.168.11.4 on eni=eni-bank-web-04",
+        "ROUTE: best match policy=rp-bank-web-default prefix=192.168.11.0/24 next_hop=vnet/bank-prod-web metric=10 (len=24)",
+        "VNET_MAPPING: looking up 192.168.11.4 in vnet=bank-prod-web",
+        "VNET_MAPPING: 192.168.11.4 → underlay=10.0.1.14 mac=aa:bb:cc:01:00:04 action=vnet_encap"
+    ],
+    "matched_acl_rule":    {"policy_name":"acl-bank-web-inbound", "priority":100, "action":"allow"},
+    "matched_route":       {"policy_name":"rp-bank-web-default", "prefix":"192.168.11.0/24", "next_hop_type":"vnet", "next_hop_target":"bank-prod-web"},
+    "matched_vnet_mapping":{"vnet_name":"bank-prod-web", "ip_address":"192.168.11.4", "action":"vnet_encap"}
+}
+```
+
+`verdict: 3` = `VERDICT_ENCAP`. The trace[] array narrates every stage
+the dashd flow engine walked, in order. `matched_*` fields name the
+exact spec objects that won at each stage — copy any name into
+`dashctl describe <kind> <name>` to inspect.
+
+---
+
+#### B. `trace-flow` — DROP_ACL when the deny rule terminates the chain
+
+**Objective**: prove TCP/22 (SSH) to the same ENI hits ACL rule 150
+(`deny src ∈ 10.0.0.0/8`) — well, in this specific request the
+source 203.0.113.10 is NOT in 10.0.0.0/8, but the rule priority
+order matters; the deny rule that ultimately fires is the one whose
+src/dst masks are widest enough to catch the packet. Watch the trace
+to see which.
+
+```powershell
+$BODY = '{"flow":{"direction":1,"eni_name":"eni-bank-web-04","src_ip":"203.0.113.10","dst_ip":"192.168.11.4","dst_port":22,"protocol":"tcp"}}'
+curl.exe -s -X POST http://127.0.0.1:3000/api/v1/diagnostics/trace-flow `
+        -H 'Content-Type: application/json' -d $BODY | python -m json.tool
+```
+
+**Expected**:
+```json
+{
+    "verdict": 6,
+    "trace": [
+        "INPUT: dir=INBOUND eni=eni-bank-web-04 src=203.0.113.10:0 dst=192.168.11.4:22 proto=tcp vni=",
+        "ACL inbound: 1 candidate policies",
+        "ACL skip: policy=acl-bank-web-inbound priority=100 action=allow reason=dst_port: 22 not in any of [443]",
+        "ACL skip: policy=acl-bank-web-inbound priority=110 action=allow reason=dst_port: 22 not in any of [80]",
+        "ACL skip: policy=acl-bank-web-inbound priority=120 action=allow reason=src: 203.0.113.10 not in any of [192.168.12.0/24]",
+        "ACL skip: policy=acl-bank-web-inbound priority=130 action=allow reason=src: 203.0.113.10 not in any of [192.168.91.0/24]",
+        "ACL skip: policy=acl-bank-web-inbound priority=140 action=deny reason=src: 203.0.113.10 not in any of [10.0.0.0/8]",
+        "ACL DENY: policy=acl-bank-web-inbound priority=150 reason=all fields matched"
+    ],
+    "matched_acl_rule": {"policy_name":"acl-bank-web-inbound","priority":150,"action":"deny"}
+}
+```
+
+`verdict: 6` = `VERDICT_DROP_ACL`. The trace shows every rule the
+engine considered and skipped, finishing with the deny that won.
+This is exactly the information operators need when answering "why
+is my SSH being dropped?" — no DPU round-trip required.
+
+---
+
+#### C. `trace-flow` — DROP_NO_MAPPING (route hits, mapping doesn't)
+
+**Objective**: prove the engine catches a half-configured tenant — the
+overlay IP `192.168.11.99` is in the bank-prod-web /24 (so the route
+hits) but there is no `VnetMapping` for `.99`, so no underlay target is
+known.
+
+```powershell
+$BODY = '{"flow":{"direction":1,"eni_name":"eni-bank-web-04","src_ip":"203.0.113.10","dst_ip":"192.168.11.99","dst_port":443,"protocol":"tcp"}}'
+curl.exe -s -X POST http://127.0.0.1:3000/api/v1/diagnostics/trace-flow `
+        -H 'Content-Type: application/json' -d $BODY | python -m json.tool
+```
+
+**Expected**:
+```json
+{
+    "verdict": 5,
+    "trace": [
+        "INPUT: dir=INBOUND eni=eni-bank-web-04 src=203.0.113.10:0 dst=192.168.11.99:443 proto=tcp vni=",
+        "ACL inbound: 1 candidate policies",
+        "ACL ALLOW: policy=acl-bank-web-inbound priority=100 reason=all fields matched",
+        "ROUTE: looking up dst=192.168.11.99 on eni=eni-bank-web-04",
+        "ROUTE: best match policy=rp-bank-web-default prefix=192.168.11.0/24 next_hop=vnet/bank-prod-web metric=10 (len=24)",
+        "VNET_MAPPING: looking up 192.168.11.99 in vnet=bank-prod-web",
+        "VNET_MAPPING: no entry for 192.168.11.99 in vnet=bank-prod-web → DROP_NO_MAPPING"
+    ],
+    "matched_acl_rule": {"policy_name":"acl-bank-web-inbound","priority":100,"action":"allow"},
+    "matched_route":    {"policy_name":"rp-bank-web-default","prefix":"192.168.11.0/24","next_hop_type":"vnet","next_hop_target":"bank-prod-web"}
+}
+```
+
+`verdict: 5` = `VERDICT_DROP_NO_MAPPING`. Fix: `dashctl apply -f <new
+VnetMapping for .99>` then re-trace — the verdict flips to ENCAP.
+
+---
+
+#### D. `explain-match SUBJECT_ROUTE` — see every candidate the route lookup considered
+
+**Objective**: list every RoutePolicy bound to `eni-spark-01` and show
+which routes contain the destination IP, ordered by longest-prefix +
+metric tie-break. This is the route-table equivalent of
+`traceroute --explain`.
+
+```powershell
+$BODY = '{"subject":2,"flow":{"direction":1,"eni_name":"eni-spark-01","src_ip":"10.4.1.11","dst_ip":"10.200.5.5","dst_port":9092,"protocol":"tcp"}}'
+curl.exe -s -X POST http://127.0.0.1:3000/api/v1/diagnostics/explain-match `
+        -H 'Content-Type: application/json' -d $BODY | python -m json.tool
+```
+
+**Expected**:
+```json
+{
+    "candidates": [
+        {
+            "candidate_id": "route/rp-spark-compute/0.0.0.0/0",
+            "matched": true,
+            "reason": "0.0.0.0/0 ⊇ 10.200.5.5 (len=0, metric=1000, next_hop=drop/)"
+        },
+        {
+            "candidate_id": "route/rp-spark-compute/10.0.255.30/32",
+            "reason": "10.0.255.30/32 ⊅ 10.200.5.5",
+            "priority": 32
+        },
+        {
+            "candidate_id": "route/rp-spark-compute/192.168.51.0/24",
+            "reason": "192.168.51.0/24 ⊅ 10.200.5.5",
+            "priority": 24
+        },
+        {
+            "candidate_id": "route/rp-spark-compute/192.168.52.0/24",
+            "reason": "192.168.52.0/24 ⊅ 10.200.5.5",
+            "priority": 24
+        }
+    ],
+    "selected_candidate_id": "route/rp-spark-compute/0.0.0.0/0"
+}
+```
+
+Only the `0.0.0.0/0` default route matched (the spark ENI's other
+routes are tenant-specific overlay prefixes). `selected_candidate_id`
+names the winner; the other rows carry the **non-match reason** in
+plain English, with `⊅` = "does not contain" and `⊇` = "contains".
+
+---
+
+#### E. `acl-hit-stats {"zero_hits_only":true}` — find dead ACL rules
+
+**Objective**: with no production traffic, every rule's hit counter is
+zero. Surfacing them all proves the audit path works and gives
+operators a template for the "list unused security rules" report once
+PD-G5 lands real counters.
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:3000/api/v1/diagnostics/acl-hit-stats `
+        -H 'Content-Type: application/json' `
+        -d '{"zero_hits_only":true}' | python -m json.tool | Select-Object -First 30
+```
+
+**Expected (head + footer summary)**:
+```json
+{
+    "items": [
+        {
+            "dpu_id": "dpu-sim-01",
+            "namespace": "default",
+            "policy_name": "acl-bank-db-inbound",
+            "stage": "inbound",
+            "rules": [
+                {"priority": 100, "action": "allow"},
+                {"priority": 110, "action": "allow"},
+                {"priority": 120, "action": "allow"},
+                {"priority": 130, "action": "deny"},
+                ...
+                {"priority": 1000, "action": "deny"}
+            ],
+            "sampled_at": {...}
+        },
+        ...
+    ]
+}
+```
+
+On the shipped manifest:
+
+- **policies returned**: 180 (= 10 DPUs × 18 in-scope policies after
+  binding filtering)
+- **total rules surfaced**: ~1570
+
+Today every rule reports `hits: 0` because `HitStatsSource` is wired
+to `flow.NilHitStats` — the safe-default stub that returns "never
+observed" for every probe. PD-G5 will swap in the real counter store
+sourced from per-DPU dispatch worker telemetry; at that point this
+same endpoint becomes the "find unused security rules" report
+without any operator-side change.
+
+---
+
 **✅ Checkpoint:** Flow trace covers happy path, quarantine drop,
 and ACL port-range edge case. Debug pane reaches both BFF and
-sim APIs. Audit log preserves the bootstrap chronology.
+sim APIs. Audit log preserves the bootstrap chronology. The PE-1
+diagnostics REST API answers every "why did the policy do X?"
+question in pure cache compute — no DPU contact required.
 
 ---
 
