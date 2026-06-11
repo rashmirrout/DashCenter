@@ -1,11 +1,12 @@
 go 1.22
 
 use (
-	./gen/go
-	./dashapi-runtime
-	./dashd
-	./dashctl
-	./dash-sim
-	./dash-sim-client
-	./dash-redis-adapter
+./gen/go
+./dashapi-runtime
+./dashd
+./dashctl
+./dash-sim
+./dash-sim-client
+./dash-redis-adapter
+./console
 )
