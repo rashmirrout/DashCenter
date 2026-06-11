@@ -25,7 +25,7 @@
 
 | Phase | Objective | Status | Gates |
 |---|---|---|---|
-| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. | ⏳ In progress | 10 / 24 |
+| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. | ⏳ In progress | 14 / 24 |
 | **Phase B** — gRPC streaming (real-time) | WebSocket ↔ gRPC bridge in BFF; real-time DPU status, events, flows, counters, audit in SPA. | ❌ Not started | 0 / 12 |
 | **Phase C** — Diagnostics & advanced (full fidelity) | TraceFlow animation, ACL hit stats streaming, basic HA/Migration stream UIs, E2E tests. | ❌ Not started | 0 / 10 |
 | **Phase D** — HA Theater + Migration Center + Capacity | Full HA orchestration theater, 10-phase migration control center, capacity planner with what-if simulator. 3 new views. | ❌ Not started | 0 / 16 |
@@ -108,12 +108,12 @@ WebSocket, no gRPC. The console is independently valuable at this phase.
 
 | Gate | Task | Status | AI Agent Instructions |
 |---|---|---|---|
-| **A1b-G1** | `internal/cache/cache.go`: In-process TTL cache with stale-while-revalidate. Types: `CacheEntry{Data, ExpiresAt, StaleAt}`, `Cache` struct with `sync.RWMutex` + `map[string]*CacheEntry`. Methods: `Get(key) → ([]byte, CacheStatus)`, `Set(key, data, ttl, staleWindow)`, `Invalidate(key)`, `InvalidatePattern(prefix)`, `Flush()`. `CacheStatus` enum: `HIT`, `MISS`, `STALE`. On STALE: return data + trigger background refresh goroutine. | ❌ | Use stdlib only (`sync.RWMutex`, `map`, `time`). Background refresh: `go func() { data := fetch(); cache.Set(key, data, ttl, stale) }()`. Periodic cleanup goroutine every 60s removes expired+stale entries. Response headers: `X-Cache: hit|miss|stale`, `X-Cache-Age: Ns`. See `dashw-web-scale-design-req-analysis.md §3` for full design. |
+| **A1b-G1** | `internal/cache/cache.go` + `cache_test.go` (16 tests): In-process TTL cache with stale-while-revalidate, `InvalidatePattern`, background cleanup, `Stop()`. | ✅ | — |
 | **A1b-G2** | `internal/cache/invalidation.go`: Mutation-aware cache invalidation. Map of URL pattern → cache keys to flush. BFF proxy middleware intercepts successful PUT/POST/DELETE responses and calls `cache.InvalidatePattern()`. | ❌ | Invalidation map: PUT vnets → flush `fleet/summary,topology,vnet/detail:*,vnet/canvas:*,dependencies`. PUT enis → flush `fleet/summary,topology,dpu/detail:*,vnet/*,capacity,dependencies`. POST reconcile → `cache.Flush()` (full). See analysis doc §3.4 for complete map. |
-| **A1b-G3** | `internal/resilience/circuit_breaker.go`: Circuit breaker for dashd calls. States: CLOSED→OPEN→HALF_OPEN. Threshold: 5 failures in 30s → OPEN for 30s. When OPEN: return `ErrCircuitOpen` (caller serves stale cache). HALF_OPEN: try one request, success → CLOSED. | ❌ | Use `sync/atomic` for state + failure counter. Thread-safe. One circuit breaker per dashd target (REST, Admin, gRPC). Wrap all aggregation fan-out calls with `cb.Call(func() error { ... })`. |
-| **A1b-G4** | `internal/resilience/rate_limiter.go`: Write rate limiter. `golang.org/x/time/rate` token bucket per source IP. 10/s burst, 100/min sustained. Middleware: check on PUT/POST/DELETE methods only. Return `429 Too Many Requests` with `Retry-After` header. | ❌ | IP extraction: `X-Real-IP` header (from chi `RealIP` middleware), fallback to `RemoteAddr`. Per-IP limiter map with cleanup (remove idle entries after 5 min). Ignore reads (GET) — cache handles read load. |
-| **A1b-G5** | `internal/health/readiness.go`: `GET /readyz` readiness probe. Checks: 1) dashd REST reachable (GET /admin/health, timeout 2s), 2) at least 1 cache entry populated. Returns 200 if both pass, 503 otherwise. | ❌ | Separate from `/healthz` (liveness). K8s uses `/readyz` for load balancer routing — new instances don't receive traffic until cache is warm. `/healthz` only checks "process alive" (always 200 unless deadlocked). |
-| **A1b-G6** | Unit tests: cache (TTL expiry, stale-while-revalidate, invalidation, pattern flush), circuit breaker (state transitions, threshold, timeout), rate limiter (burst, sustained, per-IP isolation), readiness (warm/cold cache). | ❌ | Test cache: `Set(key, data, 1s, 5s)` → immediate `Get` = HIT → sleep 1.1s → `Get` = STALE → sleep 5.1s → `Get` = MISS. Test CB: trigger 5 errors → state = OPEN → wait 30s → HALF_OPEN → success → CLOSED. |
+| **A1b-G3** | `internal/resilience/circuit_breaker.go` + `circuit_breaker_test.go` (12 tests): CLOSED→OPEN→HALF_OPEN state machine with failure window, half-open immediate reopen. | ✅ | — |
+| **A1b-G4** | `internal/resilience/rate_limiter.go` + `rate_limiter_test.go` (14 tests): Per-IP token bucket, write-only middleware, idle IP cleanup, extractIP from X-Real-IP/XFF/RemoteAddr. | ✅ | — |
+| **A1b-G5** | `internal/health/readiness.go`: `GET /readyz` readiness probe with dashd check (already in health.go from A1-G5). Cache warmth check deferred to A3 integration. | ⬜ | — |
+| **A1b-G6** | All resilience unit tests: cache (16), circuit breaker (12), rate limiter (14) = 42 tests. All pass. | ✅ | — |
 
 **Gate verification:** Cache reduces dashd calls by 50×+ under multi-user load. Circuit breaker opens on dashd failure, serves stale. Rate limiter rejects excessive writes. `/readyz` returns 503 until cache warm.
 
@@ -121,10 +121,10 @@ WebSocket, no gRPC. The console is independently valuable at this phase.
 
 | Gate | Task | Status |
 |---|---|---|
-| **A2-G1** | `proxy/rest.go`: reverse-proxy `/api/v1/*` → dashd `:8443` with path rewrite, error handler, timeout | ❌ |
-| **A2-G2** | `proxy/admin.go`: reverse-proxy `/api/admin/*` → dashd `:7443` | ❌ |
-| **A2-G3** | `proxy/sim.go`: dynamic reverse-proxy `/api/sim/{simId}/admin/*` → dash-sim | ❌ |
-| **A2-G4** | Integration test: start BFF + mock dashd; verify PUT/GET/DELETE pass through with correct path rewrite | ❌ |
+| **A2-G1** | `proxy/rest.go`: reverse-proxy `/api/v1/*` → dashd `:8443` with path rewrite, error handler, timeout | ✅ |
+| **A2-G2** | `proxy/admin.go`: reverse-proxy `/api/admin/*` → dashd `:7443` | ✅ |
+| **A2-G3** | `proxy/sim.go`: dynamic reverse-proxy `/api/sim/{simId}/admin/*` → dash-sim | ✅ |
+| **A2-G4** | Integration test: `proxy_test.go` (10 tests): path rewrite, backend down 502, invalid URL fallback, header forwarding, status passthrough | ✅ |
 
 **Gate verification:** `curl http://localhost:8080/api/v1/default/vnets` returns dashd response; `curl http://localhost:8080/api/admin/health` returns admin health.
 

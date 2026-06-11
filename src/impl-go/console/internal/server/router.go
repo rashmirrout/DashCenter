@@ -8,6 +8,7 @@ import (
 "github.com/go-chi/cors"
 "github.com/rashmirrout/DashCenter/src/impl-go/console/internal/config"
 "github.com/rashmirrout/DashCenter/src/impl-go/console/internal/health"
+"github.com/rashmirrout/DashCenter/src/impl-go/console/internal/proxy"
 )
 
 // buildRouter constructs the chi router with all middleware and routes.
@@ -36,19 +37,22 @@ MaxAge:           300,
 r.Get("/healthz", health.LivenessHandler())
 r.Get("/readyz", health.ReadinessHandler(cfg))
 
-// ── REST proxy routes (Phase A) ─────────────────────────────
-// Placeholder: proxy routes are registered in A2.
-// r.HandleFunc("/api/v1/*", restProxy.ServeHTTP)
-// r.HandleFunc("/api/admin/*", adminProxy.ServeHTTP)
+	// ── REST proxy routes ───────────────────────────────────────
+	restProxy := proxy.NewRestProxy(cfg.DashdRestAddr, cfg.ProxyTimeout, logger)
+	adminProxy := proxy.NewAdminProxy(cfg.DashdAdminAddr, cfg.ProxyTimeout, logger)
 
-// ── Aggregation routes (Phase A3) ───────────────────────────
-// Placeholder: aggregation routes are registered in A3.
-// r.Get("/api/console/fleet/summary", agg.FleetSummary)
-// r.Get("/api/console/dpu/{dpuId}/detail", agg.DpuDetail)
-// r.Get("/api/console/topology", agg.Topology)
-// r.Get("/api/console/vnet/{vnetName}/detail", agg.VnetDetail)
-// r.Get("/api/console/vnet/{vnetName}/canvas", agg.VnetCanvas)
-// r.Get("/api/console/stats/capacity", agg.CapacityStats)
+	r.Route("/api", func(r chi.Router) {
+		r.HandleFunc("/v1/*", restProxy.ServeHTTP)
+		r.HandleFunc("/admin/*", adminProxy.ServeHTTP)
+
+		if cfg.SimBaseAddr != "" {
+			simProxy := proxy.NewSimProxy(cfg.SimBaseAddr, cfg.ProxyTimeout, logger)
+			r.HandleFunc("/sim/{simId}/admin/*", simProxy.ServeHTTP)
+		}
+	})
+
+	// ── Aggregation routes (Phase A3) ───────────────────────────
+	// Placeholder: aggregation endpoints registered in A3.
 
 // ── WebSocket bridges (Phase B) ─────────────────────────────
 // Placeholder: WS routes are registered in B1.
