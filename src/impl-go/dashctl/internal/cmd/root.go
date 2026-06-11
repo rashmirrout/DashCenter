@@ -163,6 +163,7 @@ func (a *Application) newRootCmd() *cobra.Command {
 		a.newEditCmd(),
 		a.newDiffCmd(),
 		a.newReconcileCmd(),
+		a.newSimulateCmd(),
 		a.newDpuCmd(),
 		a.newInventoryCmd(),
 		a.newEventsCmd(),

@@ -9,6 +9,7 @@ import (
 
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 "google.golang.org/grpc"
@@ -53,11 +54,24 @@ func (stubControlPlane) List(_ context.Context, _, _ string) ([]*service.StoredI
 return nil, nil
 }
 func (stubControlPlane) Reconcile(_ context.Context) error { return nil }
+func (stubControlPlane) SimulateApply(_ context.Context, _ []service.SimulateOp) (*service.SimulateResult, error) {
+	return &service.SimulateResult{WouldSucceed: true}, nil
+}
+func (stubControlPlane) RegisterDpu(_ context.Context, _ service.DpuRegistration) error { return nil }
+func (stubControlPlane) CordonDpu(_ context.Context, _, _ string) error               { return nil }
+func (stubControlPlane) UncordonDpu(_ context.Context, _, _ string) error             { return nil }
+func (stubControlPlane) ListCordonedDpus(_ context.Context) []string                  { return nil }
+func (stubControlPlane) ApplyBatch(_ context.Context, ops []service.BatchOp) (*service.BatchResult, error) {
+	return &service.BatchResult{Committed: true, OpsTotal: len(ops), OpsCommitted: len(ops)}, nil
+}
+func (stubControlPlane) DrainDpu(_ context.Context, dpu string, _ operations.DrainOpts) (operations.DrainResult, error) {
+	return operations.DrainResult{DpuID: dpu, Cordoned: true}, nil
+}
 
 // newTestServer builds a New(...) instance with stub services so calls
 // to gRPC RegisterService never see a nil interface inside the desc.
 func newTestServer() *Server {
-return New(stubControlPlane{}, service.NewObservability(nil, nil, model.NewObsCache()))
+return New(stubControlPlane{}, service.NewObservability(nil, nil, model.NewObsCache()), nil, nil)
 }
 
 // 1. serviceErrToStatus maps each known error to the right gRPC code.

@@ -1,0 +1,9 @@
+# Ignore build outputs and local overrides — keep the directory git-clean
+# while operators experiment.
+docker-compose.override.yml
+dashd.log
+audit.jsonl
+state/
+*.bak
+dashctl.exe
+dashd.exe

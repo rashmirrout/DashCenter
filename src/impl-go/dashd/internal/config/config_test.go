@@ -116,21 +116,23 @@ inventory:
 }
 
 func TestBackendEtcdError(t *testing.T) {
+	// PA-1b: storage.backend=etcd is now a real backend. With no endpoints
+	// configured, validation must reject — pointing the operator at the
+	// required field. Previously (PA-1a) the whole backend was rejected
+	// with "not yet implemented".
 	yaml := `
 storage:
   backend: etcd
-  file:
-    state_dir: /tmp/test
 inventory:
   source: api
 `
 	path := writeTemp(t, "etcd.yaml", yaml)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected error for backend=etcd")
+		t.Fatal("expected error for etcd backend without endpoints")
 	}
-	if !strings.Contains(err.Error(), "Phase 1") {
-		t.Errorf("error should mention Phase 1, got: %v", err)
+	if !strings.Contains(err.Error(), "endpoints") {
+		t.Errorf("error should mention missing endpoints, got: %v", err)
 	}
 }
 

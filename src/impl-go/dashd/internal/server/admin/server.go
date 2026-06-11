@@ -26,25 +26,53 @@ dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1
 
 // Server is the admin HTTP server.
 type Server struct {
-srv *http.Server
+	srv *http.Server
 }
 
-// New creates an admin server.
+// LeaderObserver is the minimal slice of an elector that the admin
+// handler needs to report leadership state on /admin/health and
+// /admin/leader. Implemented by *leader.EtcdElector and *leader.NoneElector.
+type LeaderObserver interface {
+	IsLeader() bool
+	LeaderID() string
+}
+
+// noLeaderObserver is the always-leader fallback used when no elector is
+// supplied (preserves PA-0 single-node behaviour for callers that haven't
+// migrated to NewWithElector yet).
+type noLeaderObserver struct{}
+
+func (noLeaderObserver) IsLeader() bool    { return true }
+func (noLeaderObserver) LeaderID() string { return "" }
+
+// New creates an admin server. Equivalent to NewWithElector with a
+// stub elector that always reports leader=true (PA-0 single-node).
 func New(inv *inventory.Inventory, st store.DesiredStore, obs *model.ObsCache, rec *reconciler.Reconciler) *Server {
-h := &handler{inv: inv, store: st, obs: obs, rec: rec}
-mux := http.NewServeMux()
-mux.HandleFunc("GET /admin/health", h.health)
-mux.HandleFunc("GET /admin/leader", h.leader)
-mux.HandleFunc("GET /admin/inventory", h.inventoryList)
-mux.HandleFunc("GET /admin/desired", h.desired)
-mux.HandleFunc("GET /admin/observed", h.observed)
-mux.HandleFunc("GET /admin/drift", h.drift)
-mux.HandleFunc("GET /admin/eni-placement", h.eniPlacement)
-mux.HandleFunc("POST /admin/reconcile", h.reconcile)
-return &Server{srv: &http.Server{
-Handler:           mux,
-ReadHeaderTimeout: 5 * time.Second,
-}}
+	return NewWithElector(inv, st, obs, rec, noLeaderObserver{})
+}
+
+// NewWithElector creates an admin server that reports live leadership
+// state from the supplied LeaderObserver on /admin/health and
+// /admin/leader. Multi-node controller deployments (PA-3+) MUST use this
+// constructor so followers report leader=false.
+func NewWithElector(inv *inventory.Inventory, st store.DesiredStore, obs *model.ObsCache, rec *reconciler.Reconciler, el LeaderObserver) *Server {
+	if el == nil {
+		el = noLeaderObserver{}
+	}
+	h := &handler{inv: inv, store: st, obs: obs, rec: rec, elector: el}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /admin/health", h.health)
+	mux.HandleFunc("GET /admin/leader", h.leader)
+	mux.HandleFunc("GET /admin/inventory", h.inventoryList)
+	mux.HandleFunc("GET /admin/desired", h.desired)
+	mux.HandleFunc("GET /admin/observed", h.observed)
+	mux.HandleFunc("GET /admin/drift", h.drift)
+	mux.HandleFunc("GET /admin/eni-placement", h.eniPlacement)
+	mux.HandleFunc("POST /admin/reconcile", h.reconcile)
+	return &Server{srv: &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}}
 }
 
 // Serve starts listening on addr.
@@ -66,10 +94,11 @@ _ = s.srv.Shutdown(ctx)
 }
 
 type handler struct {
-inv   *inventory.Inventory
-store store.DesiredStore
-obs   *model.ObsCache
-rec   *reconciler.Reconciler
+inv     *inventory.Inventory
+store   store.DesiredStore
+obs     *model.ObsCache
+rec     *reconciler.Reconciler
+elector LeaderObserver
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
@@ -79,11 +108,14 @@ State    string `json:"state"`
 LastSeen string `json:"last_seen"`
 }
 
+leaderID := h.elector.LeaderID()
+isLeader := h.elector.IsLeader()
 out := struct {
-Status string    `json:"status"`
-Leader bool      `json:"leader"`
-Dpus   []dpuInfo `json:"dpus"`
-}{Status: "ok", Leader: true}
+Status   string    `json:"status"`
+Leader   bool      `json:"leader"`
+LeaderID string    `json:"leader_id,omitempty"`
+Dpus     []dpuInfo `json:"dpus"`
+}{Status: "ok", Leader: isLeader, LeaderID: leaderID}
 
 allOk := true
 for _, e := range h.inv.List() {
@@ -103,7 +135,7 @@ writeJSON(w, 200, out)
 }
 
 func (h *handler) leader(w http.ResponseWriter, r *http.Request) {
-writeJSON(w, 200, map[string]bool{"leader": true})
+writeJSON(w, 200, map[string]any{"leader": h.elector.IsLeader(), "leader_id": h.elector.LeaderID()})
 }
 
 func (h *handler) inventoryList(w http.ResponseWriter, r *http.Request) {

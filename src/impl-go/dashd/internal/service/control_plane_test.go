@@ -19,7 +19,7 @@ t.Fatalf("Open: %v", err)
 }
 t.Cleanup(func() { fs.Close() })
 inv := inventory.New()
-return NewControlPlane(fs, inv, nil)
+return NewControlPlane(fs, inv, nil, nil, nil, nil, nil)
 }
 
 func TestPutVnet_OK(t *testing.T) {
@@ -51,6 +51,11 @@ t.Fatal("expected error for empty name")
 
 func TestPutEni_OK(t *testing.T) {
 svc := newTestService(t)
+// PA-5: ENI references a Vnet — the namespace validator now requires
+// the Vnet to exist in the same namespace before the ENI is accepted.
+if _, err := svc.PutVnet(context.Background(), "", &dashcenterv1.VnetSpec{Name: "v1", Vni: 1}); err != nil {
+	t.Fatalf("seed Vnet: %v", err)
+}
 res, err := svc.PutEni(context.Background(), "", &dashcenterv1.EniSpec{Name: "eni-1", VnetName: "v1"})
 if err != nil {
 t.Fatalf("PutEni: %v", err)
@@ -114,6 +119,10 @@ t.Error("expected accepted")
 
 func TestPutVnetMapping_OK(t *testing.T) {
 svc := newTestService(t)
+// PA-5: VnetMapping references a Vnet — must exist in same namespace.
+if _, err := svc.PutVnet(context.Background(), "", &dashcenterv1.VnetSpec{Name: "v1", Vni: 1}); err != nil {
+	t.Fatalf("seed Vnet: %v", err)
+}
 res, err := svc.PutVnetMapping(context.Background(), "", &dashcenterv1.VnetMappingSpec{VnetName: "v1", IpAddress: "10.0.0.1"})
 if err != nil {
 t.Fatalf("PutVnetMapping: %v", err)

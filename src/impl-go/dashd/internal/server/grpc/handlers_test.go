@@ -30,6 +30,7 @@ import (
 "time"
 
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 "google.golang.org/grpc"
@@ -104,6 +105,26 @@ func (s *richControlPlaneStub) List(_ context.Context, _ string, _ string) ([]*s
 return nil, nil
 }
 func (s *richControlPlaneStub) Reconcile(_ context.Context) error { return s.reconcileErr }
+
+func (s *richControlPlaneStub) SimulateApply(_ context.Context, _ []service.SimulateOp) (*service.SimulateResult, error) {
+	return &service.SimulateResult{WouldSucceed: true}, nil
+}
+
+func (s *richControlPlaneStub) RegisterDpu(_ context.Context, _ service.DpuRegistration) error {
+	return nil
+}
+
+func (s *richControlPlaneStub) CordonDpu(_ context.Context, _, _ string) error    { return nil }
+func (s *richControlPlaneStub) UncordonDpu(_ context.Context, _, _ string) error  { return nil }
+func (s *richControlPlaneStub) ListCordonedDpus(_ context.Context) []string       { return nil }
+
+func (s *richControlPlaneStub) ApplyBatch(_ context.Context, ops []service.BatchOp) (*service.BatchResult, error) {
+	return &service.BatchResult{Committed: true, OpsTotal: len(ops), OpsCommitted: len(ops)}, nil
+}
+
+func (s *richControlPlaneStub) DrainDpu(_ context.Context, dpu string, _ operations.DrainOpts) (operations.DrainResult, error) {
+	return operations.DrainResult{DpuID: dpu, Cordoned: true}, nil
+}
 
 // richObservabilityStub implements service.ObservabilityService.
 type richObservabilityStub struct {
@@ -364,18 +385,29 @@ t.Errorf("PutInventory code=%v want Unimplemented", status.Code(err))
 }
 }
 
-// 10. RegisterDpu is also unimplemented (same family as PutInventory).
-func TestHandler_RegisterDpu_Unimplemented(t *testing.T) {
-b := newBufServer(t)
+// 10. RegisterDpu is implemented in PB-3. A call with an empty
+// DpuRegistration (no identity) must return InvalidArgument; a valid
+// payload returns OK via the stub.
+func TestHandler_RegisterDpu_PB3(t *testing.T) {
+	b := newBufServer(t)
 
-client := dashcenterv1.NewControlPlaneClient(b.conn)
-ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-defer cancel()
+	client := dashcenterv1.NewControlPlaneClient(b.conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-_, err := client.RegisterDpu(ctx, &dashcenterv1.DpuRegistration{})
-if status.Code(err) != codes.Unimplemented {
-t.Errorf("RegisterDpu code=%v want Unimplemented", status.Code(err))
-}
+	// Missing identity → InvalidArgument from the handler before
+	// reaching the service stub.
+	if _, err := client.RegisterDpu(ctx, &dashcenterv1.DpuRegistration{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty reg: code=%v want InvalidArgument", status.Code(err))
+	}
+
+	// Valid request: handler delegates to the stub (which returns nil).
+	if _, err := client.RegisterDpu(ctx, &dashcenterv1.DpuRegistration{
+		Identity:     &dashcenterv1.DpuIdentity{DpuId: "dpu-1"},
+		Capabilities: &dashcenterv1.DpuCapabilities{ServiceTunnel: true},
+	}); err != nil {
+		t.Errorf("valid reg: err=%v want nil", err)
+	}
 }
 
 // --- ObservabilityService handler tests ---------------------------------------

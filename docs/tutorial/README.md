@@ -44,6 +44,7 @@
 | 15 | [dashd fleet: 5 DPUs](15-dashd-fleet.md) | `deploy/dashd-fleet/` brought up; fan-out + targeted placement |
 | 16 | [dashctl quickstart](16-dashctl-quickstart.md) | Build the operator CLI, contexts, output formats, CAS, container path |
 | 17 | [full-fleet experiments](17-full-fleet-experiments.md) | The 36-step walkthrough + custom-ENI/ACL playground |
+| 18 | [HA + ENI live migration hands-on](18-ha-and-migration-handson.md) | 3-controller HA fleet + 103 pre-applied objects + switchover + failover + 10-phase migration + kill-leader survival |
 
 ### Appendices
 

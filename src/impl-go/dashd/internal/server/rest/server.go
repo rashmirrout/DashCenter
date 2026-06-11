@@ -9,38 +9,97 @@ import (
 "fmt"
 "io"
 "log/slog"
+"net"
 "net/http"
 "time"
 
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 )
 
 // Server is the REST HTTP server.
 type Server struct {
-srv *http.Server
+srv      *http.Server
+listener auth.ListenerConfig
 }
 
-// New creates a REST server wired to the shared service layer.
-func New(cp service.ControlPlaneService, obs service.ObservabilityService) *Server {
-h := &handler{cp: cp, obs: obs}
-return &Server{srv: &http.Server{
-Handler:           h.router(),
+// New creates a REST server wired to the shared service layer. ha and
+// mig may be nil — in that case the /v1/ha/* and /v1/migrations/*
+// routes return 503.
+//
+// Deprecated convenience constructor: prefer NewWithOptions in
+// production (it accepts TLS + auth + audit wiring).
+func New(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService) *Server {
+return NewWithOptions(cp, obs, ha, mig, Options{})
+}
+
+// Options bundles PD-G1..G4 wiring for the REST server.
+type Options struct {
+	// Listener carries TLS material; if non-zero ListenerConfig.Mode
+	// is honoured at Serve time (TLS in token/mtls modes).
+	Listener auth.ListenerConfig
+
+	// Authorizer is consulted by the HTTP middleware. nil falls
+	// back to auth.AllowAllAuthorizer (today's plaintext behaviour).
+	Authorizer auth.Authorizer
+
+	// AuditWriter logs every request. nil disables auditing.
+	AuditWriter *audit.Writer
+}
+
+// NewWithOptions is the production constructor.
+func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService, opts Options) *Server {
+h := &handler{cp: cp, obs: obs, ha: ha, mig: mig}
+var handlerChain http.Handler = h.router()
+// Compose OUTSIDE -> IN so auth runs first and audit reads Subject
+// from ctx.
+if opts.AuditWriter != nil {
+handlerChain = audit.HTTPMiddleware(audit.InterceptorConfig{Writer: opts.AuditWriter, Roles: auth.DefaultRoleMap})(handlerChain)
+}
+if opts.Authorizer != nil {
+handlerChain = auth.NewHTTPMiddleware(opts.Authorizer)(handlerChain)
+}
+return &Server{
+srv: &http.Server{
+Handler:           handlerChain,
 ReadHeaderTimeout: 5 * time.Second,
-}}
+},
+listener: opts.Listener,
+}
 }
 
-// Serve starts listening on addr.
+// Serve starts listening on addr. When the configured Listener.Mode
+// is token / mtls and TLS material is present, the listener is wrapped
+// in TLS via auth.NewListener.
 func (s *Server) Serve(addr string) error {
 s.srv.Addr = addr
-slog.Info("rest: listening", "addr", addr)
+slog.Info("rest: listening", "addr", addr, "mode", s.listener.Mode)
+lc := s.listener
+if lc.Mode == "" || lc.Mode == "none" {
 err := s.srv.ListenAndServe()
 if errors.Is(err, http.ErrServerClosed) {
 return nil
 }
 return err
 }
+// TLS path: build via auth.NewListener so token + mtls modes get
+// the same TLS code path everywhere.
+ln, err := auth.NewListener("tcp", addr, lc)
+if err != nil {
+return err
+}
+err = s.srv.Serve(ln)
+if errors.Is(err, http.ErrServerClosed) {
+return nil
+}
+return err
+}
+
+var _ net.Listener = (net.Listener)(nil) // keep "net" referenced when TLS is off
 
 // Stop gracefully shuts down the server.
 func (s *Server) Stop() {
@@ -52,6 +111,8 @@ _ = s.srv.Shutdown(ctx)
 type handler struct {
 cp  service.ControlPlaneService
 obs service.ObservabilityService
+ha  service.HaService // may be nil; /v1/ha/* returns 503 when so
+mig service.MigrationService // may be nil; /v1/migrations/* returns 503 when so
 }
 
 // urlKindToStoreKind maps plural URL path segments to singular store kind names.
@@ -71,6 +132,23 @@ mux := http.NewServeMux()
 // Inventory (no namespace).
 mux.HandleFunc("PUT /v1/inventory", h.putInventory)
 mux.HandleFunc("GET /v1/inventory", h.getInventory)
+
+// RegisterDpu (PB-3): advertise DpuCapacityLimits + DpuCapabilities for
+// a previously-registered DPU. Body shape mirrors service.DpuRegistration.
+mux.HandleFunc("POST /v1/inventory/{id}/register", h.registerDpu)
+
+// Cordon / Uncordon (PC-1). Body: {"reason": "..."} — reason is
+// recorded in the operations audit ring for forensics. Idempotent.
+mux.HandleFunc("POST /v1/inventory/{id}/cordon", h.cordonDpu)
+mux.HandleFunc("POST /v1/inventory/{id}/uncordon", h.uncordonDpu)
+mux.HandleFunc("GET /v1/inventory/cordoned", h.listCordoned)
+
+// Drain (PC-G7). Body: {"reason":"...","parallelism":4}. Cordons
+// the DPU then rehomes every ENI to a least-loaded uncordoned
+// destination. Returns the full DrainResult envelope; status code
+// is 200 when every ENI migrated, 207 (Multi-Status) when some
+// failed (the source remains cordoned for retry).
+mux.HandleFunc("POST /v1/inventory/{id}/drain", h.drainDpu)
 
 // Namespace-scoped spec routes (with optional {ns} prefix, fallback to "default").
 // Pattern: /v1/{ns}/{plural_kind}/{name}
@@ -98,6 +176,41 @@ mux.HandleFunc("DELETE /v1/{kind}/{name}", h.deleteDefault)
 
 // Reconcile.
 mux.HandleFunc("POST /v1/reconcile", h.reconcile)
+
+// SimulateApply (PB-2): dry-run admission. Body is JSON of
+// service.SimulateOp list under {"ops": [...]}. Always returns 200
+// (the would_succeed field carries the verdict); only request-shape
+// errors (empty body, bad json) return 400. This matches kubectl's
+// `--dry-run=server` UX where the server is reachable but the request
+// would fail validation — still a successful round-trip.
+mux.HandleFunc("POST /v1/simulate", h.simulate)
+
+// ApplyBatch (PC-8): atomic multi-spec write. Body is JSON of
+// service.BatchOp list under {"ops": [...]}. Returns 200 with the
+// service.BatchResult envelope on commit; 207 (Multi-Status) with
+// the same envelope on partial rollback so operators can distinguish
+// success from clean-failure from dirty-failure at the HTTP layer.
+mux.HandleFunc("POST /v1/apply-batch", h.applyBatch)
+
+// HA orchestration (PC-G1..G3).
+mux.HandleFunc("GET /v1/ha", h.listHa)
+mux.HandleFunc("GET /v1/ha/{ns}/{name}", h.getHa)
+mux.HandleFunc("POST /v1/ha/{ns}/{name}/switchover", h.haSwitchover)
+mux.HandleFunc("POST /v1/ha/{ns}/{name}/failover", h.haFailover)
+mux.HandleFunc("GET /v1/ha/events", h.haWatchEvents)
+mux.HandleFunc("GET /v1/ha/flow-sync-stats", h.haFlowSyncStats)
+
+// Migration sessions (PC-G4..G6).
+mux.HandleFunc("POST /v1/migrations/plans", h.migCreatePlan)
+mux.HandleFunc("POST /v1/migrations/plans/validate", h.migValidatePlan)
+mux.HandleFunc("POST /v1/migrations/sessions", h.migStartSession)
+mux.HandleFunc("GET /v1/migrations/sessions", h.migListSessions)
+mux.HandleFunc("GET /v1/migrations/sessions/{id}", h.migGetSession)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/advance", h.migAdvance)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/rollback", h.migRollback)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/abort", h.migAbort)
+mux.HandleFunc("POST /v1/migrations/sessions/{id}/commit", h.migCommit)
+mux.HandleFunc("GET /v1/migrations/sessions/{id}/stream", h.migStreamSession)
 
 return mux
 }
@@ -374,6 +487,135 @@ return
 writeJSON(w, 200, map[string]any{"accepted": true})
 }
 
+// --- Cordon / Uncordon (PC-1) -----------------------------------------
+
+// reasonBody is the optional body shape for cordon / uncordon. We accept
+// either an empty body or {"reason":"..."}.
+type reasonBody struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func (h *handler) cordonDpu(w http.ResponseWriter, r *http.Request) {
+	h.cordonImpl(w, r, true)
+}
+
+func (h *handler) uncordonDpu(w http.ResponseWriter, r *http.Request) {
+	h.cordonImpl(w, r, false)
+}
+
+func (h *handler) cordonImpl(w http.ResponseWriter, r *http.Request, cordoned bool) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, 400, errors.New("path: dpu id is required"))
+		return
+	}
+	var req reasonBody
+	if body, err := io.ReadAll(r.Body); err == nil && len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+			return
+		}
+	}
+	var err error
+	if cordoned {
+		err = h.cp.CordonDpu(r.Context(), id, req.Reason)
+	} else {
+		err = h.cp.UncordonDpu(r.Context(), id, req.Reason)
+	}
+	if err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"accepted": true, "id": id, "cordoned": cordoned})
+}
+
+func (h *handler) listCordoned(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"dpus": h.cp.ListCordonedDpus(r.Context())})
+}
+
+// drainDpu (PC-G7) cordons the DPU then rehomes every ENI to a
+// least-loaded uncordoned destination. Body shape (JSON, all fields
+// optional):
+//
+//	{
+//	  "reason": "rolling reboot",
+//	  "parallelism": 4
+//	}
+//
+// Response is the operations.DrainResult envelope. Status code:
+//   200 — every ENI migrated; source is cordoned and empty
+//   207 — some ENIs failed to migrate; source remains cordoned for
+//         retry. Inspect result.failed[] for per-ENI reasons.
+func (h *handler) drainDpu(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, 400, errors.New("path: dpu id is required"))
+		return
+	}
+	var req struct {
+		Reason      string `json:"reason,omitempty"`
+		Parallelism int    `json:"parallelism,omitempty"`
+	}
+	if body, err := io.ReadAll(r.Body); err == nil && len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+			return
+		}
+	}
+	res, err := h.cp.DrainDpu(r.Context(), id, operations.DrainOpts{
+		Parallelism: req.Parallelism,
+		Reason:      req.Reason,
+	})
+	if err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	status := http.StatusOK
+	if len(res.Failed) > 0 {
+		status = http.StatusMultiStatus
+	}
+	writeJSON(w, status, res)
+}
+
+// registerDpu (PB-3) accepts a DpuRegistration body and forwards to the
+// service layer. Body shape (JSON):
+//
+//	{
+//	  "limits": { "max_enis": 100, ... },
+//	  "capabilities": { "ipv6": true, "service_tunnel": false, ... }
+//	}
+//
+// The {id} path parameter overrides any "id" in the body. At least one
+// of limits or capabilities must be set — empty bodies are rejected to
+// avoid silently clearing previously-advertised values.
+func (h *handler) registerDpu(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, 400, errors.New("path: dpu id is required"))
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if len(body) == 0 {
+		writeErr(w, 400, errors.New("empty body; expected {\"limits\":..., \"capabilities\":...}"))
+		return
+	}
+	var req service.DpuRegistration
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	req.ID = id
+	if err := h.cp.RegisterDpu(r.Context(), req); err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"accepted": true, "id": id})
+}
+
 func (h *handler) getInventory(w http.ResponseWriter, r *http.Request) {
 statuses, err := h.cp.GetInventory(r.Context())
 if err != nil {
@@ -410,6 +652,74 @@ return
 writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// --- SimulateApply (PB-2) ---
+
+func (h *handler) simulate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Ops []service.SimulateOp `json:"ops"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if len(body) == 0 {
+		writeErr(w, 400, errors.New("empty body; expected {\"ops\": [...]}"))
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+		return
+	}
+	res, err := h.cp.SimulateApply(r.Context(), req.Ops)
+	if err != nil {
+		handleServiceErr(w, err)
+		return
+	}
+	writeJSON(w, 200, res)
+}
+
+// --- ApplyBatch (PC-8) ---
+
+func (h *handler) applyBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Ops []service.BatchOp `json:"ops"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if len(body) == 0 {
+		writeErr(w, 400, errors.New("empty body; expected {\"ops\": [...]}"))
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeErr(w, 400, fmt.Errorf("parse body: %w", err))
+		return
+	}
+	res, batchErr := h.cp.ApplyBatch(r.Context(), req.Ops)
+	if res == nil {
+		// Shape-error from the service layer (e.g. unknown kind) —
+		// surface the standard service error path so it gets mapped
+		// to 400 / 412 / 429 as appropriate.
+		handleServiceErr(w, batchErr)
+		return
+	}
+	// Always return the full envelope. Status code:
+	//   200 — committed
+	//   207 (Multi-Status) — rolled back cleanly
+	//   500 — rolled back BUT some compensations failed (dirty)
+	status := http.StatusOK
+	if !res.Committed {
+		status = http.StatusMultiStatus
+		if len(res.CompFailures) > 0 {
+			status = http.StatusInternalServerError
+		}
+	}
+	writeJSON(w, status, res)
+}
+
 // --- Helpers ---
 
 func resolveKind(plural string) string {
@@ -443,6 +753,14 @@ return
 }
 if errors.Is(err, service.ErrInvalidArgument) {
 writeErr(w, 400, err)
+return
+}
+if errors.Is(err, service.ErrResourceExhausted) {
+writeErr(w, 429, err)
+return
+}
+if errors.Is(err, service.ErrFailedPrecondition) {
+writeErr(w, 412, err)
 return
 }
 // Unclassified errors are still 500, but log the underlying reason

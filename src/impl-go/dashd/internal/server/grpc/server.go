@@ -9,10 +9,13 @@ import (
 "log/slog"
 "net"
 
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 "google.golang.org/grpc"
 "google.golang.org/grpc/codes"
+"google.golang.org/grpc/credentials"
 "google.golang.org/grpc/reflection"
 "google.golang.org/grpc/status"
 )
@@ -22,26 +25,85 @@ type Server struct {
 gs   *grpc.Server
 cp   service.ControlPlaneService
 obs  service.ObservabilityService
+ha   service.HaService
+mig  service.MigrationService
 }
 
-// New creates a gRPC server wired to the shared service layer.
-func New(cp service.ControlPlaneService, obs service.ObservabilityService) *Server {
-gs := grpc.NewServer(
-grpc.ChainUnaryInterceptor(recoveryInterceptor, loggingInterceptor),
-)
+// Options bundles the PD-G1..G4 wiring the gRPC server cares about:
+// TLS server identity (cert/key for token/mtls modes; nil for plain),
+// the Authorizer that's installed in the interceptor chain, and the
+// audit writer that records every mutating call. All fields are
+// optional — zero-value Options matches the pre-PD plaintext + AllowAll
+// behaviour exactly.
+type Options struct {
+	// TLSConfig terminates the listener in TLS when non-nil.
+	// Production wires this from auth.ListenerConfig + the cert/key
+	// already loaded for the REST server.
+	TLSConfig credentials.TransportCredentials
 
-s := &Server{gs: gs, cp: cp, obs: obs}
+	// Authorizer is consulted by the auth interceptor. nil falls
+	// back to auth.AllowAllAuthorizer.
+	Authorizer auth.Authorizer
 
-// Register ControlPlane service.
-registerControlPlane(gs, cp)
+	// AuditWriter logs every mutating RPC. nil disables auditing.
+	AuditWriter *audit.Writer
+}
 
-// Register ObservabilityService.
-registerObservability(gs, obs)
+// New creates a gRPC server wired to the shared service layer. ha and
+// mig may be nil — in that case those RPCs return codes.Unimplemented
+// (legacy / pre-PC test wiring).
+//
+// Deprecated convenience constructor: prefer NewWithOptions in production.
+func New(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService) *Server {
+	return NewWithOptions(cp, obs, ha, mig, Options{})
+}
 
-// Enable gRPC server reflection for debugging tools like grpcurl.
-reflection.Register(gs)
+// NewWithOptions is the production constructor that accepts Options
+// for TLS termination + auth + audit. main.go calls this; tests
+// continue to use New() for the zero-options path.
+func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService, opts Options) *Server {
+	unaryChain := []grpc.UnaryServerInterceptor{recoveryInterceptor, loggingInterceptor}
+	streamChain := []grpc.StreamServerInterceptor{}
+	if opts.Authorizer != nil {
+		unaryChain = append(unaryChain, auth.NewUnaryServerInterceptor(opts.Authorizer))
+		streamChain = append(streamChain, auth.NewStreamServerInterceptor(opts.Authorizer))
+	}
+	if opts.AuditWriter != nil {
+		acfg := audit.InterceptorConfig{Writer: opts.AuditWriter, Roles: auth.DefaultRoleMap}
+		unaryChain = append(unaryChain, audit.UnaryInterceptor(acfg))
+		streamChain = append(streamChain, audit.StreamInterceptor(acfg))
+	}
 
-return s
+	srvOpts := []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(unaryChain...),
+	}
+	if len(streamChain) > 0 {
+		srvOpts = append(srvOpts, grpc.ChainStreamInterceptor(streamChain...))
+	}
+	if opts.TLSConfig != nil {
+		srvOpts = append(srvOpts, grpc.Creds(opts.TLSConfig))
+	}
+
+	gs := grpc.NewServer(srvOpts...)
+
+	s := &Server{gs: gs, cp: cp, obs: obs, ha: ha, mig: mig}
+
+	// Register ControlPlane service.
+	registerControlPlane(gs, cp)
+
+	// Register ObservabilityService.
+	registerObservability(gs, obs)
+
+	// Register HaService (PC-G1..G3).
+	registerHa(gs, ha)
+
+	// Register MigrationService (PC-G4..G6).
+	registerMigration(gs, mig)
+
+	// Enable gRPC server reflection for debugging tools like grpcurl.
+	reflection.Register(gs)
+
+	return s
 }
 
 // Serve starts the gRPC server on the given address.
@@ -94,6 +156,12 @@ return status.Errorf(codes.FailedPrecondition, "generation mismatch")
 }
 if errors.Is(err, service.ErrInvalidArgument) {
 return status.Errorf(codes.InvalidArgument, "%v", err)
+}
+if errors.Is(err, service.ErrResourceExhausted) {
+return status.Errorf(codes.ResourceExhausted, "%v", err)
+}
+if errors.Is(err, service.ErrFailedPrecondition) {
+return status.Errorf(codes.FailedPrecondition, "%v", err)
 }
 return status.Errorf(codes.Internal, "internal error")
 }
