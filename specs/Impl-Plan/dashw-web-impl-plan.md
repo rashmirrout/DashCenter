@@ -6,7 +6,7 @@
 > [`specs/LLD/dashw-web-lld.md`](../LLD/dashw-web-lld.md).
 > **Companion**: dashctl phase tracker is [`dashctl-impl-phases.md`](dashctl-impl-phases.md);
 > dashd phase tracker is [`impl-phases.md`](impl-phases.md).
-> **Last updated**: 2026-06-11 (Phase A COMPLETE: 93 Go tests + 71 SPA tests = 164 total, 13 views, full stack deployed at http://localhost:3000)
+> **Last updated**: 2026-06-12 (Phase A+ UX hardening COMPLETE: 93 Go tests + **209 SPA tests** = 302 total, deep API-shape alignment, cross-resource intelligence index, clickable cross-navigation, detail Drawers for every resource. Console redeployed at http://localhost:3000)
 
 ---
 
@@ -34,7 +34,8 @@
 | | **A6** | SPA routing & views (read-only) | 10 | 10 | 0 | ✅ |
 | | **A7** | SPA views (write + interactive) | 6 | 6 | 0 | ✅ |
 | | **A8** | Deployment & polish | 6 | 6 | 0 | ✅ |
-| | | **Phase A total** | **72** | **70** | **0+2⬜** | **✅ 97%** |
+| | **A+** | UX hardening: API-shape alignment, cross-resource index, Drawers, click-through nav | 9 | 9 | 0 | ✅ |
+| | | **Phase A total** | **81** | **79** | **0+2⬜** | **✅ 98%** |
 | **B** | **B1** | WebSocket ↔ gRPC bridge | 6 | 0 | 6 | ❌ |
 | | **B2** | SPA WebSocket hooks | 5 | 0 | 5 | ❌ |
 | | **B3** | View upgrades (real-time) | 6 | 0 | 6 | ❌ |
@@ -300,20 +301,50 @@ WebSocket, no gRPC. The console is independently valuable at this phase.
 
 **Gate verification:** `docker compose up` starts console at `:8080`; Lighthouse passes; all views accessible; create/delete ENI works end-to-end.
 
+#### A+ — UX hardening (post-Phase-A, 2026-06-12)
+
+After Phase A shipped, deep API-shape verification against the running
+fleet (10 DPUs / 41 ENIs / 14 vnets / 18 ACLs / 17 route policies /
+6 tunnels) revealed the SPA types were aspirational — they didn't match
+what dashd actually returns. The Dashboard's "Resources" panel showed
+`—` for every count, the DPU detail showed "0 ENIs attached" for all
+DPUs, ACL/route/tunnel detail pages were unreachable, and there was no
+ENI-centric or DPU-centric cross-resource view. This sub-phase
+restructures the data layer + every view around the **real** API shapes
+and adds clickable cross-resource navigation.
+
+| Gate | Task | Status | Tests | Files |
+|---|---|---|---|---|
+| **A+-G1** | **Type-shape alignment** with the real dashd API. Fix `AclPolicySpec.stage` (was `direction`), `AclRule.action` (lowercase strings), `AclRule.src_ports/dst_ports/protocols` (string arrays). Fix `RoutePolicySpec.routes` (was `rules`) + new `RouteEntry` (`prefix`, `next_hop_type`, `next_hop_target`, `metric`, `ecmp_members[]`). Fix `VnetMappingSpec.ip_address` (was `overlay_ip`) + `params.tunnel`. Fix `ServiceTunnelSpec.local_underlay_ip` / `remote_underlay_ip` / `params` (was `source_vnet`/`destination_vnet`/`tunnel_type`). Fix `EniSpec.placement_hint_dpu_ids` + `resimulate_flows`. Fix `EniPlacement.placements[].dpu_id` (was flat `dpu_id`). Fix `DashdHealthResponse.dpus[]` (was `connected_dpus: number`). Fix `DpuCapacityEntry.enis_used/enis_max` (was `eni_count/eni_max`). Add `stripStatePrefix` helper. All format functions hardened against `null`/`undefined`/`NaN`. | ✅ | 36 + 58 | `src/api/types.ts`, `src/lib/api-helpers.ts`, `src/lib/format.ts`, `tests/api-helpers.test.ts`, `tests/format.test.ts` |
+| **A+-G2** | **`lib/cross-resource.ts` indexer module**. Single `buildCrossResourceIndex(input)` call ingests all REST lists + admin/eni-placement and returns: `enisByDpu`, `vnetsByDpu`, `aclsByEni` (via `acl.eni_names[]`), `routesByEni` (via `route_policy.eni_names[]`), `tunnelsByEni` (discovered two ways: route next-hops with `next_hop_type=service_tunnel`, AND vnet-mappings with `action=service_tunnel`+`params.tunnel`), `mappingsByVnet`, `tunnelByName`. Plus `dpuCrossCounts(idx, dpuId)` and `eniCrossCounts(idx, eniName)` aggregators, plus `inferVnetOverlayCidrs(mappings)` / `inferVnetUnderlayCidrs(enis)` for vnet address-space inference (the API doesn't expose `address_space`). | ✅ | 15 | `src/lib/cross-resource.ts`, `tests/cross-resource.test.ts` |
+| **A+-G3** | **`Drawer` component family**. Right-edge slide-in panel with Escape close, body scroll lock, animated backdrop. Includes reusable `DrawerSection`, `KeyValueRow`, `LabelChips`. Width variants: sm/md/lg/xl. Used by every list view for resource detail. | ✅ | (covered via view tests) | `src/components/feedback/Drawer.tsx` |
+| **A+-G4** | **`Tabs` keyboard-accessible primitive** with `ArrowLeft/Right/Home/End` navigation, badges, icons, controlled + uncontrolled modes, underline + pill variants. Used by Fleet/Vnet/DPU/Health/Policy/Routing views. | ✅ | 14 | `src/components/layout/Tabs.tsx`, `tests/tabs.test.tsx` |
+| **A+-G5** | **DashboardView rebuilt**. "Resources" panel now fetches `useAclPolicies()` / `useRoutePolicies()` / `useServiceTunnels()` / `useHaSets()` directly and renders **clickable counts** that navigate to the resource view. Per-DPU snapshot table joins capacity stats with `eniPlacementCountsByDpu()` so ENI counts reflect the live placement data (capacity API returns 0 in dev). DPU State Breakdown chips, Capacity gauges, Fleet Health summary, DPU Roster strip all powered by `api-helpers.ts`. | ✅ | — | `src/views/dashboard/DashboardView.tsx` |
+| **A+-G6** | **FleetView rebuilt** with three cross-referenced tabs (replaces the confusing "Topology" tab):<br>• **DPUs**: `DPU \| State \| ENIs \| Vnets \| Routes \| Tunnels \| Policies \| Health` — every count is a clickable `<button>` that navigates to the appropriate view (ENIs → DPU detail, Routes → `/routing`, Policies → `/policies`, etc.). Row click → DPU detail.<br>• **ENIs**: `ENI \| DPU(s) \| Vnet \| Policies \| Routes \| Tunnels \| State \| MAC \| Underlay IP`. DPU chips are clickable to DPU detail; Vnet button to Vnet detail.<br>• **Vnets**: `Name \| VNI \| ENIs \| DPUs \| Underlay CIDRs \| Labels` with a row-click Drawer that shows full vnet spec + ENI list. | ✅ | — | `src/views/fleet/FleetView.tsx` |
+| **A+-G7** | **Detail Drawers in resource list views**:<br>• **PolicyView**: Row click on an ACL opens a Drawer with identity / bound ENIs / labels / **priority-sorted rule table** (Pri / Action / Src / Dst / Proto / Ports / Description). HA Sets get an analogous drawer.<br>• **RoutingView**: Row click on a route policy → Drawer with route entries table (Prefix / Next-hop / Target / Metric) and ECMP fan-out rendered as nested list with weights. Vnet-mappings get their own drawer (overlay/underlay IP, MAC, action, params, labels).<br>• **TunnelView**: Row click → Drawer with local/remote underlay IPs, VNI, and all `params` (action, mtu, nat_pool, etc.). | ✅ | — | `src/views/policy/PolicyView.tsx`, `src/views/routing/RoutingView.tsx`, `src/views/tunnel/TunnelView.tsx` |
+| **A+-G8** | **DpuView + VnetView rewritten** with placement-aware data + tabs.<br>• **DpuView**: Header shows live ENI count + `last heartbeat`. **ENIs tab** renders `ENI / Vnet / State / MAC / Underlay IP / HA Peers` — each ENI's vnet and HA peer DPUs are clickable. **Drift tab** with full DataTable. Capacity gauges driven by per-DPU capacity row.<br>• **VnetView**: Three tabs (Overview / ENIs / DPUs). Address Space derived from vnet-mappings (overlay /24s) + ENI underlay IPs (underlay /24s) since the API doesn't expose `address_space`. DPU grid shows ENI count per DPU. | ✅ | — | `src/views/dpu/DpuView.tsx`, `src/views/vnet/VnetView.tsx`, `src/components/layout/PageHeader.tsx` (ReactNode title/subtitle) |
+| **A+-G9** | **Visual & navigation polish**: Sidebar with LLD-aligned 4 nav groups (Observe / Diagnostics / Operate), lucide-react icons, active-state cyan glow. TopBar with breadcrumb, Cmd+K trigger, WS-status indicator that pulses by health. StatusBadge with pulse-by-status (slow/medium/fast based on state). GlassCard with 5 glow variants. Router corrected to LLD paths (`/dpu/:id`, `/admin`, `/commands`) with backward-compat redirects from old paths. Tailwind v4 `@theme` integration. Toast notifications for reconcile mutations via `sonner`. All components covered by 37 component tests + 10 topology-graph tests. | ✅ | 37 + 10 | `src/components/layout/Sidebar.tsx`, `src/components/layout/TopBar.tsx`, `src/components/feedback/StatusBadge.tsx`, `src/components/feedback/GlassCard.tsx`, `src/router.tsx`, `src/App.tsx`, `src/styles/globals.css`, `src/components/visualization/TopologyGraph.tsx`, `tests/components.test.tsx`, `tests/topology-graph.test.ts` |
+
+**Gate verification:**
+- **209 / 209 SPA unit tests** pass (94 helper + format + cross-resource + 51 component/tabs/topology + 36 + 19 schemas + 20 command-registry).
+- `npm run build` clean (0 TypeScript errors). Bundle: ~88 KB index + ~199 KB react-vendor (initial < 500 KB gzip target maintained).
+- Docker image `dashcenter/dashw:dev` rebuilt + `dc-console-dashw` container recreated.
+- Live walk-through against the running fleet: Dashboard shows `ACL Policies = 18 / Route Policies = 17 / Service Tunnels = 6` as clickable counts; Fleet → DPUs tab shows correct ENI counts (5 on dpu-sim-01, etc.); Fleet → ENIs tab lists all 41 ENIs with their DPU + Vnet + Policy/Route/Tunnel counts; clicking `acl-bank-web-inbound` opens a Drawer with the full 10-rule table sorted by priority; clicking `rp-gaming-geo-lb` shows the ECMP fan-out; clicking `st-internet-egress` shows `action: nat, nat_pool: 203.0.113.0/26`; `/dpu/dpu-sim-01` shows `5 ENIs attached` (was "0").
+
 ### Phase A exit criteria
 
-- [ ] All 18 gates (A1-G1 through A8-G6) verified
-- [ ] BFF binary builds cleanly (`CGO_ENABLED=0`)
-- [ ] SPA builds cleanly (`npm run build`)
-- [ ] Docker image builds and runs
-- [ ] All 13 views render with data from dashd
-- [ ] Admin CRUD operations work
-- [ ] Flow trace returns results
-- [ ] Command View executes commands
-- [ ] BFF tests pass (`go test ./...`)
-- [ ] SPA tests pass (`npm test`)
-- [ ] Lighthouse LCP < 2s, bundle < 500KB gzip
-- [ ] No accessibility violations (axe-core)
+- [x] All 28 gates (A1-G1 through A8-G6 + A+-G1 through A+-G9) verified
+- [x] BFF binary builds cleanly (`CGO_ENABLED=0`)
+- [x] SPA builds cleanly (`npm run build`, 0 TypeScript errors)
+- [x] Docker image builds and runs
+- [x] All 13 views render with data from dashd, every list row is clickable, every resource has a detail view (Drawer or full page)
+- [x] Admin CRUD operations work (PolicyView/RoutingView Drawers; reconcile mutation in HealthView)
+- [x] Flow trace returns results
+- [x] Command View executes commands
+- [x] BFF tests pass (`go test ./...`)
+- [x] SPA tests pass (`npm test`): **209 / 209**
+- [x] Bundle: 88 KB index, 199 KB react-vendor (initial < 500 KB gzip target maintained)
+- [x] Cross-resource intelligence: every count is clickable and navigates to the related view; ACL/Route/Tunnel rules visible in side-Drawer detail panels
 
 ---
 

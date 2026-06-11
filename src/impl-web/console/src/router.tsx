@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import App from './App';
 import { ErrorBoundary } from '@/components/feedback/ErrorBoundary';
 
@@ -19,13 +19,15 @@ const CommandView = lazy(() => import('./views/command/CommandView'));
 const DebugView = lazy(() => import('./views/debug/DebugView'));
 
 /* ── Loading fallback + error boundary ─────────────────────── */
-function ViewLoader({ children, name }: { children: React.ReactNode; name?: string }) {
+function ViewLoader({ children, name }: { children: ReactNode; name?: string }) {
   return (
     <ErrorBoundary viewName={name}>
       <Suspense
         fallback={
           <div className="flex items-center justify-center h-64">
-            <div className="text-text-secondary animate-pulse">Loading view...</div>
+            <div className="text-[color:var(--text-secondary)] animate-pulse">
+              Loading view…
+            </div>
           </div>
         }
       >
@@ -35,7 +37,23 @@ function ViewLoader({ children, name }: { children: React.ReactNode; name?: stri
   );
 }
 
-/* ── Route table ───────────────────────────────────────────── */
+/* ── Route table (LLD §5) ──────────────────────────────────── */
+/**
+ * Routes per spec:
+ *   /dashboard           → DashboardView
+ *   /fleet               → FleetView
+ *   /dpu/:dpuId          → DpuView          (NOT /fleet/dpu/:dpuId)
+ *   /vnet/:vnetName      → VnetView         (singular)
+ *   /routing             → RoutingView
+ *   /tunnels             → TunnelView
+ *   /policies            → PolicyView
+ *   /flow-trace          → FlowTraceView
+ *   /audit               → AuditView
+ *   /health              → HealthView
+ *   /admin               → AdminOpsView     (NOT /admin-ops)
+ *   /commands            → CommandView      (plural)
+ *   /debug               → DebugView
+ */
 export const router = createBrowserRouter([
   {
     path: '/',
@@ -44,18 +62,25 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <ViewLoader name="Dashboard"><DashboardView /></ViewLoader> },
       { path: 'fleet', element: <ViewLoader name="Fleet"><FleetView /></ViewLoader> },
-      { path: 'fleet/dpu/:dpuId', element: <ViewLoader name="DPU Detail"><DpuView /></ViewLoader> },
-      { path: 'vnets', element: <ViewLoader name="Vnets"><VnetView /></ViewLoader> },
-      { path: 'vnets/:vnetName', element: <ViewLoader name="Vnet Detail"><VnetView /></ViewLoader> },
+      { path: 'dpu/:dpuId', element: <ViewLoader name="DPU Detail"><DpuView /></ViewLoader> },
+      { path: 'vnet/:vnetName', element: <ViewLoader name="Vnet Detail"><VnetView /></ViewLoader> },
       { path: 'routing', element: <ViewLoader name="Routing"><RoutingView /></ViewLoader> },
       { path: 'tunnels', element: <ViewLoader name="Tunnels"><TunnelView /></ViewLoader> },
       { path: 'policies', element: <ViewLoader name="Policies"><PolicyView /></ViewLoader> },
-      { path: 'health', element: <ViewLoader name="Health"><HealthView /></ViewLoader> },
-      { path: 'audit', element: <ViewLoader name="Audit"><AuditView /></ViewLoader> },
-      { path: 'admin-ops', element: <ViewLoader name="Admin Ops"><AdminOpsView /></ViewLoader> },
       { path: 'flow-trace', element: <ViewLoader name="Flow Trace"><FlowTraceView /></ViewLoader> },
-      { path: 'command', element: <ViewLoader name="Command"><CommandView /></ViewLoader> },
+      { path: 'audit', element: <ViewLoader name="Audit"><AuditView /></ViewLoader> },
+      { path: 'health', element: <ViewLoader name="Health"><HealthView /></ViewLoader> },
+      { path: 'admin', element: <ViewLoader name="Admin Ops"><AdminOpsView /></ViewLoader> },
+      { path: 'commands', element: <ViewLoader name="Commands"><CommandView /></ViewLoader> },
       { path: 'debug', element: <ViewLoader name="Debug"><DebugView /></ViewLoader> },
+      /* Backward-compat redirects from old paths */
+      { path: 'fleet/dpu/:dpuId', element: <Navigate to="/dpu/__redir__" replace /> },
+      { path: 'vnets', element: <Navigate to="/fleet" replace /> },
+      { path: 'vnets/:vnetName', element: <Navigate to="/vnet/__redir__" replace /> },
+      { path: 'admin-ops', element: <Navigate to="/admin" replace /> },
+      { path: 'command', element: <Navigate to="/commands" replace /> },
+      /* 404 fallback */
+      { path: '*', element: <Navigate to="/dashboard" replace /> },
     ],
   },
 ]);

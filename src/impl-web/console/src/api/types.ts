@@ -43,6 +43,11 @@ export interface EniSpec {
   mac_address: string;
   underlay_ip: string;
   admin_state?: string;
+  /** dashd uses `placement_hint_dpu_ids: []`. */
+  placement_hint_dpu_ids?: string[];
+  resimulate_flows?: boolean;
+  labels?: Record<string, string>;
+  /** Legacy fields. */
   dpu_id?: string;
   primary_ip?: string;
   secondary_ips?: string[];
@@ -52,11 +57,19 @@ export interface EniSpec {
 
 export interface AclRule {
   priority: number;
-  action: 'ALLOW' | 'DENY';
-  direction: 'IN' | 'OUT';
-  protocol?: number;
+  /** dashd uses lowercase action strings: `allow`, `deny`, `allow_and_continue`. */
+  action: string;
+  description?: string;
   src_prefixes?: string[];
   dst_prefixes?: string[];
+  /** dashd returns port strings like `"443"` or `"7777-7800"`. */
+  src_ports?: string[];
+  dst_ports?: string[];
+  /** Protocol names (`tcp`, `udp`, `icmp`) or numeric strings (`"6"`, `"17"`). */
+  protocols?: string[];
+  /** Legacy fields retained for compatibility. */
+  direction?: "IN" | "OUT";
+  protocol?: number;
   src_port_range?: PortRange;
   dst_port_range?: PortRange;
   terminating?: boolean;
@@ -69,26 +82,46 @@ export interface PortRange {
 
 export interface AclPolicySpec {
   metadata: ObjectMeta;
+  /** dashd uses `stage: "inbound" | "outbound"`. */
+  stage?: "inbound" | "outbound";
   eni_names: string[];
-  default_action: 'ALLOW' | 'DENY';
   rules: AclRule[];
+  labels?: Record<string, string>;
+  /** Legacy: not present in current API. */
+  default_action?: "ALLOW" | "DENY";
 }
 
 /* ── Route Policy ──────────────────────────────────────────── */
 
-export interface RoutePolicyRule {
-  priority: number;
-  action: 'PERMIT' | 'DENY';
-  prefixes?: string[];
-  community?: string[];
-  as_path_regex?: string;
+export interface RouteEcmpMember {
+  next_hop_type: string;
+  next_hop_target?: string;
+  weight?: number;
 }
+
+export interface RouteEntry {
+  prefix: string;
+  /** `vnet`, `service_tunnel`, `drop`, etc. */
+  next_hop_type?: string;
+  /** Name of the target vnet/tunnel. */
+  next_hop_target?: string;
+  metric?: number;
+  /** When set, the route fans out across these next-hops. */
+  ecmp_members?: RouteEcmpMember[];
+}
+
+/** Legacy alias retained for compatibility. */
+export type RoutePolicyRule = RouteEntry;
 
 export interface RoutePolicySpec {
   metadata: ObjectMeta;
   eni_names: string[];
-  direction: 'IN' | 'OUT';
-  rules: RoutePolicyRule[];
+  /** dashd uses `routes` (not `rules`). */
+  routes?: RouteEntry[];
+  labels?: Record<string, string>;
+  /** Legacy fields. */
+  direction?: "IN" | "OUT";
+  rules?: RouteEntry[];
 }
 
 /* ── Vnet Mapping ──────────────────────────────────────────── */
@@ -96,19 +129,33 @@ export interface RoutePolicySpec {
 export interface VnetMappingSpec {
   metadata: ObjectMeta;
   vnet_name: string;
-  overlay_ip: string;
+  /** dashd uses `ip_address`; legacy alias `overlay_ip` retained. */
+  ip_address?: string;
+  overlay_ip?: string;
   underlay_ip: string;
   mac_address: string;
+  /** `vnet_encap`, `service_tunnel`, etc. */
   action?: string;
+  /** `params.tunnel` when action == `service_tunnel`. */
+  params?: Record<string, string>;
+  labels?: Record<string, string>;
 }
 
 /* ── Service Tunnel ────────────────────────────────────────── */
 
 export interface ServiceTunnelSpec {
   metadata: ObjectMeta;
-  source_vnet: string;
-  destination_vnet: string;
-  tunnel_type: string;
+  /** dashd shape. */
+  local_underlay_ip?: string;
+  remote_underlay_ip?: string;
+  vni?: number;
+  /** `action`, `mtu`, `nat_pool`, etc. */
+  params?: Record<string, string>;
+  labels?: Record<string, string>;
+  /** Legacy fields retained for compatibility. */
+  source_vnet?: string;
+  destination_vnet?: string;
+  tunnel_type?: string;
   encap_type?: string;
   bidirectional?: boolean;
 }
@@ -179,8 +226,11 @@ export interface DashdHealthResponse {
   leader_id?: string;
   member_id?: string;
   cluster_size?: number;
-  connected_dpus: number;
-  uptime_seconds: number;
+  /** dashd /admin/health returns the dpus array (not a count). */
+  dpus?: Array<{ id: string; state: string; last_seen?: string }>;
+  /** Optional aggregate-style fields (BFF may add these). */
+  connected_dpus?: number;
+  uptime_seconds?: number;
   version?: string;
 }
 
@@ -208,11 +258,23 @@ export interface DpuHealthEntry {
   address?: string;
 }
 
-export interface EniPlacement {
-  eni_name: string;
-  vnet_name: string;
+export interface EniPlacementSlot {
   dpu_id: string;
-  underlay_ip: string;
+  observed?: boolean;
+}
+
+export interface EniPlacement {
+  /** Actual API uses `name`; legacy alias `eni_name` retained. */
+  name?: string;
+  eni_name?: string;
+  vnet_name?: string;
+  mac_address?: string;
+  underlay_ip?: string;
+  admin_state?: string;
+  /** Modern field: an ENI may be present on multiple DPUs (HA). */
+  placements?: EniPlacementSlot[];
+  /** Legacy single-DPU placement. */
+  dpu_id?: string;
 }
 
 /* ── BFF Aggregation types ─────────────────────────────────── */
@@ -363,20 +425,36 @@ export interface CapacityStats {
 }
 
 export interface DpuCapacityEntry {
-  dpu_id: string;
-  state: DpuState;
-  eni_count: number;
-  eni_max: number;
-  route_count: number;
-  route_max: number;
-  acl_rule_count: number;
-  acl_rule_max: number;
-  flow_count: number;
-  flow_max: number;
-  pps_current: number;
-  pps_max: number;
-  bps_current: number;
-  bps_max: number;
+  /** Actual API uses `id`; legacy alias `dpu_id` retained for compatibility. */
+  id?: string;
+  dpu_id?: string;
+  state: DpuState | string;
+  /** Actual API fields (snake_case used/max/pct). */
+  enis_used?: number;
+  enis_max?: number;
+  enis_pct?: number;
+  routes_used?: number;
+  routes_max?: number;
+  routes_pct?: number;
+  acl_rules_used?: number;
+  acl_rules_max?: number;
+  acl_rules_pct?: number;
+  flows_used?: number;
+  flows_max?: number;
+  flows_pct?: number;
+  /** Legacy field names (BFF aggregation may use these). */
+  eni_count?: number;
+  eni_max?: number;
+  route_count?: number;
+  route_max?: number;
+  acl_rule_count?: number;
+  acl_rule_max?: number;
+  flow_count?: number;
+  flow_max?: number;
+  pps_current?: number;
+  pps_max?: number;
+  bps_current?: number;
+  bps_max?: number;
 }
 
 /* ── Counter Report (Phase B — stubbed types for Phase A) ── */
