@@ -824,7 +824,89 @@ Access: `http://localhost:8080`
 
 ---
 
-## 14. Observability
+## 14. Scalability & resilience
+
+### 14.1 Load model
+
+dashw's BFF is read-heavy: operators poll dashboard/fleet/DPU views
+every 5–30s. Aggregation endpoints fan out to 4–6 dashd calls each.
+Without mitigation, N concurrent operators = N×fan-out dashd calls per
+refresh cycle — linear amplification.
+
+**Design target:** dashd load is **constant O(1)** regardless of user
+count. Achieved via in-process TTL cache + singleflight.
+
+### 14.2 In-process TTL cache
+
+| Property | Value |
+|---|---|
+| **Type** | In-process `sync.RWMutex` + `map[string]*CacheEntry` |
+| **Dependencies** | Zero (stdlib only) |
+| **Memory** | ~50 entries × 10KB = 500KB |
+| **TTL (fast-poll)** | 5s (fleet/summary, dpu/detail, capacity) |
+| **TTL (slow-poll)** | 30s (topology, vnet/canvas, dependencies) |
+| **Stale window** | 30s beyond TTL (stale-while-revalidate) |
+| **Invalidation** | Mutation-aware: BFF proxy intercepts successful PUT/POST/DELETE, flushes affected cache keys |
+| **Response headers** | `X-Cache: hit|miss|stale`, `X-Cache-Age: Ns` |
+
+**Impact:** 100 operators polling fleet/summary every 10s → 1 dashd
+call per 5s (cache hit rate 99%+). Single operator experience unchanged.
+
+### 14.3 WebSocket fan-out hub
+
+Each WS stream type (dpu-status, events, flows, counters, audit, etc.)
+is backed by a **shared gRPC stream** per BFF instance. The
+`StreamHub` multiplexes one gRPC stream → N WebSocket clients:
+
+- First subscriber triggers gRPC stream open
+- All subsequent subscribers receive the same data
+- Last subscriber disconnects → gRPC stream closed (ref-counted)
+- Parameterized streams (e.g., `/ws/flows/dpu-1`) use key `"flows:dpu-1"`
+
+**Impact:** 100 operators watching DPU status → 1 gRPC stream (not 100).
+
+### 14.4 Fault tolerance
+
+| Mechanism | Purpose |
+|---|---|
+| **Stale-while-revalidate** | On dashd unavailability, return last-known cached data + `X-Cache: stale` header. SPA shows staleness warning instead of blank page. |
+| **Circuit breaker** | After 5 failures in 30s, stop calling dashd for 30s. Serve stale cache. Prevents thundering herd on recovery. |
+| **Graceful shutdown** | SIGTERM → stop accepting connections → WS close frames → cancel gRPC contexts → drain in-flight requests (15s) → exit. |
+| **WS auto-reconnect** | Hub reconnects gRPC streams with exponential backoff. WS clients receive error frames during gap. |
+
+### 14.5 Health probes
+
+| Endpoint | Type | Checks |
+|---|---|---|
+| `GET /healthz` | Liveness | Process alive, not deadlocked |
+| `GET /readyz` | Readiness | dashd REST reachable + ≥1 cache entry populated |
+
+### 14.6 Rate limiting
+
+| Scope | Limit | Mechanism |
+|---|---|---|
+| Reads | None (cache handles load) | — |
+| Writes (per IP) | 10/s, 100/min | Token bucket (`golang.org/x/time/rate`) |
+| Batch size | 50 objects/request | Request validation |
+
+### 14.7 Horizontal scaling
+
+Single BFF instance: 50–100 concurrent users, ~300 WS connections,
+~100MB memory. Scale horizontally with IP-hash load balancer for WS
+stickiness. Each instance has independent in-process cache.
+
+**Redis upgrade path:** When >3 replicas needed, add Redis as shared
+cache to eliminate redundant cross-instance dashd calls. No code
+changes needed beyond swapping the cache backend.
+
+> **Deep analysis:** See
+> [`specs/HLD/dashw-web-scale-design-req-analysis.md`](dashw-web-scale-design-req-analysis.md)
+> for the full load model, caching options comparison, fan-out hub
+> design, and production readiness analysis.
+
+---
+
+## 15. Observability
 
 | Layer | Mechanism |
 |---|---|

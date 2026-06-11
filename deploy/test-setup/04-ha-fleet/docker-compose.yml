@@ -1,0 +1,130 @@
+# 04-ha-fleet: full HA fleet — 1 etcd + 5 dash-sim DPUs + 3 dashd controllers.
+#
+# Quick start:
+#   pwsh ./start-fleet.ps1                          # Windows
+#   ./start-fleet.sh                                # Linux / macOS / WSL
+#
+# Manual:
+#   docker compose up -d etcd dash-sim-1 dash-sim-2 dash-sim-3 dash-sim-4 dash-sim-5 dashd-1 dashd-2 dashd-3
+#   docker compose ps
+#
+# Drive from host (dashctl binary on PATH):
+#   dashctl --endpoint http://localhost:28443 version
+#   dashctl --endpoint http://localhost:28443 apply -f ./manifest
+#
+# Drive from one-shot container (no host binary needed):
+#   docker compose run --rm dashctl --endpoint http://dashd-1:8443 --insecure version
+#
+# Port map (host:container):
+#   etcd      :12379 → :2379         (etcd client)
+#   dashd-1   :28443 → :8443 (REST), :27443 → :7443 (admin), :29443 → :9443 (gRPC)
+#   dashd-2   :28453 → :8443 (REST), :27453 → :7443 (admin), :29453 → :9443 (gRPC)
+#   dashd-3   :28463 → :8443 (REST), :27463 → :7443 (admin), :29463 → :9443 (gRPC)
+#   dash-sim  no host ports — internal-only on the compose network
+#
+# Cleanup:
+#   pwsh ./stop-fleet.ps1                           # Windows
+#   ./stop-fleet.sh                                 # Linux / macOS / WSL
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: dc-ha-etcd
+    networks: [ha-fleet]
+    command:
+      - etcd
+      - --name=fleet
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=fleet=http://etcd:2380
+      - --initial-cluster-token=ha-fleet-token
+      - --initial-cluster-state=new
+    ports:
+      - "127.0.0.1:12379:2379"
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # ---- 5 dash-sim DPUs ----
+  dash-sim-1: &simbase
+    image: dashcenter/dash-sim:dev
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dash-sim/Dockerfile
+    container_name: dc-ha-sim-1
+    networks: [ha-fleet]
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-01"]
+  dash-sim-2:
+    <<: *simbase
+    container_name: dc-ha-sim-2
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-02"]
+  dash-sim-3:
+    <<: *simbase
+    container_name: dc-ha-sim-3
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-03"]
+  dash-sim-4:
+    <<: *simbase
+    container_name: dc-ha-sim-4
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-04"]
+  dash-sim-5:
+    <<: *simbase
+    container_name: dc-ha-sim-5
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-05"]
+
+  # ---- 3 dashd controllers (etcd-elected HA) ----
+  dashd-1: &dashdbase
+    image: dashcenter/dashd:dev
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dashd/Dockerfile
+    container_name: dc-ha-dashd-1
+    networks: [ha-fleet]
+    depends_on:
+      etcd: { condition: service_healthy }
+    volumes:
+      - ./dashd-1.yaml:/etc/dashd/dashd.yaml:ro
+      - ./inventory.yaml:/etc/dashd/inventory.yaml:ro
+    ports:
+      - "127.0.0.1:28443:8443"
+      - "127.0.0.1:27443:7443"
+      - "127.0.0.1:29443:9443"
+  dashd-2:
+    <<: *dashdbase
+    container_name: dc-ha-dashd-2
+    volumes:
+      - ./dashd-2.yaml:/etc/dashd/dashd.yaml:ro
+      - ./inventory.yaml:/etc/dashd/inventory.yaml:ro
+    ports:
+      - "127.0.0.1:28453:8443"
+      - "127.0.0.1:27453:7443"
+      - "127.0.0.1:29453:9443"
+  dashd-3:
+    <<: *dashdbase
+    container_name: dc-ha-dashd-3
+    volumes:
+      - ./dashd-3.yaml:/etc/dashd/dashd.yaml:ro
+      - ./inventory.yaml:/etc/dashd/inventory.yaml:ro
+    ports:
+      - "127.0.0.1:28463:8443"
+      - "127.0.0.1:27463:7443"
+      - "127.0.0.1:29463:9443"
+
+  # ---- One-shot dashctl container ----
+  # Usage:
+  #   docker compose run --rm dashctl --endpoint http://dashd-1:8443 --insecure version
+  dashctl:
+    image: dashcenter/dashctl:dev
+    build:
+      context: ../../..
+      dockerfile: src/impl-go/dashctl/Dockerfile
+    profiles: [cli]
+    networks: [ha-fleet]
+    entrypoint: ["/usr/local/bin/dashctl"]
+
+networks:
+  ha-fleet:
+    name: dashcenter-ha-fleet

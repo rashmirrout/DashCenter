@@ -12,11 +12,12 @@ topology uses it.
 > topology, where it sits in the tutorial sequence). The current page
 > is the operator reference; the tutorial is the learning path.
 
-| #  | Topology                                                          | When to use                                              |
-|----|-------------------------------------------------------------------|----------------------------------------------------------|
-| 01 | [Host, multi-port](01-host-multi-port/README.md) — native procs   | Fastest dev loop — you just ran `go build`.              |
-| 02 | [Single docker](02-single-docker/README.md) — one DPU container   | Validating the container image before promoting it.      |
-| 03 | [Multi-docker fleet](03-multi-docker-fleet/README.md) — compose   | Multi-DPU integration tests, CI, demo days.              |
+| #  | Topology                                                          | When to use                                                                              |
+|----|-------------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| 01 | [Host, multi-port](01-host-multi-port/README.md) — native procs   | Fastest dev loop — you just ran `go build`.                                              |
+| 02 | [Single docker](02-single-docker/README.md) — one DPU container   | Validating the container image before promoting it.                                      |
+| 03 | [Multi-docker fleet](03-multi-docker-fleet/README.md) — compose   | Multi-DPU integration tests against a single `dashd`.                                    |
+| 04 | [HA fleet](04-ha-fleet/README.md) — compose + etcd + 3× dashd     | HA + failover demos, multi-controller integration, CI, the [HA tutorial](../../docs/tutorial/10-ha-and-migration-handson.md). |
 
 > **First time?** Each topology has a **hands-on, step-by-step guide**
 > with every command, expected log, and clean-up rescue path —
@@ -25,6 +26,7 @@ topology uses it.
 > - [01-host-multi-port/manual-handson.md](01-host-multi-port/manual-handson.md)
 > - [02-single-docker/manual-handson.md](02-single-docker/manual-handson.md)
 > - [03-multi-docker-fleet/manual-handson.md](03-multi-docker-fleet/manual-handson.md)
+> - [04-ha-fleet/manual-handson.md](04-ha-fleet/manual-handson.md)
 
 
 ## How the pieces fit together

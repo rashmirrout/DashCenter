@@ -808,6 +808,779 @@ All are tree-shakeable and add < 50KB gzipped combined.
 
 ---
 
+## 8. Existing View Enhancements — Making Every View Eye-Catching
+
+The 13 Phase A views are functionally correct but visually standard.
+These enhancements transform each from a "management console" into a
+**visual experience** — using animation, spatial encoding, progressive
+disclosure, and real-time data storytelling.
+
+---
+
+### 8.1 Dashboard — Fleet Heartbeat
+
+**Current:** Static cards, gauges, event list.
+**Enhanced:** A living, breathing fleet visualization.
+
+#### 8.1.1 Fleet Heartbeat Ring
+
+Replace the health donut with a **heartbeat ring** — a circular
+visualization where each DPU is a segment of the ring:
+
+```
+         ┌───────────────────┐
+         │    FLEET PULSE    │
+         │                   │
+         │    ╭──╮ ╭──╮     │
+         │   ╱    ╲╱    ╲    │  ← Each arc segment = 1 DPU
+         │  │  5 DPUs   │   │     Width ∝ ENI count
+         │  │  12 ENIs   │   │     Color = health state
+         │  │  99.2% ↑   │   │     Pulse animation = heartbeat
+         │   ╲    ╱╲    ╱    │
+         │    ╰──╯ ╰──╯     │
+         │                   │
+         └───────────────────┘
+```
+
+- Each ring segment represents one DPU
+- Segment **width** ∝ ENI count (bigger DPU = bigger segment)
+- Segment **color** = health state (green/amber/red)
+- Entire ring **pulses** like a heartbeat (slow: healthy fleet, fast: issues)
+- Hover segment → tooltip with DPU summary
+- Click segment → navigate to `/dpu/{id}`
+- Center text: total DPUs, ENIs, overall uptime percentage with trend arrow
+
+#### 8.1.2 Smart Summary Cards with Trend Arrows
+
+Each stats card shows not just the current number but a **trend sparkline
++ delta badge**:
+
+```
+┌─────────────────────────────┐
+│  DPU Fleet                  │
+│  ┌──┐                      │
+│  │ 5│  ▁▁▂▂▃▃▃▃▅▅ ↗ +0    │
+│  └──┘  (last 24h)          │
+│  All healthy                │
+└─────────────────────────────┘
+
+┌─────────────────────────────┐
+│  Active Flows               │
+│  ┌──────┐                   │
+│  │12,430│ ▁▂▃▅▇▅▃▂ ↗ +142  │
+│  └──────┘  (last 1h)       │
+│  94% fast path              │
+└─────────────────────────────┘
+```
+
+- Delta badge: green `↗ +N` for increase, red `↘ −N` for decrease
+- Sparkline: last 24h for slow metrics, last 1h for fast metrics
+- Sub-text: key secondary insight (e.g., "94% fast path")
+
+#### 8.1.3 Activity Heatmap (GitHub-style)
+
+Below the summary cards, a **52-week activity heatmap** showing
+operational activity intensity (mutations, reconciles, alerts) per day:
+
+```
+Activity (last 52 weeks):
+Mon ░░░░░░▓▓░░░░░░░▓░░░░░░░░░▓▓▓░░░░░░░░░░░░▓░░░░░░░░
+Wed ░░░░░░░▓▓▓░░░░░░░░░░░░░░░░▓▓░░░░░░░░░░░░░▓░░░░░░░░
+Fri ░░░░░░░░▓░░░░░░░░░░░░░░░░░░▓▓▓░░░░░░░░░░░░░░░░░░░░
+```
+
+- Color intensity = number of mutations + events that day
+- Click day → filter audit log to that date
+- Tooltip: "23 mutations, 3 alerts, 1 reconcile on Jun 5"
+
+#### 8.1.4 Mini Topology with Live Pulse
+
+The mini topology doesn't just show nodes — it **pulses** them:
+
+- Each DPU node pulses at a rate proportional to its pps
+- Edges (tunnels) show directional particle flow
+- New events cause a brief **ripple** emanating from the affected DPU
+- The entire mini-topology subtly zooms to focus on whichever region has activity
+
+---
+
+### 8.2 Fleet View — Heatmap Overlay Modes
+
+**Current:** Static topology + data table.
+**Enhanced:** Multi-mode topology with switchable visualization layers.
+
+#### 8.2.1 Overlay Mode Selector
+
+A toolbar with toggle buttons switches the topology visualization:
+
+| Mode | What it shows |
+|---|---|
+| **Health** (default) | Node color = health state (green/amber/red) |
+| **Capacity** | Node size ∝ capacity usage %. Color: green→amber→red gradient. Over-capacity nodes throb. |
+| **Traffic** | Edge thickness ∝ pps between endpoints. High-traffic edges glow brighter. Node size ∝ total throughput. |
+| **Drift** | Nodes with drift items have a red dashed border + badge count. Clean nodes fade to 50% opacity. |
+| **Age** | Node color = gradient from green (recently seen) to amber (minutes) to red (stale). Reveals connectivity issues. |
+
+#### 8.2.2 Fleet Table with Inline Sparklines
+
+Every numeric column in the fleet table gets an **inline sparkline** showing
+the last 60 data points:
+
+```
+│ DPU   │ State   │ ENIs │ Capacity │ Flows        │ Last Seen │
+│───────┼─────────┼──────┼──────────┼──────────────┼───────────│
+│ DPU-1 │ ● UP    │ 2/8  │ ▓▓▓░ 38% │ ▁▂▃▅▇ 1,204 │ 2s ago   │
+│ DPU-2 │ ● UP    │ 3/8  │ ▓▓▓▓ 50% │ ▁▁▂▃▃ 892   │ 1s ago   │
+│ DPU-3 │ ⚠ DEGR │ 2/8  │ ▓▓▓░ 35% │ ▁▁▁▅▇ 1,891 │ 5s ago   │
+```
+
+- Capacity bar: inline colored bar with percentage
+- Flow column: sparkline + current value
+- Last Seen: relative time with color (green < 5s, amber < 30s, red > 30s)
+- Row hover: entire row elevates with subtle shadow + glow
+
+#### 8.2.3 Vnet Cards with Live Metrics
+
+Each Vnet summary card shows a **micro-topology** of its DPU spread:
+
+```
+┌──────────────────────────────────┐
+│  vnet-prod          VNI: 10001   │
+│                                  │
+│  ⬡─⬡─⬡     10 ENIs across 5 DPUs │
+│  ⬡─⬡                             │
+│                                  │
+│  ▁▂▃▃▅▅▃▂  Flows: 6,230         │
+│  Tunnels: 10  ● All active       │
+└──────────────────────────────────┘
+```
+
+- Mini DPU cluster (dots in a grid showing DPU spread)
+- Live flow sparkline
+- Tunnel health indicator
+- Click → Vnet dual-plane canvas view
+
+---
+
+### 8.3 DPU View — Digital Twin
+
+**Current:** Header + panels + tables.
+**Enhanced:** A visual "digital twin" of the DPU.
+
+#### 8.3.1 DPU Hardware Schematic
+
+Replace the header with an **isometric DPU schematic** showing ENI
+slots as physical ports:
+
+```
+┌──────────────────────────────────────────────────┐
+│         ⬡ DPU-1                                  │
+│     ┌─────────────────────────────────────────┐  │
+│     │  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐  │  │
+│     │  │ E1│ │ E2│ │   │ │   │ │   │ │   │  │  │  ← ENI "slots"
+│     │  │ ●●│ │ ●●│ │   │ │   │ │   │ │   │  │  │    filled = in use
+│     │  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘  │  │    ● = active flows
+│     │                                         │  │
+│     │  State: UP ●    IP: 10.0.0.1            │  │
+│     │  Uptime: 14h 23m  Version: v2.1.0       │  │
+│     └─────────────────────────────────────────┘  │
+│                                                  │
+│  Capacity: ██████░░ 2/8 ENIs (25%)               │
+└──────────────────────────────────────────────────┘
+```
+
+- ENI slots rendered as physical port rectangles
+- Filled slots: colored by Vnet (cyan=vnet-prod, green=vnet-staging)
+- Empty slots: gray/dashed border
+- Each slot has tiny activity dots (pulsing when traffic active)
+- Hover slot → ENI tooltip (name, MAC, Vnet, flows)
+- Click slot → expand ENI detail panel
+
+#### 8.3.2 ENI Pipe Visualization with Traffic Animation
+
+Each ENI is visualized as a **pipe** with flowing traffic particles:
+
+```
+ENI-01 (aa:bb:cc:dd:ee:01)  vnet-prod
+═══════════►════►════►═══════════
+  142 flows   12K pps   4.2 MB/s
+  ● up                  ▁▂▃▅▇▃▂
+```
+
+- Pipe width ∝ flow count (thicker pipe = more flows)
+- Particle speed ∝ pps (faster particles = more traffic)
+- Particle color: cyan for normal, amber for slow path, red for drops
+- Below pipe: inline sparkline of traffic rate
+- If ENI is `admin_state=down`: pipe turns gray, no particles, "ADMIN DOWN" badge
+
+#### 8.3.3 Capacity Gauges with Prediction
+
+Each capacity gauge shows not just current but **projected fill time**:
+
+```
+     ENIs                Routes
+   ╭─────╮             ╭─────╮
+  ╱  25%  ╲           ╱  72%  ╲
+ │  2 / 8  │         │ 142/196 │
+  ╲  ↗    ╱           ╲  ↗↗  ╱
+   ╰─────╯             ╰─────╯
+  ~32 days             ~3 days ⚠️
+  until full           until full
+```
+
+- Arc color: threshold-based (green → amber → red)
+- Below gauge: "estimated time until full" based on recent growth rate
+- Growth rate calculated from rolling 24h delta
+- Warning icon if projected to fill within 7 days
+
+#### 8.3.4 Quick Action Floating Bar
+
+A persistent floating action bar at the bottom of the DPU view:
+
+```
+┌────────────────────────────────────────────────────────┐
+│ [⊕ Add ENI]  [🔄 Reconcile]  [🚫 Cordon]  [📤 Drain] │
+│ [📊 Trace Flow]  [📋 View Observed]  [⋯ More]        │
+└────────────────────────────────────────────────────────┘
+```
+
+- Context-aware: "Cordon" becomes "Uncordon" if already cordoned
+- "Drain" disabled if no ENIs
+- Each button has keyboard shortcut hint on hover
+
+---
+
+### 8.4 Routing View — Route Resolution Visualizer
+
+**Current:** Prefix tree + table.
+**Enhanced:** Interactive route resolution with animated path tracing.
+
+#### 8.4.1 Animated Route Resolution
+
+When clicking on a prefix in the tree, animate the **resolution path**:
+
+```
+10.0.1.5 resolves to:
+
+10.0.0.0/8 (root)
+    └─→ 10.0.0.0/16 (vnet)
+        └─→ 10.0.1.0/24 (vnet-prod)      ← MATCH
+            next-hop: vnet (vnet-prod)
+            via DPU-1, DPU-3
+```
+
+- Tree path highlights step-by-step with animated traversal
+- Each node shows match/miss with reason
+- Final match node glows + shows next-hop detail
+- "Test an IP" input: type any IP → watch it resolve in real-time
+
+#### 8.4.2 Route Coverage Map
+
+A horizontal bar visualization showing **which prefix ranges are
+covered** vs gaps:
+
+```
+0.0.0.0 ─────────────────────────────── 255.255.255.255
+         ████████░░░░████████████░░░░░░████████████████
+         10.0.0/8     172.16/12         192.168/16
+              └── vnet   └── svc_tunnel   └── direct
+
+Gaps: 11.0.0.0 – 172.15.255.255 (DROP: no matching route)
+```
+
+- Colored by next-hop type
+- Gaps highlighted in red with "no route" tooltip
+- Click segment → jump to that route in the table
+
+#### 8.4.3 ECMP Path Visualization
+
+For routes with ECMP members, show a **fan-out diagram**:
+
+```
+10.0.1.0/24 → ECMP (3 paths):
+    ├── 33% → vnet-prod (via DPU-1)  weight: 1
+    ├── 33% → vnet-prod (via DPU-3)  weight: 1
+    └── 34% → vnet-prod (via DPU-5)  weight: 1
+```
+
+- Visual fan-out from prefix to targets
+- Width of each path ∝ weight
+- Live traffic split shown if counters available
+
+---
+
+### 8.5 Tunnel View — Traffic-Weighted Mesh
+
+**Current:** Map + table.
+**Enhanced:** Live traffic-weighted tunnel mesh.
+
+#### 8.5.1 Traffic-Proportional Edge Rendering
+
+Tunnel edges have visual properties that encode live traffic data:
+
+| Property | Encodes |
+|---|---|
+| **Line width** | Total pps through tunnel (1px → 6px) |
+| **Particle speed** | Packets/sec (slow = low traffic, fast = high traffic) |
+| **Particle size** | Average packet size (small = small packets, large = jumbo) |
+| **Color saturation** | Utilization % (dim = low, bright = high) |
+| **Dash pattern** | State: solid = ACTIVE, dashed = DOWN, dotted = UNKNOWN |
+
+#### 8.5.2 Tunnel Pair Highlighting
+
+Click a DPU → **highlight all its tunnel connections**, fade others:
+
+```
+           ⬡ DPU-1 ─────────── ⬡ DPU-2   (highlighted, bright)
+                   ╲           ╱
+                    ╲         ╱
+       ⬡ DPU-5 ──── ╳ ────── ⬡ DPU-3    (highlighted, bright)
+                    ╱         ╲
+                   ╱           ╲
+           ⬡ DPU-4             (faded, 20% opacity)
+```
+
+- Selected DPU: bright glow + all its tunnels highlighted
+- Unrelated tunnels: fade to 20% opacity
+- Shows total traffic to/from selected DPU in a summary badge
+
+---
+
+### 8.6 Policy View — Rule Blocks Visualization
+
+**Current:** Expandable tables.
+**Enhanced:** Visual "rule blocks" with inline testing.
+
+#### 8.6.1 ACL Rule Blocks
+
+Render ACL rules as **stacked colored blocks** (inspired by firewall
+rule visualizers):
+
+```
+ACL: web-frontend-acl (INBOUND, eni-01, eni-02)
+
+Priority ▼
+┌─────────────────────────────────────────────────────┐
+│ 10  ALLOW  10.0.0.0/8 → *  TCP 80,443              │ ████ 142K hits
+├─────────────────────────────────────────────────────┤
+│ 20  ALLOW  172.16.0.0/12 → *  ANY                   │ ███ 89K hits
+├─────────────────────────────────────────────────────┤
+│ 30  DENY   192.168.0.0/16 → *  ANY                  │ █ 2K hits
+├─────────────────────────────────────────────────────┤
+│ 40  ALLOW  0.0.0.0/0 → 10.0.1.0/24  UDP 53          │ ░ 0 hits 💀
+├─────────────────────────────────────────────────────┤
+│ 999 DENY   *  →  *  ANY                (default deny)│ ░ 48 hits
+└─────────────────────────────────────────────────────┘
+```
+
+- Block height ∝ hit count (more hits = taller block)
+- ALLOW = green background tint, DENY = red background tint
+- Hit count bar on the right (proportional to max hits)
+- Dead rules (0 hits): dimmed with 💀 badge
+- Hover rule → expanded detail (prefixes, ports, description)
+- **Inline "Test" button** per rule: enter an IP → show if this rule would match
+
+#### 8.6.2 Policy Conflict Detector
+
+Automatically detect rules that **shadow** each other:
+
+```
+⚠️ Conflict detected:
+  Rule 20 (ALLOW 172.16.0.0/12 → * ANY) completely shadows
+  Rule 40 (ALLOW 0.0.0.0/0 → 10.0.1.0/24 UDP 53)
+  because 10.0.1.0/24 ⊂ 172.16.0.0/12 and rule 20 has higher priority.
+  Rule 40 will NEVER be evaluated. [Remove Rule 40?]
+```
+
+---
+
+### 8.7 Flow Trace View — Interactive Packet Builder
+
+**Current:** Form + result.
+**Enhanced:** Visual packet builder with protocol layer visualization.
+
+#### 8.7.1 Visual Packet Constructor
+
+Instead of plain input fields, show the packet as **protocol layers**:
+
+```
+┌──────────────────────────────────────────────────────┐
+│  PACKET BUILDER                                      │
+│                                                      │
+│  ┌────────────────────────────────────────────────┐  │
+│  │  L2: Ethernet                                  │  │
+│  │  Src MAC: [aa:bb:cc:dd:ee:01]  ENI: [eni-01▼] │  │
+│  ├────────────────────────────────────────────────┤  │
+│  │  L3: IPv4                                      │  │
+│  │  Src: [10.0.0.5]    Dst: [10.0.1.10]          │  │
+│  │  VNI: [10001]        Direction: [OUTBOUND ▼]   │  │
+│  ├────────────────────────────────────────────────┤  │
+│  │  L4: TCP                                       │  │
+│  │  Src Port: [8080]    Dst Port: [443]           │  │
+│  └────────────────────────────────────────────────┘  │
+│                                                      │
+│  [🔍 Trace Packet]                                   │
+└──────────────────────────────────────────────────────┘
+```
+
+- Protocol layers rendered as stacked cards (like Wireshark)
+- L2/L3/L4 labels with protocol-appropriate coloring
+- Auto-fill ENI's MAC when selecting from dropdown
+- "Quick presets" button: common test packets (HTTP, DNS, ICMP)
+
+#### 8.7.2 Trace Result Comparison
+
+"Compare" button lets operators run two traces side-by-side:
+
+```
+TRACE A (before policy change)     TRACE B (after policy change)
+ACL IN:  Rule 50 ALLOW  ✅        ACL IN:  Rule 30 DENY  ❌
+Route:   10.0.1.0/24 vnet  ✅     Route:   (not reached)
+Verdict: ENCAP ✅                  Verdict: DROP_ACL ❌
+
+DIFF: Rule 30 (new) matches before Rule 50. Packet now denied.
+```
+
+- Side-by-side animated pipeline traces
+- Diff highlighting: stages that differ glow red
+- "What changed?" summary below
+
+---
+
+### 8.8 Audit Log View — Rich Activity Stream
+
+**Current:** Flat table with filters.
+**Enhanced:** Rich activity stream with actor avatars and impact badges.
+
+#### 8.8.1 Activity Cards (not rows)
+
+Instead of a flat table, render each audit entry as a **card**:
+
+```
+┌──────────────────────────────────────────────────────┐
+│  🔵 PutAclPolicy                        14:28:01.012 │
+│  operator@corp → acl_policy/default/web-acl          │
+│  txn: abc-123  gen: 42                               │
+│                                                      │
+│  Impact: 3 DPUs dispatched  ✅✅✅                    │
+│  Affected ENIs: eni-01, eni-02                       │
+│  [View Diff] [View Policy] [Replay Change]           │
+└──────────────────────────────────────────────────────┘
+```
+
+- Actor avatar (initials circle) with principal name
+- RPC badge (color-coded: PUT=blue, DELETE=red, RECONCILE=amber)
+- Impact line: how many DPUs were affected + their dispatch status
+- Affected resources listed
+- Quick action links: view diff, navigate to resource, replay
+
+#### 8.8.2 Actor Swimlane View
+
+Toggle to see audit entries grouped by **actor** (who did what):
+
+```
+operator@corp:     ──●──●────●──────────●───── 14 actions
+ci-pipeline@bot:   ────────●──────●──────────── 4 actions
+admin@oncall:      ──────────────────────●───── 1 action
+                   10:00                   now
+```
+
+- Each actor is a horizontal swimlane
+- Dots = actions, sized by impact (number of DPUs affected)
+- Color = action type (blue=PUT, red=DELETE, amber=RECONCILE)
+- Click dot → expand to full audit card
+
+---
+
+### 8.9 Health View — Live Cluster Vitals
+
+**Current:** Panels with text.
+**Enhanced:** Visual vital signs monitor.
+
+#### 8.9.1 Cluster Vital Signs
+
+```
+┌────────────────────────────────────────────────────────┐
+│  CLUSTER VITALS                                        │
+│                                                        │
+│  ♥ Heartbeat     ▁▁▁▁▁▁▁▁▁▁  Every 5s  ✅ On time    │
+│  ⚡ Leader        node-01     Uptime: 14h 23m          │
+│  🔄 Reconcile    Last: 2m ago  Pending: 0  ✅          │
+│  📊 API Latency  p50: 4ms  p95: 12ms  p99: 42ms       │
+│                  ▁▁▂▂▃▅▃▂▁▁  (last 1h)               │
+│                                                        │
+│  DPU CONNECTION STATUS:                                │
+│  ●●●●●  5/5 connected    Last check: 2s ago           │
+│  ● DPU-1 (2ms) ● DPU-2 (3ms) ● DPU-3 (4ms)          │
+│  ● DPU-4 (3ms) ● DPU-5 (2ms)                         │
+└────────────────────────────────────────────────────────┘
+```
+
+- Heartbeat line: ECG-style trace showing health check timing
+- Leader with uptime and election history link
+- Per-DPU connection latency as color-coded dots (green < 10ms, amber < 50ms)
+- API latency percentiles with sparkline
+
+#### 8.9.2 Leader Election Timeline
+
+A horizontal timeline showing leader election history:
+
+```
+Leader History:
+node-01 ████████████████████████████████████████ (14h 23m, current)
+node-02 ███████                                  (2h, previous)
+node-01 ████████████████████████████████         (8h)
+        └────────────────────────────────────── now
+```
+
+- Each bar = a leadership term
+- Color: current leader = green, previous = gray
+- Click bar → show election details (reason for change)
+
+---
+
+### 8.10 Admin Ops View — Visual Resource Builder
+
+**Current:** Forms.
+**Enhanced:** Visual drag-and-drop resource builder.
+
+#### 8.10.1 Visual ENI Placement
+
+When creating ENIs, show a visual **DPU placement grid**:
+
+```
+Choose placement for new ENI:
+
+  ⬡ DPU-1         ⬡ DPU-2         ⬡ DPU-3
+  2/8 ENIs (25%)   3/8 ENIs (38%)   2/8 ENIs (25%)
+  █░░░             ██░░             █░░░
+  [Drop here]      [Drop here]      [Drop here] ← recommended ⭐
+
+  ⬡ DPU-4         ⬡ DPU-5
+  4/8 ENIs (50%)   1/8 ENIs (13%)
+  ████             █░░░░░░░
+  [Drop here]      [Drop here] ← most capacity
+```
+
+- DPU grid shows capacity bars
+- Recommended DPU highlighted with star
+- Drag ENI card to a DPU to set placement hint
+- "Auto" button: let dashd decide (no placement hint)
+
+#### 8.10.2 Live Diff Preview
+
+Before submitting any mutation, show a **side-by-side diff** with
+syntax highlighting:
+
+```
+┌─── Current ──────────────┬─── Proposed ─────────────┐
+│ {                        │ {                         │
+│   "name": "eni-01",      │   "name": "eni-01",      │
+│   "vnet_name": "prod",   │   "vnet_name": "prod",   │
+│   "admin_state": "up",   │   "admin_state": "down",  │ ← changed
+│   "mac": "aa:bb:cc:..."  │   "mac": "aa:bb:cc:..."   │
+│ }                        │ }                         │
+└──────────────────────────┴───────────────────────────┘
+
+Changes: 1 field modified (admin_state: up → down)
+Impact: ENI will stop processing traffic on DPU-1.
+[Cancel]  [Apply Change]
+```
+
+- Changed fields highlighted (green=added, red=removed, amber=modified)
+- Impact summary auto-generated from diff
+- "Simulate" button: dry-run before applying
+
+---
+
+### 8.11 Command View — Intelligent Shell
+
+**Current:** Catalog + builder.
+**Enhanced:** Context-aware intelligent shell.
+
+#### 8.11.1 Context-Aware Autocomplete
+
+As operators type in the command builder, show **context-aware suggestions**:
+
+```
+dashctl get en▊
+              ├── eni          (ENI resources)
+              ├── eni-01       (existing ENI)
+              └── eni-02       (existing ENI)
+```
+
+- Suggestions ranked by: recently used → matching resources → all options
+- Resource names auto-complete from live data (query dashd)
+- Flag values auto-complete (e.g., `--dpu` suggests DPU IDs)
+
+#### 8.11.2 Output Visualization
+
+Command output is not just text — it's **rendered visually**:
+
+```
+$ dashctl get eni eni-01 -o wide
+
+┌─────────────────────────────────────────────────┐
+│  eni-01                                         │
+│  Vnet: vnet-prod   MAC: aa:bb:cc:dd:ee:01       │
+│  DPU: DPU-1        State: ● UP                  │
+│  Underlay: 10.0.0.1                             │
+│                                                  │
+│  Capacity: ████████░░ 80%                        │
+│  Flows: ▁▂▃▅▇ 1,204                            │
+│                                                  │
+│  [Open in DPU View]  [Edit]  [Delete]           │
+└─────────────────────────────────────────────────┘
+```
+
+- Resource outputs rendered as rich cards (not raw JSON)
+- List outputs rendered as interactive tables
+- "Copy as JSON" / "Copy as YAML" toggle
+- Action buttons on output cards for quick follow-up
+
+---
+
+### 8.12 Debug View — Network DevTools
+
+**Current:** Raw API caller + sim inspector.
+**Enhanced:** Chrome DevTools-inspired network debugger.
+
+#### 8.12.1 Request Waterfall
+
+Show all API requests in a **Chrome DevTools-style waterfall**:
+
+```
+GET  /api/console/fleet/summary     ████         42ms  200
+GET  /api/admin/health              ██████       68ms  200
+PUT  /api/v1/default/enis/eni-01    ████████     112ms 200
+GET  /api/admin/drift?dpu=dpu-3     ███          28ms  200
+WS   /ws/dpu-status                 ▓▓▓▓▓▓▓▓▓▓▓ open (14m)
+```
+
+- Horizontal bars proportional to response time
+- Color: green (< 50ms), amber (50–200ms), red (> 200ms)
+- Click request → expand to see full request/response
+- WS connections shown as persistent bars
+- Filter: method, status code, path pattern
+
+#### 8.12.2 WebSocket Frame Inspector
+
+For the WS tester, show frames with **JSON path highlighting**:
+
+```
+WS /ws/dpu-status Frame #42:
+┌─────────────────────────────────────────────────┐
+│ {                                               │
+│   "type": "dpu_status",                         │
+│   "seq": 42,                                    │
+│   "data": {                                     │
+│     "identity": {                               │
+│       "dpu_id": "dpu-1",        ← click to copy │
+│       "appliance_id": "app-1"                   │
+│     },                                          │
+│     "state": 2,           ← DPU_STATE_UP        │
+│     "usage": {                                  │
+│       "enis_used": 2      ← 2/8 = 25%          │
+│     }                                           │
+│   }                                             │
+│ }                                               │
+└─────────────────────────────────────────────────┘
+```
+
+- JSON syntax highlighted
+- Enum values annotated with human-readable names
+- Usage values annotated with percentages (from limits)
+- Click any value → copy to clipboard
+- Diff mode: highlight changes between consecutive frames
+
+---
+
+### 8.13 General Enhancements (All Views)
+
+#### 8.13.1 Contextual Right-Click Menu
+
+Every resource element (DPU badge, ENI name, Vnet card, policy name)
+has a **right-click context menu**:
+
+```
+Right-click on "DPU-1":
+┌─────────────────────┐
+│ Open DPU View       │
+│ View ENIs           │
+│ View Flows          │
+│ ─────────────────── │
+│ Cordon              │
+│ Drain               │
+│ Reconcile           │
+│ ─────────────────── │
+│ Copy ID             │
+│ Copy IP             │
+│ View in JSON        │
+└─────────────────────┘
+```
+
+#### 8.13.2 Cross-View Breadcrumb Trail
+
+Navigation breadcrumbs show the **path the operator took**:
+
+```
+Dashboard → Fleet → DPU-1 → Flow Trace (from eni-01)
+```
+
+- Click any crumb to go back
+- Preserves context (e.g., DPU filter carries to Flow Trace)
+
+#### 8.13.3 Spotlight Search with Preview
+
+The `Cmd+K` command palette shows **live preview** of the selected result:
+
+```
+⌘ K: Search
+┌─────────────────────┬──────────────────────────────────────┐
+│ > eni-01            │  eni-01                              │
+│                     │  Vnet: vnet-prod  MAC: aa:bb:cc:..   │
+│ ● eni-01 (ENI)     │  DPU: DPU-1  State: ● UP             │
+│ ● eni-02 (ENI)     │  Flows: 1,204  Capacity: 80%         │
+│ ○ /dpu/dpu-1 (view)│                                      │
+│ ○ get eni (command) │  [Open] [Edit] [Delete]              │
+└─────────────────────┴──────────────────────────────────────┘
+```
+
+- Left: search results with type icons
+- Right: live preview panel showing resource details
+- Quick action buttons in preview
+
+#### 8.13.4 Keyboard Shortcuts Layer
+
+A transparent keyboard shortcut overlay (toggle with `?`):
+
+```
+┌────────────────────────────────────────────────────────┐
+│  KEYBOARD SHORTCUTS                                    │
+│                                                        │
+│  Navigation:                                           │
+│  G D  → Dashboard      G F  → Fleet      G P  → Policy│
+│  G T  → Tunnels        G A  → Admin      G C  → Commands
+│                                                        │
+│  Actions:                                              │
+│  ⌘ K  → Search         ⌘ S  → Save       ⌘ R  → Refresh
+│  N    → New Resource    E    → Edit        D    → Delete
+│  ?    → This help                                      │
+└────────────────────────────────────────────────────────┘
+```
+
+#### 8.13.5 Dark/Light Mode with Smooth Transition
+
+While the primary theme is "Network Dark", offer a **light mode** for
+operators who prefer it, with a smooth 300ms CSS transition:
+
+- Toggle in TopBar (sun/moon icon)
+- All CSS custom properties swap
+- Saved in `ui-prefs-store` (persisted)
+- Charts and visualizations adjust colors automatically
+
+---
+
 > **End of Vision.** This document is a blueprint for transforming
 > dashw from a management console into a **network operations
 > intelligence platform** — one that fully exploits the extraordinary
@@ -816,6 +1589,5 @@ All are tree-shakeable and add < 50KB gzipped combined.
 > endpoints are needed beyond the BFF aggregation layer already designed
 > in the existing LLD.
 >
-> **Next step:** Update the existing HLD and LLD to incorporate these
-> features, then update the implementation plan with additional gates
-> for Phases D (HA + Migration) and E (Intelligence + Analytics).
+> **Implementation plan:** [`specs/Impl-Plan/dashw-web-impl-plan.md`](../Impl-Plan/dashw-web-impl-plan.md)
+> tracks all phases (A through E) with gate-level detail.

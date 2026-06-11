@@ -1,0 +1,16 @@
+dpus:
+  - id: dpu-sim-01
+    endpoint: dash-sim-1:50051
+    labels: { rack: A1, zone: z1, role: edge }
+  - id: dpu-sim-02
+    endpoint: dash-sim-2:50051
+    labels: { rack: A1, zone: z1, role: edge }
+  - id: dpu-sim-03
+    endpoint: dash-sim-3:50051
+    labels: { rack: A2, zone: z1, role: edge }
+  - id: dpu-sim-04
+    endpoint: dash-sim-4:50051
+    labels: { rack: A2, zone: z2, role: core }
+  - id: dpu-sim-05
+    endpoint: dash-sim-5:50051
+    labels: { rack: B1, zone: z2, role: core }

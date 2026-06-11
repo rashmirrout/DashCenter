@@ -22,6 +22,7 @@
 **Known unblockers shipped this session (post-tagging)**:
 - HA admin-leader status (admin handler was hardcoded `leader=true`) — fixed in [`src/impl-go/dashd/internal/server/admin/server.go`](../src/impl-go/dashd/internal/server/admin/server.go)
 - Stale config validator rejecting `ha.controller.elector.backend=etcd` — fixed in [`src/impl-go/dashd/internal/config/ha.go`](../src/impl-go/dashd/internal/config/ha.go)
+- `start-fleet.{ps1,sh}` IPv6 stall on Windows when probing `http://localhost:27443` — IPv6 lookup hits `::1` first, dashd binds IPv4-only, the connect blocks past the 2s timeout. Fixed in 04-ha-fleet by probing `127.0.0.1` directly with a 3s timeout.
 
 **Latent work documented but not in this plan**:
 - Denial auditing (4xx short-circuits never reach audit middleware) — 30-line cleanup, no PE/PF dependency, queued as a follow-up PR
@@ -84,12 +85,14 @@ fixture     ha+migration  diag+gNMI  + denial  GA tag
 
 ---
 
-### Step 2 — `docs/tutorial/10-ha-and-migration-handson.md`
+### Step 2 — `docs/tutorial/18-ha-and-migration-handson.md`
 
-**Why second**: the tutorial sequence stops at `09-multi-dpu-test-infra.md`. HA + live migration are PC's headline features and there is no narrative for them. Writing the tutorial is also adversarial review — it surfaces operator-facing rough edges (this is how we found the `leader=true` bug).
+**Why second**: the tutorial sequence stops at `17-full-fleet-experiments.md` (HA + migration are PC's headline features but were untaught). Writing the tutorial is also adversarial review — it surfaces operator-facing rough edges (this is how we found the `leader=true` bug and the IPv6 stall).
+
+> **Note on slot numbering**: slots 0–9 (Part I, dash-sim) and 10–17 (Part II, dashd) are already taken. The HA tutorial took slot **18**, not 10 as originally written in this plan.
 
 **Deliverables**:
-- New tutorial page [`docs/tutorial/10-ha-and-migration-handson.md`](tutorial/10-ha-and-migration-handson.md) covering, end-to-end:
+- New tutorial page [`docs/tutorial/18-ha-and-migration-handson.md`](tutorial/18-ha-and-migration-handson.md) covering, end-to-end:
   1. Bring up `04-ha-fleet/` (from Step 1)
   2. Inspect leader election (etcd keyspace + `/admin/leader` on each dashd)
   3. Apply an `HaSet` + walk a planned `switchover` via SSE
@@ -162,16 +165,16 @@ fixture     ha+migration  diag+gNMI  + denial  GA tag
 
 | # | Action | Status | Started | Completed | Notes / links |
 |---|---|---|---|---|---|
-| 1 | Promote `tmp-fleet/` → `deploy/test-setup/04-ha-fleet/` (compose + configs + manifest + scripts + README + handson) | ⬜ Not started | — | — | — |
-| 2 | Add `test/integration/ha_fleet/` with `//go:build integration_ha_fleet` automation | ⬜ Not started | — | — | depends on #1 |
-| 3 | Write `docs/tutorial/10-ha-and-migration-handson.md` + update tutorial index | ⬜ Not started | — | — | depends on #1 |
+| 1 | Promote `tmp-fleet/` → `deploy/test-setup/04-ha-fleet/` (compose + configs + manifest + scripts + README + handson) | ✅ Done | 2026-06-11 | 2026-06-11 | 103-object pre-baked scenario (12 vnets, 4 service tunnels, 30 ENIs, 30 vnet mappings, 12 route policies, 12 ACL policies with 120 rules, 3 HA sets). Live smoke-test passed: leader elected, manifest applied, fan-out across 3 dashd verified, HA switchover SSE green, kill-leader failover preserves all 103 objects. |
+| 2 | Add `test/integration/ha_fleet/` with `//go:build integration_ha_fleet` automation | ✅ Done | 2026-06-11 | 2026-06-11 | `src/impl-go/dashd/test/integration/ha_fleet/fleet_test.go` (~250 LOC) drives `start-fleet`, applies manifest via docker-run dashctl with bind-mount, asserts per-kind counts, exercises switchover SSE, kills the leader, asserts state survival on the new leader. `go vet -tags=integration_ha_fleet` clean; full run reserved for CI / on-demand. |
+| 3 | Write `docs/tutorial/18-ha-and-migration-handson.md` + update tutorial index | ✅ Done | 2026-06-11 | 2026-06-11 | Slot 18 not 10 (10–17 were occupied). 8-step walkthrough: prereqs → fleet up → inspect leader election → apply 103 objects → switchover SSE → failover SSE → 10-phase migration → kill-leader-mid-migration survival → cleanup. Cross-linked from `04-ha-fleet/README.md` and `deploy/test-setup/README.md`. |
 | 4 | PE-1 — `internal/flow/` Diagnostics (TraceFlow / ExplainMatch / ExplainDrift / GetAclHitStats / TriggerResimulation) | ⬜ Not started | — | — | PE-G1, PE-G2 |
 | 5 | PE-2 — Saga + EventBroadcaster + gNMI Subscribe bridge | ⬜ Not started | — | — | PE-G5; saga was already partially landed under PC-G8 — confirm reuse |
-| 6 | PE-3 — dash-sim per-ENI counter emission + dispatch.SnapshotCounters wiring | ⬜ Not started | — | — | unblocks #7 |
+| 6 | PE-3 — dash-sim per-ENI counter emission + dispatch.SnapshotCounters wiring | ⬜ Not started | — | — | unblocks #8 |
 | 7 | PE-4 — MigrationService `ExportMigrationBundle` / `ImportMigrationBundle` (streaming gRPC) | ⬜ Not started | — | — | closes the two PC `Unimplemented` stubs |
 | 8 | PD-G5 — `internal/observability/{counter_store,broadcaster}.go` + `GetCounters` follow mode + `dashctl counters --follow` | ⬜ Not started | — | — | depends on #6 |
 | 9 | Denial auditing — write audit entry from `auth.interceptor` on 401/403 before short-circuit | ⬜ Not started | — | — | independent; can land any time |
-| 10 | Tag `dashd-2.0.0` GA — CHANGELOG, README badge, green CI | ⬜ Not started | — | — | depends on #8, #9, #4-7 |
+| 10 | Tag `dashd-2.0.0` GA — CHANGELOG, README badge, green CI | ⬜ Not started | — | — | depends on #8, #9, #4–7 |
 
 **Status legend**: ⬜ Not started · ⏳ In progress · ✅ Done · ❎ Deferred
 
