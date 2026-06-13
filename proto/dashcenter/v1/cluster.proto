@@ -1,0 +1,244 @@
+// cluster.proto — dashcenter.v1.ClusterService
+//
+// Returns a fleet-topology snapshot: who runs the controller cluster,
+// where do they listen, which DPUs do they manage, what's the leader,
+// what's healthy. Read-only; runs on any node (leader OR follower).
+//
+// Design: docs/dashd-features/cluster-topology-design.md
+//
+// Membership semantics
+// --------------------
+// Each dashd process publishes its own PeerInfo to etcd under its own
+// lease. ClusterService surfaces that membership view + the local
+// inventory + the desired-spec object counts as one hierarchical
+// envelope. Lease loss (process crash / network partition) auto-removes
+// the peer within 1 lease TTL (default 8s).
+//
+// Determinism
+// -----------
+// Every list in the response (cluster.nodes, appliances, dpus, enis)
+// is sorted by stable key so two back-to-back GetTopology calls on
+// identical inputs return byte-identical bodies. Clients can compute
+// reliable diffs.
+//
+// Cost model
+// ----------
+// GetTopology is a pure-CPU pass over local in-memory maps; no etcd
+// reads, no per-request fan-out. Sub-millisecond at typical scale
+// (≤ 100 DPUs).
+
+syntax = "proto3";
+
+package dashcenter.v1;
+
+option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1;dashcenterv1";
+
+import "google/protobuf/timestamp.proto";
+
+// -----------------------------------------------------------------------------
+// ClusterService
+// -----------------------------------------------------------------------------
+
+service ClusterService {
+  // Returns the current fleet topology snapshot. Auth: viewer+.
+  rpc GetTopology(GetTopologyRequest) returns (TopologyResponse);
+
+  // Streams the topology: first event = full snapshot (KIND_SNAPSHOT),
+  // subsequent events = typed deltas (peer add/remove/update, leader
+  // change, DPU add/remove/state). Auth: viewer+.
+  //
+  // Slow subscribers: events are dropped (not blocked); the operator
+  // sees the drop counter via /admin/health. Sustained drops indicate
+  // the client should re-call GetTopology to resync.
+  rpc WatchTopology(WatchTopologyRequest) returns (stream TopologyEvent);
+}
+
+// -----------------------------------------------------------------------------
+// Requests
+// -----------------------------------------------------------------------------
+
+message GetTopologyRequest {
+  // When true the response carries per-DPU ENI arrays (DpuTopInfo.enis).
+  // When false (default) only counts are returned, which keeps the
+  // payload small for monitoring agents.
+  bool include_enis = 1;
+}
+
+message WatchTopologyRequest {
+  // Same toggle as GetTopologyRequest.include_enis. Applies to the
+  // initial SNAPSHOT event AND to subsequent KIND_DPU_* deltas.
+  bool include_enis = 1;
+}
+
+// -----------------------------------------------------------------------------
+// Snapshot envelope
+// -----------------------------------------------------------------------------
+
+message TopologyResponse {
+  google.protobuf.Timestamp computed_at = 1;
+  ClusterInfo cluster = 2;
+  repeated ApplianceInfo appliances = 3;
+  repeated ZoneInfo zones = 4;
+  TopologySummary summary = 5;
+  // namespace → per-kind object counts.
+  map<string, NamespaceObjectCounts> objects = 6;
+}
+
+// -----------------------------------------------------------------------------
+// Controllers / dashd cluster
+// -----------------------------------------------------------------------------
+
+message ClusterInfo {
+  // healthy is false when at least one node has unreachable or partial
+  // state. Operators key alerting off this.
+  bool healthy = 1;
+
+  // leader_id is the elected leader's node_id, or empty if no leader
+  // currently holds the lease (election in progress / split-brain
+  // recovery).
+  string leader_id = 2;
+
+  // node_count is len(nodes). Carried explicitly so cheap clients can
+  // alert on cardinality without parsing the array.
+  int32 node_count = 3;
+
+  repeated ClusterNodeInfo nodes = 4;
+}
+
+message ClusterNodeInfo {
+  // node_id is the dashd identity (matches /admin/leader.leader_id).
+  string node_id = 1;
+
+  // rest_addr / grpc_addr / admin_addr are the listen addresses this
+  // peer published to the registry. Format: "host:port" or full URL.
+  string rest_addr = 2;
+  string grpc_addr = 3;
+  string admin_addr = 4;
+
+  // version is the dashd version string (e.g. "0.2.0-phase1b").
+  string version = 5;
+
+  // build_sha is the git SHA at build time. Empty when the build
+  // pipeline did not inject it.
+  string build_sha = 6;
+
+  // started_at is when this peer's registry first published itself
+  // (NOT the process start time on disk, though they're close).
+  google.protobuf.Timestamp started_at = 7;
+
+  // is_leader echoes whether this node currently holds the
+  // controller-elector lease.
+  bool is_leader = 8;
+
+  // labels are operator-supplied tags (region, role, cost-centre, …).
+  map<string, string> labels = 9;
+}
+
+// -----------------------------------------------------------------------------
+// Appliances / DPUs / ENIs
+// -----------------------------------------------------------------------------
+
+message ApplianceInfo {
+  // id is the appliance identifier (from inventory label "rack" or
+  // explicit appliance_id). "unassigned" when a DPU has no rack label.
+  string id = 1;
+
+  string zone = 2;  // availability zone (operator-supplied)
+  string tier = 3;  // tier label (operator-supplied)
+
+  repeated DpuTopInfo dpus = 4;
+}
+
+message DpuTopInfo {
+  string id = 1;
+
+  // slot is the chassis slot index (from inventory label "slot").
+  int32 slot = 2;
+
+  // state is the DpuState enum name as a string (e.g. "DPU_STATE_UP").
+  // Strings, not the enum, because clients parse human-readable states
+  // and operators write match expressions against them.
+  string state = 3;
+
+  google.protobuf.Timestamp last_seen = 4;
+
+  // eni_count is len(enis) when include_enis=true, else the count
+  // from the placement table.
+  int32 eni_count = 5;
+
+  bool cordoned = 6;
+
+  // enis is populated only when GetTopologyRequest.include_enis=true.
+  repeated EniTopInfo enis = 7;
+}
+
+message EniTopInfo {
+  string name = 1;
+  string namespace = 2;
+  string vnet_name = 3;
+  string mac_address = 4;
+  string admin_state = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Rollups
+// -----------------------------------------------------------------------------
+
+message ZoneInfo {
+  string zone = 1;
+  int32 appliance_count = 2;
+  int32 dpu_count = 3;
+  int32 eni_count = 4;
+}
+
+message TopologySummary {
+  int32 total_nodes = 1;
+  int32 total_appliances = 2;
+  int32 total_dpus = 3;
+  int32 total_enis = 4;
+  int32 healthy_dpus = 5;
+  int32 degraded_dpus = 6;
+  int32 offline_dpus = 7;
+  int32 cordoned_dpus = 8;
+}
+
+message NamespaceObjectCounts {
+  int32 vnets = 1;
+  int32 enis = 2;
+  int32 vnet_mappings = 3;
+  int32 acl_policies = 4;
+  int32 route_policies = 5;
+  int32 ha_sets = 6;
+  int32 service_tunnels = 7;
+}
+
+// -----------------------------------------------------------------------------
+// Stream events
+// -----------------------------------------------------------------------------
+
+message TopologyEvent {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_SNAPSHOT = 1;        // body = snapshot (initial event)
+    KIND_PEER_ADDED = 2;      // body = peer
+    KIND_PEER_REMOVED = 3;    // body = peer
+    KIND_PEER_UPDATED = 4;    // body = peer (labels/endpoints changed)
+    KIND_LEADER_CHANGED = 5;  // old_leader_id + new_leader_id
+    KIND_DPU_STATE = 6;       // body = dpu (state field changed)
+    KIND_DPU_ADDED = 7;       // body = dpu
+    KIND_DPU_REMOVED = 8;     // body = dpu
+  }
+  Kind kind = 1;
+  google.protobuf.Timestamp ts = 2;
+
+  oneof body {
+    TopologyResponse snapshot = 10;
+    ClusterNodeInfo peer = 11;
+    DpuTopInfo dpu = 13;
+  }
+
+  // For KIND_LEADER_CHANGED only; both may be empty (e.g. fresh boot
+  // with no prior leader).
+  string old_leader_id = 12;
+  string new_leader_id = 14;
+}
