@@ -760,6 +760,79 @@ export interface ReconcileResult {
   details?: string;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+ * EniDetail — pre-joined view from /api/console/eni/{ns}/{name}/detail
+ * (mirrors aggregation.EniDetail in src/impl-go/console)
+ * ═══════════════════════════════════════════════════════════════ */
+
+export interface EniDetail {
+  namespace: string;
+  name: string;
+  identity: EniDetailIdentity;
+  /** Parent Vnet projection; omitted when the vnet fetch failed. */
+  vnet?: EniDetailVnetSummary;
+  placement: EniDetailPlacement;
+  /** HaSet that contains at least one placement DPU; null when none. */
+  ha_set?: EniDetailHaSetSummary | null;
+
+  vnet_mappings_reachable: VnetMappingSpec[];
+  acls_inbound: AclPolicySpec[];
+  acls_outbound: AclPolicySpec[];
+  route_policies: RoutePolicySpec[];
+  service_tunnels: ServiceTunnelSpec[];
+
+  counters: EniDetailCounters;
+  /** Best-effort warnings for partial failures (e.g. "vnet fetch failed"). */
+  warnings?: string[];
+}
+
+export interface EniDetailIdentity {
+  vnet_name: string;
+  mac_address?: string;
+  underlay_ip?: string;
+  admin_state?: string;
+  generation?: number;
+  labels?: Record<string, string>;
+}
+
+export interface EniDetailVnetSummary {
+  name: string;
+  vni: number;
+  gw_mac?: string;
+  state?: string;
+}
+
+export interface EniDetailPlacement {
+  dpu_ids: string[];
+  /** True iff dpu_ids.length > 1 (ENI present on multiple DPUs via HA). */
+  ha_active_active: boolean;
+  slots?: EniDetailPlacementSlot[];
+}
+
+export interface EniDetailPlacementSlot {
+  dpu_id: string;
+  observed: boolean;
+}
+
+export interface EniDetailHaSetSummary {
+  name: string;
+  scope?: string;
+  virtual_ip?: string;
+  member_dpu_ids: string[];
+  members_by_role?: Record<string, string>;
+}
+
+export interface EniDetailCounters {
+  acl_inbound: number;
+  acl_outbound: number;
+  routes: number;
+  mappings: number;
+  tunnels: number;
+  placements: number;
+  /** Reserved for Phase B per-rule counters. */
+  rule_hits?: number;
+}
+
 /* ── dashctl Command Registry types ────────────────────────── */
 
 export interface CommandDef {

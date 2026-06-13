@@ -8,6 +8,7 @@ import type {
   VnetCanvasData,
   CapacityStats,
   ServiceTopologyResponse,
+  EniDetail,
 } from './types';
 
 const C = API_BASE.CONSOLE;
@@ -23,4 +24,14 @@ export const consoleApi = {
   capacityStats: () => api.get<CapacityStats>(`${C}/stats/capacity`),
   serviceTopology: () =>
     api.get<ServiceTopologyResponse>(`${C}/service-topology`),
+  /**
+   * Pre-joined view of a single ENI built by the BFF.
+   * See: src/impl-go/console/internal/aggregation/aggregator.go EniDetail().
+   * Namespace and name are URL-encoded to handle any operator-chosen names
+   * containing reserved characters.
+   */
+  eniDetail: (namespace: string, name: string) =>
+    api.get<EniDetail>(
+      `${C}/eni/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/detail`
+    ),
 };

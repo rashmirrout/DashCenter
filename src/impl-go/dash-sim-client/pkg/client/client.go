@@ -152,5 +152,19 @@ func (c *Client) GetCounters(ctx context.Context, kind dashapi.ObjectKind, key [
 	return resp.GetCounters(), nil
 }
 
+// GetDpuCounters fetches the typed per-DPU rollup added in PE-3a (PE-G8).
+// The response always contains the DPU-wide bucket; per-ENI and per-VNET
+// sections are populated only when the respective IncludeEnis / IncludeVnets
+// flag is set on req. Returning the full *DpuCountersResponse (rather than
+// flattening to a map like GetCounters) gives the CLI render layer full
+// access to scope_key + bucket pairs and to the device_id / sampled_at_ns
+// metadata required by --watch mode.
+func (c *Client) GetDpuCounters(ctx context.Context, req *dashapi.DpuCountersRequest) (*dashapi.DpuCountersResponse, error) {
+	if req == nil {
+		req = &dashapi.DpuCountersRequest{}
+	}
+	return c.api.GetDpuCounters(ctx, req)
+}
+
 // Compile-time check.
 var _ proto.Message = (*dashapi.Object)(nil)

@@ -67,6 +67,7 @@ r.Get("/api/console/topology", agg.Topology)
 r.Get("/api/console/vnet/{vnetName}/detail", agg.VnetDetail)
 r.Get("/api/console/stats/capacity", agg.CapacityStats)
 r.Get("/api/console/service-topology", agg.ServiceTopology)
+r.Get("/api/console/eni/{namespace}/{name}/detail", agg.EniDetail)
 // ── Topology v2 (PE-G7) ─ NEW ───────────────────────
 // Live multiplexed stream over the dashd ClusterService gRPC.
 // Browser MUST hit these endpoints — NEVER dashd directly.

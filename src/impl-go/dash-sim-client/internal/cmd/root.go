@@ -58,6 +58,7 @@ schema, so the same command line works against both.`,
 	root.AddCommand(newListCmd())
 	root.AddCommand(newSubscribeCmd())
 	root.AddCommand(newCountersCmd())
+	root.AddCommand(newDpuCountersCmd())
 	root.AddCommand(newKindsCmd())
 	root.AddCommand(newSimulateCmd())
 	root.AddCommand(newPingCmd())

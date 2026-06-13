@@ -26,7 +26,7 @@
 | **Phase 2 · PA** — Infrastructure | etcd store, leader election, namespace enforcement | ✅ Complete — ready to tag `dashd-2.0.0-alpha` | 6 / 6 |
 | **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ✅ Complete — ready to tag `dashd-2.0.0-beta` | 4 / 4 |
 | **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ✅ Complete — ready to tag `dashd-2.0.0-rc1` | 8 / 8 |
-| **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge, cluster topology | ⏳ In progress (PE-1 Diagnostics ✅ PE-G1+G2 · PE-G6 ClusterService ✅ · PE-G7 Topology streaming hardening + dashw multiplexer + /topology-v2 SPA ✅ · PE-G7.1 dashctl topology + leader observer + cordon button ✅; saga + gNMI pending) | 5 / 8 |
+| **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge, cluster topology | ⏳ In progress (PE-1 Diagnostics ✅ PE-G1+G2 · PE-G6 ClusterService ✅ · PE-G7 Topology streaming hardening + dashw multiplexer + /topology-v2 SPA ✅ · PE-G7.1 dashctl topology + leader observer + cordon button ✅ · PE-G8 sim+sim-client counter rollups ✅; saga, gNMI, dashd counter ingest pending) | 6 / 10 |
 | **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ⏳ In progress (TLS ✅ · RBAC ✅ PD-G1/G3 · mTLS ✅ PD-G2 · audit ✅ PD-G4 incl. denial-audit · counters deferred) | 4 / 5 |
 
 ---
@@ -845,6 +845,8 @@ Deliver **operator diagnostic tools** that run entirely in dashd's memory agains
 | PE-G6 | ClusterService: GetTopology + WatchTopology return live fleet topology | ✅ |
 | PE-G7 | Topology streaming hardening (D1-D7) + dashw multiplexer + `/topology-v2` SPA — browser ↔ dashw only, never direct to dashd; resume cursor + RESYNC sentinel; per-IP cap + rate limit; 14 broadcaster + 10 hub + 25 SPA tests green; full Prom observability | ✅ |
 | PE-G7.1 | PE-G6/G7 polish — `dashctl topology [--follow]` CLI parity + `EtcdElector` background leader-observer (followers now report `leader_id` without explicit lookup) + Cordon/Uncordon button in `/topology-v2` SPA inspector drawer | ✅ |
+| PE-G8 | dash-sim per-DPU + per-ENI + per-VNET counter rollups via new `dashapi.v1.GetDpuCounters` RPC; `dash-sim-client dpu-counters` operator subcommand inspects them standalone (no dashd involvement). 60 unit tests at 100% coverage on every new function + 4 in-process integration tests all green. Design doc: [docs/dashd-features/dash-sim-counter-rollups.md](../../docs/dashd-features/dash-sim-counter-rollups.md). Per-flow + multi-DPU scalability deferred to PE-G9/PD-G5 design docs as Future Scopes. | ✅ |
+| PE-G9 | dashd ingests `GetDpuCounters` into typed `dashcenter.v1.CounterReport` via `internal/observability/counter_mapper.go`; per-DPU `CounterStore` populated by `dispatch.counter_poller.go`; runtime config knobs (enable, poll interval, per-DPU override) + admin endpoints; live e2e in 05-full-console fleet | ❌ |
 
 ---
 

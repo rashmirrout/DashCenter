@@ -23,6 +23,12 @@ export const queryKeys = {
   eni: {
     all: ['eni'] as const,
     list: (ns?: string) => [...queryKeys.eni.all, 'list', ns ?? 'default'] as const,
+    /**
+     * Pre-joined ENI detail from /api/console/eni/{ns}/{name}/detail.
+     * Keyed by (namespace, name) so namespace switching invalidates correctly.
+     */
+    detail: (name: string, ns?: string) =>
+      [...queryKeys.eni.all, 'detail', ns ?? 'default', name] as const,
   },
   policy: {
     all: ['policy'] as const,

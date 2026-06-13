@@ -13,6 +13,7 @@ import {
   Terminal,
   Bug,
   Radio,
+  Plug,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -48,6 +49,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Observe",
     items: [
       { path: "/fleet", label: "Fleet", icon: Network },
+      { path: "/enis", label: "ENIs", icon: Plug },
       { path: "/routing", label: "Routing", icon: Route },
       { path: "/tunnels", label: "Tunnels", icon: Cable },
       { path: "/policies", label: "Policies", icon: Shield },

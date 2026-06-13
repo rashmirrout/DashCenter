@@ -470,6 +470,164 @@ packets_out  1008
 
 ---
 
+## 12a. dpu-counters (PE-3a / PE-G8) — typed per-DPU rollup
+
+`counters` (above) returns the bag of synthetic values scoped to one
+(kind, key). **`dpu-counters`** returns a typed rollup at three nested
+scopes — DPU-wide, per-ENI, per-VNET — in a single round-trip. The
+per-ENI / per-VNET sections are opt-in so the response stays small when
+the operator only needs the top-line.
+
+> **Why a new RPC?** Sum-over-keys is computed server-side using a
+> first-component scope rule (key `K` claims scope `S` iff `K == S` OR
+> `K` starts with `S + ":"`). Cheaper than N+M client-side
+> `GetCounters` calls; no payload introspection required.
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--include-enis` | `false` | Populate the per-ENI rollup table. |
+| `--include-vnets` | `false` | Populate the per-VNET rollup table. |
+| `--eni-names` | (empty) | Comma-separated ENI scope keys. Implies `--include-enis`. Unknown scopes return as zero buckets (explicit signal). |
+| `--vnet-keys` | (empty) | Comma-separated VNET scope keys. Implies `--include-vnets`. |
+| `--watch` | `false` | Stream periodic snapshots until Ctrl-C. |
+| `--interval` | `1s` | Watch-mode sample interval. Must be > 0. |
+| `-o` / `--output` | `json` | One of: `table` (default for interactive reads), `json`, `yaml`, **`csv`** (PE-3a-new). |
+
+### 12a.1 One-shot snapshot
+
+```powershell
+& $c dpu-counters -o table
+```
+
+Output (DPU-wide bucket only; per-ENI/per-VNET are opt-in):
+
+```
+DEVICE  dpu-sim-01
+TIME    2026-06-14T20:14:33Z (ns=1718388873000000000)
+
+DPU TOTALS
+SCOPE  PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+dpu    1247        2486         87104     174208     12
+```
+
+### 12a.2 Include per-ENI + per-VNET rollups
+
+```powershell
+& $c dpu-counters --include-enis --include-vnets -o table
+```
+
+Sample (against the `small` scenario, sorted alphabetically; `vnet-prod`
+strictly exceeds `vnet-stage` because its child `vnet_mapping
+["vnet-prod","10.0.0.20"]` contributes upward via the first-component
+rule):
+
+```
+PER-ENI
+SCOPE    PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+eni-001  412         824          28832     57664      4
+eni-002  421         842          29462     58924      4
+
+PER-VNET
+SCOPE       PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+vnet-prod   168         337          11808     23560      4
+vnet-stage  84          168          5896      11792      2
+```
+
+### 12a.3 Watch mode (live tail)
+
+```powershell
+& $c dpu-counters --watch --interval 2s --include-enis
+```
+
+A `----` separator delimits each successive snapshot. Transient RPC
+errors are logged to stderr but **do not** kill the loop — Ctrl-C
+exits cleanly.
+
+### 12a.4 Filter to specific scopes (with deliberately missing one)
+
+```powershell
+& $c dpu-counters --eni-names eni-001,eni-missing -o table
+```
+
+`eni-missing` appears with a zero bucket on purpose:
+
+```
+PER-ENI
+SCOPE        PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+eni-001      412         824          28832     57664      4
+eni-missing  0           0            0         0          0
+```
+
+### 12a.5 CSV for spreadsheets
+
+```powershell
+& $c dpu-counters --include-enis --include-vnets -o csv `
+  | Out-File -Encoding utf8 snapshot.csv
+Get-Content snapshot.csv -TotalCount 4
+```
+
+Output (stable header across releases):
+
+```csv
+device_id,sampled_at_ns,scope_kind,scope_key,packets_in,packets_out,bytes_in,bytes_out,drops
+dpu-sim-01,1718388873000000000,dpu,,1247,2486,87104,174208,12
+dpu-sim-01,1718388873000000000,eni,eni-001,412,824,28832,57664,4
+dpu-sim-01,1718388873000000000,eni,eni-002,421,842,29462,58924,4
+```
+
+### 12a.6 JSON envelope
+
+```powershell
+& $c dpu-counters --include-enis -o json
+```
+
+Output:
+
+```json
+{
+  "device_id": "dpu-sim-01",
+  "sampled_at": "2026-06-14T20:14:33Z",
+  "sampled_at_ns": 1718388873000000000,
+  "dpu": { "packets_in": 1247, "packets_out": 2486, "bytes_in": 87104, "bytes_out": 174208, "drops": 12 },
+  "enis": [
+    { "scope_key": "eni-001", "bucket": { "packets_in": 412, ... } },
+    { "scope_key": "eni-002", "bucket": { "packets_in": 421, ... } }
+  ]
+}
+```
+
+Pipeable through `jq`:
+
+```powershell
+& $c dpu-counters --include-enis -o json `
+  | jq '.enis[] | select(.bucket.drops > 0) | .scope_key'
+```
+
+### 12a.7 Fault injection on the new RPC
+
+The new RPC name (`"GetDpuCounters"`) participates in the same admin
+fault injector as every other RPC. Inject a one-shot failure:
+
+```powershell
+Invoke-RestMethod -Method POST `
+  http://localhost:8080/admin/faults `
+  -ContentType application/json `
+  -Body '{"op":"GetDpuCounters","mode":"error","count":1,"message":"demo"}'
+
+# First call -> "rpc error: code = Unavailable desc = demo" (exit 1)
+& $c dpu-counters
+
+# Second call succeeds (fault was a one-shot)
+& $c dpu-counters
+```
+
+Full design, scope-membership rules, and Future Scopes:
+[`docs/dashd-features/dash-sim-counter-rollups.md`](dashd-features/dash-sim-counter-rollups.md).
+
+---
+
 ## 13. SimulatePacket (dash-sim only)
 
 Walks the full DASH pipeline:

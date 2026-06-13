@@ -586,6 +586,22 @@ of each.
 | Returns | Always returns all five counter names (zero values if key unknown). |
 | Fault op name | `"GetCounters"` |
 
+### 12.6a `GetDpuCounters(DpuCountersRequest) → DpuCountersResponse` (PE-3a / PE-G8)
+
+| Aspect | Spec |
+|---|---|
+| Purpose | Single-round-trip **typed rollup** of every tracked key at three nested scopes: DPU-wide, per-ENI, per-VNET. Closes the operator-pain pattern of "N+M `GetCounters` calls to compute one DPU snapshot". |
+| Request | `DpuCountersRequest{include_enis bool, include_vnets bool, eni_names []string, vnet_keys []string}`. ENI/VNET sections are opt-in. Optional filters intersect with the enumerated scopes; unknown-scope filters are explicitly returned with a zero `CounterBucket` (preserves the operator's "I asked for this" intent). |
+| Response | `DpuCountersResponse{device_id, sampled_at_ns, dpu, enis[], vnets[]}`. `dpu` is always populated; `enis[]` / `vnets[]` only when the respective opt-in flag is set. All scoped arrays are sorted by `scope_key` ascending. |
+| Scope membership | A registry key `K` contributes to scope `S` iff `K == S` OR `K` starts with `S + ":"`. This matches the model.Store key convention for every kind we care about today (`OBJECT_KIND_ENI` + `OBJECT_KIND_ENI_ROUTE` + `OBJECT_KIND_ACL_IN`/`OUT` all roll up under the ENI name; `OBJECT_KIND_VNET` + `OBJECT_KIND_VNET_MAPPING` under the VNET name). No payload introspection required. |
+| Concurrency | One RLock per `Rollup(scope)`; per-key atomic loads provide a consistent read of each row even while `Tick()` runs concurrently. Total may straddle ticks (some rows seen before a tick, others after) — acceptable for a counter snapshot. |
+| Device ID | Echoed from `Server.WithDeviceID(id)` (set from `--device-id` at bootstrap). Empty when the setter is not called. |
+| Returns | `dpu` bucket regardless of opt-in flags. `sampled_at_ns` is wall-clock at handler entry. |
+| Fault op name | `"GetDpuCounters"` |
+| Back-compat | Purely additive. Legacy `GetCounters(kind, key)` is unchanged. |
+| Operator CLI | `dash-sim-client dpu-counters` (table / json / yaml / **csv**; `--watch` mode; `--include-enis` / `--include-vnets` / `--eni-names` / `--vnet-keys`). |
+| Design doc | [`docs/dashd-features/dash-sim-counter-rollups.md`](../../docs/dashd-features/dash-sim-counter-rollups.md) — full architecture + 10 Future Scopes (per-flow, per-namespace, SAI-canonical naming, etc.). |
+
 ### 12.7 `SimulatePacket(SimulatePacketRequest) → SimulatePacketResponse`
 
 | Aspect | Spec |

@@ -43,12 +43,62 @@ go build -o bin\dash-redis-adapter.exe .\dash-redis-adapter\cmd\dash-redis-adapt
 ## 4. Test suite
 
 ```powershell
-go test .\dash-sim\... .\dash-redis-adapter\...
+# Everything (unit + integration) for both server modules + CLI:
+go test .\dash-sim\... .\dash-sim-client\... .\dash-redis-adapter\...
 ```
 
-Pipeline conformance: 8 test cases covering outbound ENCAP, route DIRECT, route DROP, ACL deny, disabled-ENI drop, missing-route drop, inbound deliver, inbound mac lookup, inbound no-rule drop.
+Pipeline conformance (`dash-sim/test/integration/pipeline_test.go`): 8 test
+cases covering outbound ENCAP, route DIRECT, route DROP, ACL deny,
+disabled-ENI drop, missing-route drop, inbound deliver, inbound mac
+lookup, inbound no-rule drop.
 
-Redis adapter conformance: 5 test cases covering Apply/Get/Delete/Update round-trip, ordered List, Subscribe snapshot+live, ENI bytes round-trip, SimulatePacket-Unimplemented.
+Redis adapter conformance: 5 test cases covering Apply/Get/Delete/Update
+round-trip, ordered List, Subscribe snapshot+live, ENI bytes
+round-trip, SimulatePacket-Unimplemented.
+
+### 4a. PE-3a (typed per-DPU counter rollups) — gate PE-G8
+
+```powershell
+# Unit tests for the new rollup engine + handler (100% line coverage on new code):
+go test .\dash-sim\internal\sim\counters\... .\dash-sim\internal\sim\server\... -count=1 -v
+
+# End-to-end gRPC tests (in-process server + real client, no network):
+go test .\dash-sim\test\integration\... -run 'EndToEnd_.*' -count=1 -v
+
+# Client-side: CLI subcommand + render formatters + GetDpuCounters wrapper:
+go test .\dash-sim-client\pkg\client\... `
+        .\dash-sim-client\internal\render\... `
+        .\dash-sim-client\internal\cmd\... -count=1 -v
+```
+
+What lights up:
+
+| Package | New tests | Covers |
+|---|---|---|
+| `dash-sim/internal/sim/counters` | `TestBucket_Add`, `TestRegistry_SnapshotBucket`, `TestRegistry_TotalBucket`, `TestRegistry_Rollup_*`, `TestRegistry_RollupAll_*` | `Bucket.Add`, `Registry.SnapshotBucket/TotalBucket/Rollup/RollupAll` + scope-prefix rule |
+| `dash-sim/internal/sim/server` | `TestGetDpuCounters_*` (default, include-enis, include-vnets, both, unknown-scope filter, fault-inject) | `GetDpuCounters` handler + `scopesForKind` + `bucketToProto` |
+| `dash-sim/test/integration` | `EndToEnd_DefaultRequest`, `EndToEnd_IncludeEnisAndVnets`, `EndToEnd_FilterFlagsPropagate`, `EndToEnd_LegacyGetCountersStillWorks` | Full RPC round-trip + legacy back-compat |
+| `dash-sim-client/pkg/client` | `TestClient_GetDpuCounters_*` | Wrapper, nil-req normalization |
+| `dash-sim-client/internal/render` | `TestDpuCounters_Table/Json/Yaml/Csv`, `TestParseFormatExt_*` | Four output formats + CSV header stability |
+| `dash-sim-client/internal/cmd` | `TestDpuCountersCmd_PreRunE_*`, `TestOneWatchTick_*` | Flag validation + single watch tick |
+
+Optional coverage gate (run from `src/impl-go/`):
+
+```powershell
+go test .\dash-sim\internal\sim\counters\... .\dash-sim-client\internal\render\... `
+        -coverprofile cov.out
+go tool cover -func=cov.out | Select-String 'total:'
+# Expected: total: (statements) 100.0%
+Remove-Item cov.out
+```
+
+> **Tip — avoid the `$` / `cov` literal-file trap.** Do *not* write
+> `-coverprofile=$(Resolve-Path .)\cov.out` on the PowerShell command
+> line; the subexpression sometimes fails to expand and produces
+> literal files named `$` and `cov` in the package directory. Either
+> stay in the package dir and use the bare `cov.out` form above, or
+> pre-compute the path into a variable. The repo `.gitignore` now
+> shields against the typo, but the files are still unwanted.
 
 ---
 
@@ -147,6 +197,105 @@ Invoke-RestMethod -Method Post http://localhost:8080/admin/faults -Body $body -C
 $body = @{ path = "...\testdata\scenarios\small.yaml"; reset = $true } | ConvertTo-Json
 Invoke-RestMethod -Method Post http://localhost:8080/admin/scenario -Body $body -ContentType application/json
 ```
+
+## 9a. PE-3a — typed per-DPU counter rollups
+
+**RPC**: `dashapi.v1.DashApi.GetDpuCounters`. **CLI**: `dash-sim-client dpu-counters`.
+Adds a typed rollup at three nested scopes (DPU-wide, per-ENI, per-VNET)
+in a single round-trip — no more N+M `GetCounters` calls to assemble a
+DPU snapshot. Legacy `GetCounters` is preserved for back-compat.
+
+Build + test gate for this feature lives in
+[§4a above](#4a-pe-3a-typed-per-dpu-counter-rollups--gate-pe-g8).
+Full design + Future Scopes:
+[`docs/dashd-features/dash-sim-counter-rollups.md`](../../../docs/dashd-features/dash-sim-counter-rollups.md).
+
+### Quick lab (4 experiments)
+
+> **Pre-req**: bring up `dash-sim` with the small scenario:
+>
+> ```powershell
+> .\bin\dash-sim.exe --device-id dpu-sim-01 `
+>   --scenario .\dash-sim\testdata\scenarios\small.yaml
+> ```
+
+#### One-shot snapshot
+
+```powershell
+.\bin\dash-sim-client.exe dpu-counters -o table
+```
+
+Expected — DPU-wide bucket only (per-ENI/per-VNET are opt-in):
+
+```text
+DEVICE  dpu-sim-01
+TIME    2026-06-14T20:14:33Z (ns=1718388873000000000)
+
+DPU TOTALS
+SCOPE  PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+dpu    1247        2486         87104     174208     12
+```
+
+#### Include per-ENI + per-VNET rollups
+
+```powershell
+.\bin\dash-sim-client.exe dpu-counters --include-enis --include-vnets -o table
+```
+
+Expected (sorted alphabetically; `vnet-prod` strictly exceeds
+`vnet-stage` because its child `vnet_mapping ["vnet-prod","10.0.0.20"]`
+contributes via the first-component scope rule):
+
+```text
+PER-ENI
+SCOPE    PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+eni-001  412         824          28832     57664      4
+eni-002  421         842          29462     58924      4
+
+PER-VNET
+SCOPE       PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+vnet-prod   168         337          11808     23560      4
+vnet-stage  84          168          5896      11792      2
+```
+
+#### Watch mode + CSV pipe
+
+```powershell
+# Live tail at 2s intervals (Ctrl-C exits cleanly):
+.\bin\dash-sim-client.exe dpu-counters --watch --interval 2s --include-enis
+
+# Dump 5s of samples to a spreadsheet-shaped CSV (header + per-scope rows):
+1..5 | ForEach-Object { .\bin\dash-sim-client.exe dpu-counters `
+  --include-enis --include-vnets -o csv; Start-Sleep -Seconds 1 } `
+  | Out-File -Encoding utf8 burst.csv
+Get-Content burst.csv -TotalCount 6
+```
+
+CSV header is stable across releases:
+
+```csv
+device_id,sampled_at_ns,scope_kind,scope_key,packets_in,packets_out,bytes_in,bytes_out,drops
+```
+
+#### Fault injection on the new RPC
+
+```powershell
+# Make the next GetDpuCounters fail once:
+$body = @{ op = "GetDpuCounters"; mode = "error"; count = 1; message = "demo" } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://localhost:8080/admin/faults -Body $body -ContentType application/json
+
+# First call -> "rpc error: code = Unavailable desc = demo" (exit 1)
+.\bin\dash-sim-client.exe dpu-counters
+
+# Second call succeeds (fault count exhausted)
+.\bin\dash-sim-client.exe dpu-counters
+```
+
+In `--watch` mode the same injected error is logged to stderr as
+`dpu-counters: rpc error: …` and the loop keeps polling — does NOT
+exit on transient failures.
+
+
 
 ## 10. Object kinds
 

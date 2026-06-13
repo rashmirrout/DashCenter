@@ -330,6 +330,80 @@ within a second. `Ctrl-C` to exit the subscribe loop.
 
 ---
 
+## Step 14a — Typed per-DPU counter rollup (PE-3a / PE-G8)
+
+`dash-sim-client dpu-counters` returns a typed rollup at three nested
+scopes (DPU-wide, per-ENI, per-VNET) in a single round-trip. It's
+backed by the new `GetDpuCounters` RPC and works against any of the
+three sims you spun up.
+
+**One-shot DPU bucket** (always populated):
+
+```powershell
+& $c --target $sim1 dpu-counters -o table
+```
+
+Expected (numbers vary with uptime since `--tick-interval` advances
+on every tick):
+
+```
+DEVICE  dpu-sim-1
+TIME    2026-06-14T20:14:33Z (ns=...)
+
+DPU TOTALS
+SCOPE  PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+dpu    1247        2486         87104     174208     12
+```
+
+**Include per-ENI and per-VNET rollups** (sorted alphabetically;
+child keys roll up via the first-component scope rule — e.g.
+`vnet-prod:10.0.0.20` contributes to `vnet-prod`):
+
+```powershell
+& $c --target $sim1 dpu-counters --include-enis --include-vnets -o table
+```
+
+**Live tail every 2s** (Ctrl-C exits cleanly; transient RPC errors
+are logged to stderr and the loop continues):
+
+```powershell
+& $c --target $sim1 dpu-counters --watch --interval 2s --include-enis
+```
+
+**CSV for spreadsheets** (header stable across releases; one row per
+scope with a `scope_kind` discriminator):
+
+```powershell
+& $c --target $sim1 dpu-counters --include-enis --include-vnets -o csv `
+  | Out-File -Encoding utf8 snapshot.csv
+Get-Content snapshot.csv -TotalCount 4
+```
+
+**Filter with deliberately missing scope** (zero bucket returned on
+purpose — explicit "I asked, you have none" signal):
+
+```powershell
+& $c --target $sim1 dpu-counters --eni-names eni-001,eni-missing -o table
+```
+
+**JSON for `jq` scripting**:
+
+```powershell
+& $c --target $sim1 dpu-counters --include-enis -o json `
+  | jq '.enis[] | select(.bucket.drops > 0) | .scope_key'
+```
+
+Legacy per-object `counters --kind X --key Y` still works:
+
+```powershell
+& $c --target $sim1 counters --kind eni --key eni-001 -o table
+```
+
+Full design + Future Scopes:
+[`docs/dashd-features/dash-sim-counter-rollups.md`](../../../docs/dashd-features/dash-sim-counter-rollups.md).
+
+---
+
 ## Step 15 — Use the admin HTTP endpoints (dash-sim only)
 
 ```powershell
@@ -351,6 +425,16 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/faults -Body $body -C
 # Next Apply against sim1 returns Internal "injected"; subsequent calls succeed.
 & $c --target $sim1 apply --kind vnet --key vnet-fault-test --value '{"vni":1}'
 & $c --target $sim1 apply --kind vnet --key vnet-fault-test --value '{"vni":1}'
+```
+
+**Or fault-inject the new GetDpuCounters RPC**:
+
+```powershell
+$body = @{ op = "GetDpuCounters"; mode = "error"; count = 1; message = "demo" } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/faults -Body $body -ContentType application/json
+
+& $c --target $sim1 dpu-counters     # first call -> Unavailable "demo"
+& $c --target $sim1 dpu-counters     # second call succeeds (count exhausted)
 ```
 
 ---

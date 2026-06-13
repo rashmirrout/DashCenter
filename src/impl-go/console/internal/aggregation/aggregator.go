@@ -7,6 +7,7 @@ import (
 "io"
 "log/slog"
 "net/http"
+"strings"
 "sync"
 "time"
 
@@ -759,6 +760,658 @@ OfflineDpus:     offlineDpus,
 }
 
 writeJSON(w, http.StatusOK, resp)
+}
+
+// EniDetail handles GET /api/console/eni/{namespace}/{name}/detail.
+//
+// Fan-out (8 parallel goroutines, then a 9th serial fetch for the
+// parent vnet once we know its name):
+//
+//	1. GET /v1/{ns}/enis/{name}        → identity (FATAL on 404)
+//	2. GET /admin/eni-placement        → placement on DPUs (HA-aware)
+//	3. GET /v1/{ns}/vnet-mappings      → all mappings, filtered later
+//	4. GET /v1/{ns}/acl-policies       → all ACLs, filtered + split by stage
+//	5. GET /v1/{ns}/route-policies     → all routes, filtered later
+//	6. GET /v1/{ns}/service-tunnels    → all tunnels, kept for ref resolution
+//	7. GET /v1/{ns}/ha                 → HaSets, attached if placement DPU is a member
+//	8. GET /v1/{ns}/vnets/{vnet_name}  → parent Vnet + VNI (deferred until 1 returns)
+//
+// Only the ENI fetch is fatal (404 → 404, other errors → 502). Every
+// other call is best-effort: on failure the corresponding array stays
+// empty and a warning is appended so the UI can show partial data.
+func (a *Aggregator) EniDetail(w http.ResponseWriter, r *http.Request) {
+ns := chi.URLParam(r, "namespace")
+name := chi.URLParam(r, "name")
+if ns == "" || name == "" {
+writeError(w, http.StatusBadRequest, "namespace and name path parameters are required")
+return
+}
+
+ctx := r.Context()
+
+type listResp struct {
+Items []map[string]any `json:"items"`
+}
+
+var (
+eniRaw       map[string]any
+placementAll listResp
+mappingsAll  listResp
+aclsAll      listResp
+routesAll    listResp
+tunnelsAll   listResp
+haSetsAll    listResp
+
+eniErr, placementErr, mappingsErr error
+aclsErr, routesErr, tunnelsErr, haSetsErr error
+)
+
+var wg sync.WaitGroup
+wg.Add(7)
+
+// 1. ENI identity (the only fatal fetch). Cannot fetch the vnet here
+// because vnet_name is unknown until this returns — vnet is deferred
+// to after wg.Wait().
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdRestAddr, "/v1/"+ns+"/enis/"+name)
+if err != nil {
+eniErr = err
+return
+}
+eniErr = json.Unmarshal(data, &eniRaw)
+}()
+
+// 2. Placement (admin endpoint).
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdAdminAddr, "/admin/eni-placement")
+if err != nil {
+placementErr = err
+return
+}
+placementErr = json.Unmarshal(data, &placementAll)
+}()
+
+// 3. VnetMappings (full list, filter later).
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdRestAddr, "/v1/"+ns+"/vnet-mappings")
+if err != nil {
+mappingsErr = err
+return
+}
+mappingsErr = json.Unmarshal(data, &mappingsAll)
+}()
+
+// 4. ACL policies.
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdRestAddr, "/v1/"+ns+"/acl-policies")
+if err != nil {
+aclsErr = err
+return
+}
+aclsErr = json.Unmarshal(data, &aclsAll)
+}()
+
+// 5. Route policies.
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdRestAddr, "/v1/"+ns+"/route-policies")
+if err != nil {
+routesErr = err
+return
+}
+routesErr = json.Unmarshal(data, &routesAll)
+}()
+
+// 6. Service tunnels.
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdRestAddr, "/v1/"+ns+"/service-tunnels")
+if err != nil {
+tunnelsErr = err
+return
+}
+tunnelsErr = json.Unmarshal(data, &tunnelsAll)
+}()
+
+// 7. HA sets.
+go func() {
+defer wg.Done()
+data, err := a.fetchJSON(ctx, a.cfg.DashdRestAddr, "/v1/"+ns+"/ha")
+if err != nil {
+haSetsErr = err
+return
+}
+haSetsErr = json.Unmarshal(data, &haSetsAll)
+}()
+
+wg.Wait()
+
+// ── Fatal: ENI fetch failure ────────────────────────────────
+if eniErr != nil {
+// dashd returns 404 as a non-OK status which fetchJSON wraps
+// as an error containing "returned 404". Surface as 404 so
+// React Router can render a not-found state.
+if strings.Contains(eniErr.Error(), "returned 404") {
+writeError(w, http.StatusNotFound, "eni not found: "+ns+"/"+name)
+return
+}
+a.logger.Error("eni detail: identity fetch failed",
+"ns", ns, "name", name, "error", eniErr)
+writeError(w, http.StatusBadGateway, "failed to fetch eni: "+eniErr.Error())
+return
+}
+
+// ── Build identity (probe both top-level and spec shapes) ───
+identity := EniIdentity{
+VnetName:   stringField(eniRaw, "vnet_name"),
+MacAddress: stringField(eniRaw, "mac_address"),
+UnderlayIP: stringField(eniRaw, "underlay_ip"),
+AdminState: stringField(eniRaw, "admin_state"),
+Generation: int64Field(eniRaw, "generation"),
+Labels:     stringMapField(eniRaw, "labels"),
+}
+if identity.VnetName == "" {
+if spec, ok := eniRaw["spec"].(map[string]any); ok {
+identity.VnetName = stringField(spec, "vnet_name")
+identity.MacAddress = stringField(spec, "mac_address")
+identity.UnderlayIP = stringField(spec, "underlay_ip")
+identity.AdminState = stringField(spec, "admin_state")
+if identity.Labels == nil {
+identity.Labels = stringMapField(spec, "labels")
+}
+}
+}
+
+var warnings []string
+
+// ── Deferred: fetch parent vnet now that we know vnet_name ──
+var vnetSummary *VnetSummary
+if identity.VnetName != "" {
+data, err := a.fetchJSON(ctx, a.cfg.DashdRestAddr,
+"/v1/"+ns+"/vnets/"+identity.VnetName)
+if err != nil {
+warnings = append(warnings, "vnet fetch failed: "+err.Error())
+a.logger.Warn("eni detail: vnet fetch failed",
+"vnet", identity.VnetName, "error", err)
+} else {
+var vnetRaw map[string]any
+if err := json.Unmarshal(data, &vnetRaw); err != nil {
+warnings = append(warnings, "vnet parse failed: "+err.Error())
+} else {
+vnetSummary = buildVnetSummary(vnetRaw)
+}
+}
+}
+
+// ── Build placement (with HA-active-active detection) ───────
+placement := buildPlacementSummary(placementAll.Items, name)
+if placementErr != nil {
+warnings = append(warnings, "placement fetch failed: "+placementErr.Error())
+}
+
+// ── Filter ACLs by eni_names + split by stage ───────────────
+aclsIn, aclsOut, aclWarn := filterAclsForEni(aclsAll.Items, name, ns)
+if aclsErr != nil {
+warnings = append(warnings, "acl-policies fetch failed: "+aclsErr.Error())
+}
+warnings = append(warnings, aclWarn...)
+
+// ── Filter routes by eni_names ──────────────────────────────
+myRoutes, routeWarn := filterRoutesForEni(routesAll.Items, name, ns)
+if routesErr != nil {
+warnings = append(warnings, "route-policies fetch failed: "+routesErr.Error())
+}
+warnings = append(warnings, routeWarn...)
+
+// ── Filter vnet-mappings to this ENI's vnet ─────────────────
+var myMappings []map[string]any
+if identity.VnetName != "" {
+for _, m := range mappingsAll.Items {
+if mappingVnetName(m) == identity.VnetName {
+myMappings = append(myMappings, m)
+}
+}
+}
+if mappingsErr != nil {
+warnings = append(warnings, "vnet-mappings fetch failed: "+mappingsErr.Error())
+}
+
+// ── Resolve referenced service tunnels ──────────────────────
+referencedTunnels := referencedTunnelNames(myRoutes, myMappings)
+var myTunnels []map[string]any
+for _, t := range tunnelsAll.Items {
+tn := resourceName(t)
+if _, ok := referencedTunnels[tn]; ok {
+myTunnels = append(myTunnels, t)
+}
+}
+if tunnelsErr != nil {
+warnings = append(warnings, "service-tunnels fetch failed: "+tunnelsErr.Error())
+}
+
+// ── Attach HaSet if any placement DPU is a member ───────────
+haSet := findHaSetForDpus(haSetsAll.Items, placement.DpuIDs)
+if haSetsErr != nil {
+warnings = append(warnings, "ha-sets fetch failed: "+haSetsErr.Error())
+}
+
+// ── Counters ────────────────────────────────────────────────
+counters := EniDetailCounters{
+AclInbound:  len(aclsIn),
+AclOutbound: len(aclsOut),
+Routes:      len(myRoutes),
+Mappings:    len(myMappings),
+Tunnels:     len(myTunnels),
+Placements:  len(placement.DpuIDs),
+}
+
+resp := EniDetail{
+Namespace:             ns,
+Name:                  name,
+Identity:              identity,
+Vnet:                  vnetSummary,
+Placement:             placement,
+HaSet:                 haSet,
+VnetMappingsReachable: nonNil(myMappings),
+AclsInbound:           nonNil(aclsIn),
+AclsOutbound:          nonNil(aclsOut),
+RoutePolicies:         nonNil(myRoutes),
+ServiceTunnels:        nonNil(myTunnels),
+Counters:              counters,
+Warnings:              warnings,
+}
+
+writeJSON(w, http.StatusOK, resp)
+}
+
+// ── EniDetail helpers (pure, no I/O) ───────────────────────
+
+// stringField extracts a string field from a JSON-decoded map, returning
+// "" when the key is missing or not a string.
+func stringField(m map[string]any, key string) string {
+if v, ok := m[key].(string); ok {
+return v
+}
+return ""
+}
+
+// int64Field extracts a numeric field as int64. JSON numbers decode into
+// float64 by default; we coerce safely.
+func int64Field(m map[string]any, key string) int64 {
+switch v := m[key].(type) {
+case float64:
+return int64(v)
+case int64:
+return v
+case int:
+return int64(v)
+}
+return 0
+}
+
+// stringMapField extracts a map[string]string from a JSON-decoded value.
+// Returns nil when missing so json `omitempty` drops the key.
+func stringMapField(m map[string]any, key string) map[string]string {
+raw, ok := m[key].(map[string]any)
+if !ok || len(raw) == 0 {
+return nil
+}
+out := make(map[string]string, len(raw))
+for k, v := range raw {
+if s, ok := v.(string); ok {
+out[k] = s
+}
+}
+if len(out) == 0 {
+return nil
+}
+return out
+}
+
+// stringSliceField extracts a []string from a JSON-decoded slice of any.
+func stringSliceField(m map[string]any, key string) []string {
+raw, ok := m[key].([]any)
+if !ok {
+return nil
+}
+out := make([]string, 0, len(raw))
+for _, v := range raw {
+if s, ok := v.(string); ok {
+out = append(out, s)
+}
+}
+return out
+}
+
+// resourceName returns the bare name of a dashd resource regardless of
+// whether the wire shape is { "name": "..." } or
+// { "metadata": { "name": "..." } }.
+func resourceName(r map[string]any) string {
+if s, ok := r["name"].(string); ok && s != "" {
+return s
+}
+if md, ok := r["metadata"].(map[string]any); ok {
+if s, ok := md["name"].(string); ok {
+return s
+}
+}
+return ""
+}
+
+// resourceNamespace returns the namespace, handling both top-level and
+// metadata-nested shapes.
+func resourceNamespace(r map[string]any) string {
+if s, ok := r["namespace"].(string); ok && s != "" {
+return s
+}
+if md, ok := r["metadata"].(map[string]any); ok {
+if s, ok := md["namespace"].(string); ok {
+return s
+}
+}
+return ""
+}
+
+// buildVnetSummary projects a Vnet wire object into the VnetSummary
+// the UI consumes. Handles both top-level and spec-nested shapes.
+func buildVnetSummary(raw map[string]any) *VnetSummary {
+if raw == nil {
+return nil
+}
+src := raw
+if spec, ok := raw["spec"].(map[string]any); ok {
+src = spec
+}
+return &VnetSummary{
+Name:  firstNonEmpty(stringField(raw, "name"), stringField(src, "name")),
+VNI:   int(int64Field(src, "vni")),
+GwMac: stringField(src, "gw_mac"),
+State: stringField(src, "state"),
+}
+}
+
+// firstNonEmpty returns the first non-empty string from its arguments.
+func firstNonEmpty(vals ...string) string {
+for _, v := range vals {
+if v != "" {
+return v
+}
+}
+return ""
+}
+
+// buildPlacementSummary walks the eni-placement list and projects all
+// entries that match eniName into an EniPlacementSummary. Supports
+// both single-DPU (legacy `dpu_id`) and multi-DPU HA (`placements[]`).
+func buildPlacementSummary(items []map[string]any, eniName string) EniPlacementSummary {
+out := EniPlacementSummary{}
+seen := make(map[string]bool)
+
+for _, p := range items {
+// The placement entry may use `name` (current) or `eni_name` (legacy).
+n := stringField(p, "name")
+if n == "" {
+n = stringField(p, "eni_name")
+}
+if n != eniName {
+continue
+}
+
+// Single-DPU shape
+if d := stringField(p, "dpu_id"); d != "" && !seen[d] {
+out.DpuIDs = append(out.DpuIDs, d)
+out.Slots = append(out.Slots, EniPlacementSlot{DpuID: d, Observed: true})
+seen[d] = true
+}
+// Multi-DPU (HA) shape
+if slots, ok := p["placements"].([]any); ok {
+for _, s := range slots {
+sm, ok := s.(map[string]any)
+if !ok {
+continue
+}
+d := stringField(sm, "dpu_id")
+if d == "" || seen[d] {
+continue
+}
+observed := true
+if o, ok := sm["observed"].(bool); ok {
+observed = o
+}
+out.DpuIDs = append(out.DpuIDs, d)
+out.Slots = append(out.Slots, EniPlacementSlot{DpuID: d, Observed: observed})
+seen[d] = true
+}
+}
+}
+
+out.HaActiveActive = len(out.DpuIDs) > 1
+return out
+}
+
+// filterAclsForEni walks acl-policies and returns two slices: those
+// whose eni_names contains eniName for the inbound stage and for the
+// outbound stage. Warnings are emitted for cross-namespace references
+// (rare but possible — dashd doesn't enforce same-namespace today).
+func filterAclsForEni(items []map[string]any, eniName, ns string) (in, out []map[string]any, warns []string) {
+for _, acl := range items {
+// eni_names may live at the top level or inside spec.
+names := stringSliceField(acl, "eni_names")
+if len(names) == 0 {
+if spec, ok := acl["spec"].(map[string]any); ok {
+names = stringSliceField(spec, "eni_names")
+}
+}
+matches := false
+for _, n := range names {
+if n == eniName {
+matches = true
+break
+}
+}
+if !matches {
+continue
+}
+
+// Cross-namespace sanity warning (best-effort; doesn't block).
+if aclNs := resourceNamespace(acl); aclNs != "" && aclNs != ns {
+warns = append(warns, "acl-policy "+resourceName(acl)+
+" lives in namespace "+aclNs+" but references this eni — unsupported")
+}
+
+stage := stringField(acl, "stage")
+if stage == "" {
+if spec, ok := acl["spec"].(map[string]any); ok {
+stage = stringField(spec, "stage")
+}
+}
+switch stage {
+case "inbound":
+in = append(in, acl)
+case "outbound":
+out = append(out, acl)
+default:
+// Unknown stage — surface under inbound and warn (legacy data).
+warns = append(warns, "acl-policy "+resourceName(acl)+
+" has unknown stage "+stage+", showing under inbound")
+in = append(in, acl)
+}
+}
+return in, out, warns
+}
+
+// filterRoutesForEni walks route-policies and returns those whose
+// eni_names contains eniName. Cross-namespace refs warned.
+func filterRoutesForEni(items []map[string]any, eniName, ns string) (out []map[string]any, warns []string) {
+for _, rp := range items {
+names := stringSliceField(rp, "eni_names")
+if len(names) == 0 {
+if spec, ok := rp["spec"].(map[string]any); ok {
+names = stringSliceField(spec, "eni_names")
+}
+}
+matches := false
+for _, n := range names {
+if n == eniName {
+matches = true
+break
+}
+}
+if !matches {
+continue
+}
+if rpNs := resourceNamespace(rp); rpNs != "" && rpNs != ns {
+warns = append(warns, "route-policy "+resourceName(rp)+
+" lives in namespace "+rpNs+" but references this eni — unsupported")
+}
+out = append(out, rp)
+}
+return out, warns
+}
+
+// mappingVnetName returns the vnet_name of a vnet-mapping, handling
+// both top-level and spec-nested shapes.
+func mappingVnetName(m map[string]any) string {
+if v := stringField(m, "vnet_name"); v != "" {
+return v
+}
+if spec, ok := m["spec"].(map[string]any); ok {
+return stringField(spec, "vnet_name")
+}
+return ""
+}
+
+// referencedTunnelNames walks the ENI's routes and mappings and collects
+// the set of service-tunnel names they point at. Used to filter the full
+// tunnel list down to those actually reachable from this ENI.
+func referencedTunnelNames(routes, mappings []map[string]any) map[string]struct{} {
+out := make(map[string]struct{})
+add := func(name string) {
+if name != "" {
+out[name] = struct{}{}
+}
+}
+
+for _, rp := range routes {
+src := rp
+if spec, ok := rp["spec"].(map[string]any); ok {
+src = spec
+}
+// dashd uses `routes` (current) — fall back to `rules`.
+entries, ok := src["routes"].([]any)
+if !ok {
+entries, _ = src["rules"].([]any)
+}
+for _, e := range entries {
+em, ok := e.(map[string]any)
+if !ok {
+continue
+}
+if stringField(em, "next_hop_type") == "service_tunnel" {
+add(stringField(em, "next_hop_target"))
+}
+if members, ok := em["ecmp_members"].([]any); ok {
+for _, mAny := range members {
+mm, ok := mAny.(map[string]any)
+if !ok {
+continue
+}
+if stringField(mm, "next_hop_type") == "service_tunnel" {
+add(stringField(mm, "next_hop_target"))
+}
+}
+}
+}
+}
+
+for _, mp := range mappings {
+src := mp
+if spec, ok := mp["spec"].(map[string]any); ok {
+src = spec
+}
+if stringField(src, "action") == "service_tunnel" {
+if params, ok := src["params"].(map[string]any); ok {
+add(stringField(params, "tunnel"))
+}
+}
+}
+
+return out
+}
+
+// findHaSetForDpus returns the first HaSet that has at least one member
+// in dpuIDs, or nil. We also stamp MemberDpuIDs / MembersByRole so the
+// UI can render the full set with peer chips.
+func findHaSetForDpus(items []map[string]any, dpuIDs []string) *HaSetSummary {
+if len(dpuIDs) == 0 || len(items) == 0 {
+return nil
+}
+inSet := make(map[string]bool, len(dpuIDs))
+for _, d := range dpuIDs {
+inSet[d] = true
+}
+
+for _, h := range items {
+src := h
+if spec, ok := h["spec"].(map[string]any); ok {
+src = spec
+}
+members, ok := src["members"].([]any)
+if !ok {
+continue
+}
+
+var memberIDs []string
+roleMap := make(map[string]string)
+hit := false
+for _, mAny := range members {
+mm, ok := mAny.(map[string]any)
+if !ok {
+continue
+}
+id := stringField(mm, "dpu_id")
+if id == "" {
+continue
+}
+memberIDs = append(memberIDs, id)
+role := stringField(mm, "role")
+if role != "" {
+roleMap[id] = role
+}
+if inSet[id] {
+hit = true
+}
+}
+if !hit {
+continue
+}
+
+if len(roleMap) == 0 {
+roleMap = nil
+}
+return &HaSetSummary{
+Name:          resourceName(h),
+Scope:         stringField(src, "scope"),
+VirtualIP:     stringField(src, "virtual_ip"),
+MemberDpuIDs:  memberIDs,
+MembersByRole: roleMap,
+}
+}
+return nil
+}
+
+// nonNil returns the input slice if non-nil, else an empty slice so
+// JSON serialization emits `[]` instead of `null`. Keeps the TS type
+// strict (no `| null` everywhere).
+func nonNil(s []map[string]any) []map[string]any {
+if s == nil {
+return []map[string]any{}
+}
+return s
 }
 
 // writeJSON marshals v as JSON and writes it.

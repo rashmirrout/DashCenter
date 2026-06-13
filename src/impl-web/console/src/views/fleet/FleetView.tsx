@@ -368,7 +368,16 @@ export default function FleetView() {
       header: "ENI",
       accessor: (r) => r.name,
       cell: (r) => (
-        <span className="font-mono text-[color:var(--text-primary)]">{r.name}</span>
+        <button
+          type="button"
+          onClick={() =>
+            navigate(`/eni/${encodeURIComponent("default")}/${encodeURIComponent(r.name)}`)
+          }
+          className="font-mono text-[color:var(--accent-cyan)] hover:underline"
+          title="Open the dedicated ENI detail page"
+        >
+          {r.name}
+        </button>
       ),
     },
     {

@@ -243,3 +243,108 @@ RoutesUsed int     `json:"routes_used"`
 RoutesMax  int     `json:"routes_max"`
 RoutesPct  float64 `json:"routes_pct"`
 }
+
+// ── EniDetail (Phase A) ─────────────────────────────────────
+//
+// EniDetail is the response for
+//   GET /api/console/eni/{namespace}/{name}/detail.
+//
+// It is a comprehensive, pre-joined view of a single ENI built by
+// fanning out 8 calls to dashd in parallel and merging the results.
+// All cross-resource joins live server-side so the SPA renders a
+// single fetch into a "single comprehensive page" for debugging.
+//
+// Source endpoints fanned out by EniDetail():
+//   1. GET /v1/{ns}/enis/{name}              → Identity / 404 short-circuit
+//   2. GET /admin/eni-placement              → DPU placement (HA-aware)
+//   3. GET /v1/{ns}/vnets/{vnet_name}        → Parent Vnet + VNI
+//   4. GET /v1/{ns}/vnet-mappings            → Filter to this ENI's vnet
+//   5. GET /v1/{ns}/acl-policies             → Filter eni_names + split by stage
+//   6. GET /v1/{ns}/route-policies           → Filter eni_names
+//   7. GET /v1/{ns}/service-tunnels          → Resolve refs from routes/mappings
+//   8. GET /v1/{ns}/ha                       → Membership of placement DPU(s)
+//
+// All fields use snake_case for JSON to stay consistent with the
+// rest of the dashw BFF responses.
+type EniDetail struct {
+Namespace string                `json:"namespace"`
+Name      string                `json:"name"`
+Identity  EniIdentity           `json:"identity"`
+Vnet      *VnetSummary          `json:"vnet,omitempty"`
+Placement EniPlacementSummary   `json:"placement"`
+HaSet     *HaSetSummary         `json:"ha_set,omitempty"`
+
+VnetMappingsReachable []map[string]any `json:"vnet_mappings_reachable"`
+AclsInbound           []map[string]any `json:"acls_inbound"`
+AclsOutbound          []map[string]any `json:"acls_outbound"`
+RoutePolicies         []map[string]any `json:"route_policies"`
+ServiceTunnels        []map[string]any `json:"service_tunnels"`
+
+Counters EniDetailCounters `json:"counters"`
+Warnings []string          `json:"warnings,omitempty"`
+}
+
+// EniIdentity is the ENI's own spec, projected to the fields the
+// UI cares about. We keep raw `labels` for the chip cluster and
+// `generation` so the UI can detect stale data after writes.
+type EniIdentity struct {
+VnetName   string            `json:"vnet_name"`
+MacAddress string            `json:"mac_address,omitempty"`
+UnderlayIP string            `json:"underlay_ip,omitempty"`
+AdminState string            `json:"admin_state,omitempty"`
+Generation int64             `json:"generation,omitempty"`
+Labels     map[string]string `json:"labels,omitempty"`
+}
+
+// VnetSummary is the parent-Vnet projection, with VNI prominently
+// surfaced so the UI can render it as a first-class chip. The
+// concepts doc (docs/concepts/dashd-configuration-concepts.md)
+// explains why VNI lives on the Vnet and is inherited by every
+// ENI in it — this struct is the wire-level expression of that
+// inheritance.
+type VnetSummary struct {
+Name  string `json:"name"`
+VNI   int    `json:"vni"`
+GwMac string `json:"gw_mac,omitempty"`
+State string `json:"state,omitempty"`
+}
+
+// EniPlacementSummary describes where this ENI currently lives.
+// HaActiveActive is true iff DpuIDs has more than one entry
+// (i.e. the ENI is present on two DPUs simultaneously per HA).
+type EniPlacementSummary struct {
+DpuIDs         []string             `json:"dpu_ids"`
+HaActiveActive bool                 `json:"ha_active_active"`
+Slots          []EniPlacementSlot   `json:"slots,omitempty"`
+}
+
+// EniPlacementSlot mirrors the per-slot record from
+// /admin/eni-placement so the UI can show observed vs declared.
+type EniPlacementSlot struct {
+DpuID    string `json:"dpu_id"`
+Observed bool   `json:"observed"`
+}
+
+// HaSetSummary is attached when at least one placement DPU is a
+// member of an HaSet. The MemberDpuIDs slice is the union of all
+// member DPUs across matching sets (in practice there is at most
+// one match per ENI).
+type HaSetSummary struct {
+Name          string            `json:"name"`
+Scope         string            `json:"scope,omitempty"`
+VirtualIP     string            `json:"virtual_ip,omitempty"`
+MemberDpuIDs  []string          `json:"member_dpu_ids"`
+MembersByRole map[string]string `json:"members_by_role,omitempty"`
+}
+
+// EniDetailCounters provides the at-a-glance numbers that the
+// Overview tab renders without having to count arrays itself.
+type EniDetailCounters struct {
+AclInbound   int `json:"acl_inbound"`
+AclOutbound  int `json:"acl_outbound"`
+Routes       int `json:"routes"`
+Mappings     int `json:"mappings"`
+Tunnels      int `json:"tunnels"`
+Placements   int `json:"placements"`
+RuleHits     int `json:"rule_hits,omitempty"` // reserved for Phase B counters
+}

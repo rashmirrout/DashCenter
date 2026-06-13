@@ -116,9 +116,16 @@ export default function DpuView() {
       header: "ENI",
       accessor: (r) => r.name,
       cell: (r) => (
-        <span className="font-mono text-[color:var(--text-primary)]">
+        <button
+          type="button"
+          onClick={() =>
+            navigate(`/eni/${encodeURIComponent("default")}/${encodeURIComponent(r.name)}`)
+          }
+          className="font-mono text-[color:var(--accent-cyan)] hover:underline"
+          title="Open the dedicated ENI detail page"
+        >
           {r.name}
-        </span>
+        </button>
       ),
     },
     {

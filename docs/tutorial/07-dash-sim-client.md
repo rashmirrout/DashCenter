@@ -21,7 +21,8 @@ contact. It covers:
 - `list` (with `--prefix`, `--limit`)
 - `delete`
 - `subscribe` (snapshot + live)
-- `counters`
+- `counters` (per-object, legacy)
+- `dpu-counters` (typed per-DPU / per-ENI / per-VNET rollup — PE-3a / PE-G8)
 - `simulate` (outbound + inbound with `--trace`)
 - admin HTTP bonus
 - quick reference card
@@ -48,6 +49,12 @@ $c = ".\bin\dash-sim-client.exe"     # Windows
 # Streaming
 & $c subscribe [--snapshot] [--kinds <k1,k2>]
 & $c counters --kind <k> --key <a:b:...>
+
+# PE-3a (PE-G8) typed per-DPU rollup
+& $c dpu-counters [--include-enis] [--include-vnets] `
+                  [--eni-names <a,b>] [--vnet-keys <c,d>] `
+                  [--watch] [--interval 1s] `
+                  [-o table|json|yaml|csv]
 
 # Behavioural pipeline (dash-sim only)
 & $c simulate --direction outbound|inbound --eni <e> [...flags...] [--trace]
@@ -134,6 +141,59 @@ before live updates begin.
 
 The `table` output prints a compact one-line JSON in the `VALUE` column for
 readability. For full structure, use `-o json` (default) or `-o yaml`.
+
+### 3.8 `dpu-counters` for typed DPU rollups (PE-3a / PE-G8)
+
+Legacy `counters --kind X --key Y` returns the bag of synthetic counters
+scoped to one object. **`dpu-counters`** returns a typed rollup at three
+nested scopes (DPU-wide, per-ENI, per-VNET) in a single round-trip — the
+rollup is computed server-side via the first-component scope rule:
+
+> A registry key `K` contributes to scope `S` iff `K == S` OR `K`
+> starts with `S + ":"`. So scope `eni-001` claims both `eni-001`
+> itself AND child keys like `eni-001:1` (from
+> `OBJECT_KIND_ACL_IN ["eni-001", "1"]`).
+
+**Try it** (against the `small` scenario):
+
+```powershell
+# Default: just the DPU-wide bucket (always populated)
+& $c dpu-counters -o table
+
+# Opt into both sub-tables, sorted alphabetically:
+& $c dpu-counters --include-enis --include-vnets -o table
+
+# Live tail every 2s until Ctrl-C
+& $c dpu-counters --watch --interval 2s --include-enis
+
+# Filter to specific scopes (a missing scope is returned as zero bucket
+# on purpose — explicit "I asked, you have none" signal):
+& $c dpu-counters --eni-names eni-001,eni-missing -o table
+
+# CSV for spreadsheets (header is stable across releases):
+& $c dpu-counters --include-enis --include-vnets -o csv `
+  | Out-File -Encoding utf8 snapshot.csv
+
+# JSON for jq scripting:
+& $c dpu-counters --include-enis -o json `
+  | jq '.enis[] | select(.bucket.drops > 0) | .scope_key'
+```
+
+Full experiments table + sample outputs:
+[`dash-sim-client/README.md`](../../src/impl-go/dash-sim-client/README.md#pe-3a--typed-per-dpu-counter-rollups-dpu-counters).
+Full design + Future Scopes:
+[`docs/dashd-features/dash-sim-counter-rollups.md`](../dashd-features/dash-sim-counter-rollups.md).
+
+Fault injection on the new op is available via the existing admin
+port — inject latency / errors on `"GetDpuCounters"` exactly the
+same way you'd do it on `Apply` / `Subscribe`:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  http://localhost:8080/admin/faults `
+  -ContentType application/json `
+  -Body '{"op":"GetDpuCounters","mode":"delay","count":3,"delay_ms":500}'
+```
 
 ---
 

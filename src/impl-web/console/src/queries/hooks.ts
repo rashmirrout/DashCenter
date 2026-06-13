@@ -95,6 +95,25 @@ export function useEniList(ns = 'default') {
   });
 }
 
+/**
+ * Fetch the pre-joined ENI detail view from the BFF.
+ *
+ * The handler at `/api/console/eni/{ns}/{name}/detail` fans out to 8
+ * dashd endpoints in parallel and returns a single, fully resolved
+ * `EniDetail` object (identity, parent Vnet + VNI, placement with
+ * HA, ACLs split by stage, routes, tunnels, HaSet membership,
+ * counters). Polled at the Vnet cadence — ENIs change less often
+ * than fleet health.
+ */
+export function useEniDetail(name: string, ns = 'default') {
+  return useQuery({
+    queryKey: queryKeys.eni.detail(name, ns),
+    queryFn: () => consoleApi.eniDetail(ns, name),
+    refetchInterval: POLL_INTERVALS.VNET,
+    enabled: !!name,
+  });
+}
+
 export function useAclPolicies(ns = 'default') {
   return useQuery({
     queryKey: queryKeys.policy.acl(ns),

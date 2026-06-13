@@ -19,6 +19,8 @@ const CommandView = lazy(() => import('./views/command/CommandView'));
 const TopologyDashboardView = lazy(() => import('./views/topology/TopologyDashboardView'));
 const TopologyV2View = lazy(() => import('./views/topology-v2/TopologyV2View'));
 const DebugView = lazy(() => import('./views/debug/DebugView'));
+const EniListView = lazy(() => import('./views/eni/EniListView'));
+const EniView = lazy(() => import('./views/eni/EniView'));
 
 /* ── Loading fallback + error boundary ─────────────────────── */
 function ViewLoader({ children, name }: { children: ReactNode; name?: string }) {
@@ -68,6 +70,8 @@ export const router = createBrowserRouter([
       { path: 'topology-v2', element: <ViewLoader name="Topology v2"><TopologyV2View /></ViewLoader> },
       { path: 'dpu/:dpuId', element: <ViewLoader name="DPU Detail"><DpuView /></ViewLoader> },
       { path: 'vnet/:vnetName', element: <ViewLoader name="Vnet Detail"><VnetView /></ViewLoader> },
+      { path: 'enis', element: <ViewLoader name="ENIs"><EniListView /></ViewLoader> },
+      { path: 'eni/:namespace/:name', element: <ViewLoader name="ENI Detail"><EniView /></ViewLoader> },
       { path: 'routing', element: <ViewLoader name="Routing"><RoutingView /></ViewLoader> },
       { path: 'tunnels', element: <ViewLoader name="Tunnels"><TunnelView /></ViewLoader> },
       { path: 'policies', element: <ViewLoader name="Policies"><PolicyView /></ViewLoader> },
