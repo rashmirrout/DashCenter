@@ -54,11 +54,15 @@ type Options struct {
 	// Diagnostics enables the PE-1 /v1/diagnostics/* endpoints when
 	// non-nil. nil leaves them unregistered (404).
 	Diagnostics service.DiagnosticsService
+
+	// Cluster enables the PE-G2 /v1/cluster/* endpoints when non-nil.
+	// nil leaves them unregistered (404).
+	Cluster service.ClusterService
 }
 
 // NewWithOptions is the production constructor.
 func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService, opts Options) *Server {
-h := &handler{cp: cp, obs: obs, ha: ha, mig: mig, diag: opts.Diagnostics}
+h := &handler{cp: cp, obs: obs, ha: ha, mig: mig, diag: opts.Diagnostics, cluster: opts.Cluster}
 var handlerChain http.Handler = h.router()
 // Compose OUTSIDE -> IN so auth runs first and audit reads Subject
 // from ctx.
@@ -123,6 +127,7 @@ obs  service.ObservabilityService
 ha   service.HaService // may be nil; /v1/ha/* returns 503 when so
 mig  service.MigrationService // may be nil; /v1/migrations/* returns 503 when so
 diag service.DiagnosticsService // may be nil; /v1/diagnostics/* returns 503 when so
+cluster service.ClusterService // may be nil; /v1/cluster/* returns 503 when so
 }
 
 // urlKindToStoreKind maps plural URL path segments to singular store kind names.
@@ -229,6 +234,10 @@ mux.HandleFunc("POST /v1/diagnostics/explain-match", h.diagExplainMatch)
 mux.HandleFunc("POST /v1/diagnostics/explain-drift", h.diagExplainDrift)
 mux.HandleFunc("POST /v1/diagnostics/acl-hit-stats", h.diagAclHitStats)
 mux.HandleFunc("POST /v1/diagnostics/trigger-resimulation", h.diagTriggerResim)
+
+// Cluster (PE-G2). Read-only fleet topology.
+mux.HandleFunc("GET /v1/cluster/topology", h.getClusterTopology)
+mux.HandleFunc("GET /v1/cluster/topology/watch", h.watchClusterTopology)
 
 return mux
 }

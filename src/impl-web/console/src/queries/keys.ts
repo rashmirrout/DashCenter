@@ -66,4 +66,12 @@ export const queryKeys = {
     all: ['eni-placement'] as const,
     list: () => [...queryKeys.eniPlacement.all, 'list'] as const,
   },
+  diagnostics: {
+    all: ['diagnostics'] as const,
+    traceFlow: () => [...queryKeys.diagnostics.all, 'trace-flow'] as const,
+    explainMatch: () => [...queryKeys.diagnostics.all, 'explain-match'] as const,
+    aclHitStats: () => [...queryKeys.diagnostics.all, 'acl-hit-stats'] as const,
+    explainDrift: () => [...queryKeys.diagnostics.all, 'explain-drift'] as const,
+    resimulation: () => [...queryKeys.diagnostics.all, 'resimulation'] as const,
+  },
 };

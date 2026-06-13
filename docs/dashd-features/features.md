@@ -25,8 +25,9 @@
 7. [HA orchestration](#7-ha-orchestration)
 8. [Migrations](#8-migrations)
 9. [Diagnostics (PE-1)](#9-diagnostics-pe-1)
-10. [Admin port](#10-admin-port)
-11. [Quick reference index](#11-quick-reference-index)
+10. [Cluster topology (PE-G6)](#10-cluster-topology-pe-g2)
+11. [Admin port](#11-admin-port)
+12. [Quick reference index](#12-quick-reference-index)
 
 ---
 
@@ -711,7 +712,88 @@ flowchart LR
 
 ---
 
-## 10. Admin port
+## 10. Cluster topology (PE-G6)
+
+**Read-only fleet topology**: returns who runs the controller cluster
+(self-published via etcd lease), the DPU inventory grouped by appliance
++ zone, and per-namespace object counts — all in one call. Both RPCs
+are safe to call against any node; the data is local to each dashd
+(no per-request fan-out).
+
+Full design rationale: [cluster-topology-design.md](cluster-topology-design.md).
+
+### 10.1 `GET /v1/cluster/topology`
+
+**Query param**: `?include_enis=true` (default `false` — ENI counts
+only, no names; keeps the payload small for monitoring clients).
+
+**Response** (`dashcenter.v1.TopologyResponse`):
+
+```json
+{
+  "computed_at": "2026-06-12T...",
+  "cluster": {
+    "healthy": true,
+    "leader_id": "dashd-2",
+    "node_count": 3,
+    "nodes": [
+      {"node_id":"dashd-1","rest_addr":":8443","grpc_addr":":9443","admin_addr":":7443","version":"0.2.0-phase1b","started_at":"..."},
+      {"node_id":"dashd-2","is_leader":true, ...},
+      {"node_id":"dashd-3", ...}
+    ]
+  },
+  "appliances": [
+    {"id":"appliance-1","zone":"us-west-2a","tier":"gold",
+     "dpus":[{"id":"dpu-sim-01","state":"DPU_STATE_UP","eni_count":4}, ...]},
+    ...
+  ],
+  "zones": [{"zone":"us-west-2a","appliance_count":2,"dpu_count":4,"eni_count":16}, ...],
+  "summary": {"total_nodes":3,"total_appliances":5,"total_dpus":10,"total_enis":41,"healthy_dpus":10},
+  "objects": {
+    "default": {"vnets":14,"enis":41,"vnet_mappings":40,"acl_policies":18,"route_policies":17,"ha_sets":4,"service_tunnels":6},
+    "edge":    {"vnets":2, ...},
+    "staging": {"vnets":1, ...}
+  }
+}
+```
+
+**Determinism**: every list is sorted by stable key, so two back-to-back
+calls on identical inputs return byte-identical bodies (operators can
+compute diffs reliably).
+
+### 10.2 `GET /v1/cluster/topology/watch`
+
+**Server-Sent Events stream**. First line is `event: snapshot` with the
+full `TopologyResponse`; subsequent events are typed deltas:
+
+| `event:` | When |
+|---|---|
+| `snapshot` | always first; full TopologyResponse |
+| `peer_added` / `peer_removed` / `peer_updated` | dashd joined/left the etcd peer registry |
+| `leader_changed` | controller election handoff |
+| `dpu_added` / `dpu_removed` / `dpu_state` | inventory change |
+
+Each line: `event: <kind>\ndata: <protojson>\n\n`. A keep-alive comment
+is emitted every 30s so reverse proxies don't close the stream. The
+broadcaster is **drop-on-slow-subscriber**; sustained drops indicate
+the client should re-call `GetTopology` to resync.
+
+### 10.3 `GET /admin/topology` (admin port :7443, unauthenticated)
+
+Same envelope as 10.1, exposed on the admin port for operator scripts
+that already trust the management network. No auth required.
+
+### gRPC equivalents
+
+- `rpc GetTopology(GetTopologyRequest) returns (TopologyResponse)`
+- `rpc WatchTopology(WatchTopologyRequest) returns (stream TopologyEvent)`
+
+Both `viewer+` (read-only). Wired into the same auth + audit chain as
+the other services — PE-G6 inherits PD-G1/G2/G3/G4 unchanged.
+
+---
+
+## 11. Admin port
 
 The admin surface (`:7443` by default) is **unauthenticated**, intended
 to be exposed only on the management network or via a sidecar.
@@ -719,6 +801,7 @@ to be exposed only on the management network or via a sidecar.
 | Endpoint | Purpose |
 |---|---|
 | `GET /admin/leader` | `{"leader":true,"leader_id":"dashd-2","term":42}` — used by load balancers |
+| `GET /admin/topology` | Full fleet topology (see [§10](#10-cluster-topology-pe-g2)) — no auth required on admin port |
 | `GET /admin/audit/tail` | One-shot tail of `audit.jsonl` (last N rows) |
 | `GET /admin/audit/stream` | SSE stream that follows `audit.jsonl` like `tail -f` |
 | `GET /admin/metrics` | Prometheus exposition (Phase 2 PD-G2) |
@@ -734,7 +817,7 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 
 ---
 
-## 11. Quick reference index
+## 12. Quick reference index
 
 | Path | Method | Section |
 |---|---|---|
@@ -757,12 +840,15 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 | `/v1/diagnostics/explain-drift` | POST | §9.3 |
 | `/v1/diagnostics/acl-hit-stats` | POST | §9.4 |
 | `/v1/diagnostics/trigger-resimulation` | POST | §9.5 |
-| `/admin/leader` `/admin/audit/{tail,stream}` `/admin/metrics` `/admin/healthz` `/admin/readyz` | GET | §10 |
+| `/v1/cluster/topology` | GET | §10.1 |
+| `/v1/cluster/topology/watch` | GET (SSE) | §10.2 |
+| `/admin/leader` `/admin/topology` `/admin/audit/{tail,stream}` `/admin/metrics` `/admin/healthz` `/admin/readyz` | GET | §11 |
 
 ---
 
 **See also**
 - [docs/dashd-features/](.) (this folder) — additional dashd feature notes as they land
+- [cluster-topology-design.md](cluster-topology-design.md) — PE-G6 design spec (problem / solution / architecture / acceptance criteria)
 - [proto/dashcenter/v1/](../../proto/dashcenter/v1) — proto sources of truth
 - [docs/CLI_GUIDE.md](../CLI_GUIDE.md) — `dashctl` equivalents
 - [deploy/test-setup/05-full-console/manual-handson.md](../../deploy/test-setup/05-full-console/manual-handson.md) — Lab 12.6 live captures of every diagnostic

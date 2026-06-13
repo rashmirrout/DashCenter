@@ -51,6 +51,10 @@ type Options struct {
 	// Diagnostics registers the PE-1 DiagnosticsService when non-nil.
 	// nil leaves the service unregistered (codes.Unimplemented).
 	Diagnostics service.DiagnosticsService
+
+	// Cluster registers the PE-G2 ClusterService when non-nil. nil
+	// leaves the service unregistered.
+	Cluster service.ClusterService
 }
 
 // New creates a gRPC server wired to the shared service layer. ha and
@@ -110,7 +114,8 @@ func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilitySer
 
 	// Register DiagnosticsService (PE-1) when wired.
 	registerDiagnostics(gs, opts.Diagnostics)
-
+	// Register ClusterService (PE-G2).
+	registerCluster(gs, opts.Cluster)
 	// Enable gRPC server reflection for debugging tools like grpcurl.
 	reflection.Register(gs)
 

@@ -21,12 +21,15 @@ dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/placement"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 )
 
 // Server is the admin HTTP server.
 type Server struct {
-	srv *http.Server
+	srv        *http.Server
+	clusterSvc service.ClusterService // PE-G2; set later via SetClusterService
+	handler    *handler                // back-ref so SetClusterService can wire it through
 }
 
 // LeaderObserver is the minimal slice of an elector that the admin
@@ -69,10 +72,14 @@ func NewWithElector(inv *inventory.Inventory, st store.DesiredStore, obs *model.
 	mux.HandleFunc("GET /admin/drift", h.drift)
 	mux.HandleFunc("GET /admin/eni-placement", h.eniPlacement)
 	mux.HandleFunc("POST /admin/reconcile", h.reconcile)
-	return &Server{srv: &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}}
+	mux.HandleFunc("GET /admin/topology", h.topology)
+	return &Server{
+		srv: &http.Server{
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+		},
+		handler: h,
+	}
 }
 
 // Serve starts listening on addr.
@@ -99,6 +106,7 @@ store   store.DesiredStore
 obs     *model.ObsCache
 rec     *reconciler.Reconciler
 elector LeaderObserver
+clusterSvc service.ClusterService // PE-G2; nil until main.go calls Server.SetClusterService
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {

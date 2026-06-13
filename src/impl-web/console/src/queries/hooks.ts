@@ -15,6 +15,7 @@ import {
   opsApi,
 } from '@/api/dashd-rest';
 import { POLL_INTERVALS } from '@/lib/constants';
+import { diagnosticsApi } from '@/api/diagnostics';
 import type {
   VnetSpec,
   EniSpec,
@@ -24,6 +25,11 @@ import type {
   HaSetSpec,
   SimulateRequest,
   ReconcileRequest,
+  TraceFlowRequest,
+  ExplainMatchRequest,
+  AclHitStatsRequest,
+  ExplainDriftRequest,
+  TriggerResimRequest,
 } from '@/api/types';
 
 /* ═══════════════════════════════════════════════════════════
@@ -335,5 +341,55 @@ export function useSimulateFlow() {
   return useMutation({
     mutationFn: (req: SimulateRequest) => opsApi.simulate(req),
     onError: (err) => toast.error(`Simulate failed: ${err.message}`),
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * DIAGNOSTICS HOOKS (PE-1) — observability mutations
+ * ═══════════════════════════════════════════════════════════ */
+
+/** Trace a packet through the full ACL→Route→Mapping pipeline. */
+export function useTraceFlow() {
+  return useMutation({
+    mutationFn: (req: TraceFlowRequest) => diagnosticsApi.traceFlow(req),
+    onError: (err) => toast.error(`Trace flow failed: ${err.message}`),
+  });
+}
+
+/** Walk every candidate and explain why each matched or didn't. */
+export function useExplainMatch() {
+  return useMutation({
+    mutationFn: (req: ExplainMatchRequest) => diagnosticsApi.explainMatch(req),
+    onError: (err) => toast.error(`Explain match failed: ${err.message}`),
+  });
+}
+
+/** Get ACL hit stats (optionally zero-hit only). */
+export function useAclHitStats() {
+  return useMutation({
+    mutationFn: (req: AclHitStatsRequest) => diagnosticsApi.aclHitStats(req),
+    onError: (err) => toast.error(`ACL hit stats failed: ${err.message}`),
+  });
+}
+
+/** Get remediation suggestions for a specific drift item. */
+export function useExplainDrift() {
+  return useMutation({
+    mutationFn: (req: ExplainDriftRequest) => diagnosticsApi.explainDrift(req),
+    onError: (err) => toast.error(`Explain drift failed: ${err.message}`),
+  });
+}
+
+/** Trigger re-evaluation of active flows on named DPUs/ENIs. */
+export function useTriggerResimulation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: TriggerResimRequest) => diagnosticsApi.triggerResimulation(req),
+    onSuccess: (data) => {
+      toast.success(`Resimulated ${data.resimulated_count} flows`);
+      void qc.invalidateQueries({ queryKey: queryKeys.dpu.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.fleet.all });
+    },
+    onError: (err) => toast.error(`Resimulation failed: ${err.message}`),
   });
 }

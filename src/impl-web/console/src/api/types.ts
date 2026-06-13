@@ -557,7 +557,7 @@ export interface CounterReport {
   service_tunnel_rx?: number;
 }
 
-/* ── Simulate Flow ─────────────────────────────────────────── */
+/* ── Simulate Flow (legacy) ────────────────────────────────── */
 
 export interface SimulateRequest {
   vnet_name: string;
@@ -587,6 +587,134 @@ export interface SimulateStage {
   result: 'PASS' | 'DENY' | 'SKIP';
   matched_rule?: MatchedRule;
   detail?: string;
+}
+
+/* ── PE-1 Diagnostics API ──────────────────────────────────── */
+
+/** POST /v1/diagnostics/trace-flow */
+export interface TraceFlowRequest {
+  flow: TraceFlowInput;
+}
+
+export interface TraceFlowInput {
+  direction: number; // 1=INBOUND, 2=OUTBOUND
+  eni_name: string;
+  src_ip: string;
+  dst_ip: string;
+  src_port?: number;
+  dst_port?: number;
+  protocol: string; // "tcp", "udp", "icmp"
+  vni?: string;
+}
+
+export interface TraceFlowResponse {
+  verdict: number; // 3=ENCAP, 5=DROP_NO_MAPPING, 6=DROP_ACL, etc.
+  trace: string[];
+  matched_acl_rule?: TraceMatchedAcl;
+  matched_route?: TraceMatchedRoute;
+  matched_vnet_mapping?: TraceMatchedMapping;
+}
+
+export interface TraceMatchedAcl {
+  policy_name: string;
+  priority: number;
+  action: string;
+}
+
+export interface TraceMatchedRoute {
+  policy_name: string;
+  prefix: string;
+  next_hop_type: string;
+  next_hop_target: string;
+}
+
+export interface TraceMatchedMapping {
+  vnet_name: string;
+  ip_address: string;
+  action: string;
+}
+
+/** Verdict enum helpers */
+export const TRACE_VERDICTS: Record<number, { label: string; color: string }> = {
+  1: { label: 'ALLOW', color: 'green' },
+  3: { label: 'ENCAP', color: 'green' },
+  4: { label: 'DROP_NO_ROUTE', color: 'amber' },
+  5: { label: 'DROP_NO_MAPPING', color: 'amber' },
+  6: { label: 'DROP_ACL', color: 'red' },
+  7: { label: 'DROP_ADMIN_DOWN', color: 'red' },
+};
+
+/** POST /v1/diagnostics/explain-match */
+export interface ExplainMatchRequest {
+  subject: number; // 1=ACL, 2=ROUTE, 3=VNET_MAPPING
+  flow: TraceFlowInput;
+}
+
+export const EXPLAIN_SUBJECTS = {
+  ACL: 1,
+  ROUTE: 2,
+  VNET_MAPPING: 3,
+} as const;
+
+export interface ExplainMatchResponse {
+  candidates: ExplainCandidate[];
+  selected_candidate_id: string;
+}
+
+export interface ExplainCandidate {
+  candidate_id: string;
+  matched?: boolean;
+  reason: string;
+  priority?: number;
+}
+
+/** POST /v1/diagnostics/acl-hit-stats */
+export interface AclHitStatsRequest {
+  zero_hits_only?: boolean;
+  dpu_id?: string;
+  namespace?: string;
+}
+
+export interface AclHitStatsResponse {
+  items: AclHitStatsItem[];
+}
+
+export interface AclHitStatsItem {
+  dpu_id: string;
+  namespace: string;
+  policy_name: string;
+  stage: string;
+  rules: AclHitStatsRule[];
+  sampled_at?: Record<string, unknown>;
+}
+
+export interface AclHitStatsRule {
+  priority: number;
+  action: string;
+  hits?: number;
+}
+
+/** POST /v1/diagnostics/explain-drift */
+export interface ExplainDriftRequest {
+  name_ref: { kind: string; namespace: string; name: string };
+  dpu_id: string;
+}
+
+export interface ExplainDriftResponse {
+  remediation: string;
+  suggested_action?: string;
+  details?: string;
+}
+
+/** POST /v1/diagnostics/trigger-resimulation */
+export interface TriggerResimRequest {
+  dpu_ids?: string[];
+  eni_names?: string[];
+}
+
+export interface TriggerResimResponse {
+  resimulated_count: number;
+  errors?: string[];
 }
 
 /* ── Audit ─────────────────────────────────────────────────── */

@@ -70,6 +70,10 @@ func init() {
 	registerW("/dashcenter.v1.MigrationService/CommitMigration")
 	registerA("/dashcenter.v1.MigrationService/ExportMigrationBundle")
 	registerA("/dashcenter.v1.MigrationService/ImportMigrationBundle")
+
+	// --- ClusterService (PE-G6; read-only) ---
+	registerR("/dashcenter.v1.ClusterService/GetTopology")
+	registerR("/dashcenter.v1.ClusterService/WatchTopology")
 }
 
 // registerR registers a read-only RPC: viewer/operator/admin allowed.
