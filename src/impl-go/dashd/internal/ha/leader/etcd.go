@@ -102,6 +102,12 @@ type EtcdElector struct {
 	// session down deterministically.
 	sessionCancel context.CancelFunc
 
+	// observeCancel stops the background leader-observer goroutine on
+	// Close. The goroutine watches election.Observe() so that LeaderID()
+	// on a follower node reflects the current leader without callers
+	// having to invoke ObserveCurrentLeader explicitly.
+	observeCancel context.CancelFunc
+
 	mu          sync.RWMutex
 	currentLeader string
 	isLeader      bool
@@ -203,6 +209,17 @@ func NewEtcdElector(ctx context.Context, cfg EtcdConfig) (*EtcdElector, error) {
 	// torn it down), close lostCh so leaderLoop unblocks.
 	go e.watchSession()
 
+	// Background goroutine: keep `currentLeader` fresh on followers.
+	// concurrency.Election.Observe streams the value at the leader key
+	// every time it changes (campaign / resign / lease expiry on the
+	// holder). Without this, LeaderID() returns the empty string until
+	// somebody calls ObserveCurrentLeader explicitly — which is the
+	// PE-G6 known limitation that the ClusterService topology reply
+	// surfaced as `leader_id: ""` on follower nodes.
+	observeCtx, observeCancel := context.WithCancel(context.Background())
+	e.observeCancel = observeCancel
+	go e.observeLoop(observeCtx)
+
 	return e, nil
 }
 
@@ -228,6 +245,51 @@ func (e *EtcdElector) watchSession() {
 	e.closeOnce.Do(func() {
 		close(e.lostCh)
 	})
+}
+
+// observeLoop streams `concurrency.Election.Observe` and caches every
+// observed leader value in `currentLeader`. The etcd client's Observe
+// implementation auto-reconnects on transient failures and emits the
+// current value whenever the leader key changes (including campaign +
+// resign + lease-expiry handovers). On any unexpected channel close we
+// briefly back off and re-Observe so a flaky connection doesn't leave
+// followers reporting a stale leader_id forever. Exits cleanly when
+// the parent context is cancelled by Close.
+func (e *EtcdElector) observeLoop(ctx context.Context) {
+	backoff := 200 * time.Millisecond
+	const maxBackoff = 5 * time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		ch := e.election.Observe(ctx)
+		for resp := range ch {
+			leader := ""
+			if len(resp.Kvs) > 0 {
+				leader = string(resp.Kvs[0].Value)
+			}
+			e.mu.Lock()
+			e.currentLeader = leader
+			e.mu.Unlock()
+			backoff = 200 * time.Millisecond // healthy stream resets backoff
+		}
+		// Channel closed; either ctx is done or the Observe stream
+		// died. Sleep with capped exponential backoff, then re-observe.
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
 }
 
 // AwaitLeadership campaigns for leadership and blocks until elected.
@@ -358,6 +420,10 @@ func (e *EtcdElector) Close() error {
 	// returns instead of leaking until lease expiry.
 	if e.sessionCancel != nil {
 		e.sessionCancel()
+	}
+	// Stop the leader-observer goroutine.
+	if e.observeCancel != nil {
+		e.observeCancel()
 	}
 
 	// Belt-and-suspenders: ensure lostCh is closed even if

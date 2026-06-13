@@ -788,6 +788,14 @@ ring; if the cursor is older than the ring's oldest entry it emits a
 Keep-alive comments (`:keepalive\n\n`) every 30s prevent reverse-proxy
 timeouts.
 
+**Provenance** (PE-G7.1): when frames are served through dashw (the BFF),
+every JSON body carries two extra fields stamped by the multiplexer:
+`source` (the upstream dashd identity, e.g., `dashd-1:9443`) and
+`via` (this dashw replica's identity — OS hostname or `--node-id`
+override). These let operators reading a stream sample identify the
+exact path the event travelled, including from `KEEPALIVE` frames.
+Full spec: [sse-event-provenance.md](sse-event-provenance.md).
+
 **Caps + rate limit** (PE-G7): the broadcaster caps subscribers globally
 (`MaxSubscribers=64`) and per-subject (`MaxSubscribersPerSubject=4`).
 A breach returns HTTP 429 + `Retry-After` (REST) or `ResourceExhausted`
@@ -873,6 +881,8 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 - [docs/dashd-features/](.) (this folder) — additional dashd feature notes as they land
 - [cluster-topology-design.md](cluster-topology-design.md) — PE-G6 design spec (problem / solution / architecture / acceptance criteria)
 - [topology-streaming-design.md](topology-streaming-design.md) — PE-G7 production hardening (D1-D7 defects, dashw multiplexer, `/topology-v2` SPA, Future Scopes ×14)
+- [sse-event-provenance.md](sse-event-provenance.md) — PE-G7.1 SSE `source` + `via` stamping (operator-visible source identification)
+- [topology-operator-polish.md](topology-operator-polish.md) — PE-G7.1 operator polish (`dashctl topology --follow` + leader observer + `/topology-v2` cordon button)
 - [proto/dashcenter/v1/](../../proto/dashcenter/v1) — proto sources of truth
 - [docs/CLI_GUIDE.md](../CLI_GUIDE.md) — `dashctl` equivalents
 - [deploy/test-setup/05-full-console/manual-handson.md](../../deploy/test-setup/05-full-console/manual-handson.md) — Lab 12.6 live captures of every diagnostic

@@ -405,6 +405,119 @@ func TestClose_Idempotent(t *testing.T) {
 	}
 }
 
+// --- Background leader observer (the PE-G6 follower-LeaderID fix) -----
+
+// TestLeaderObserver_FollowerSeesLeaderWithoutExplicitCall asserts that
+// a follower node's LeaderID() returns the elected leader without the
+// caller having to invoke ObserveCurrentLeader explicitly. Before this
+// fix, /admin/topology and ClusterService.GetTopology served by a
+// follower returned `leader_id: ""` until somebody happened to call
+// ObserveCurrentLeader — confusing for operators reading the JSON.
+func TestLeaderObserver_FollowerSeesLeaderWithoutExplicitCall(t *testing.T) {
+	endpoint := setupEmbedded(t)
+	key := "/dashd-test/" + t.Name()
+
+	mkElector := func(nodeID string) *EtcdElector {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		e, err := NewEtcdElector(ctx, EtcdConfig{
+			Endpoints:   []string{endpoint},
+			NodeID:      nodeID,
+			LeaseTTL:    2 * time.Second,
+			LeaderKey:   key,
+			DialTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("NewEtcdElector %s: %v", nodeID, err)
+		}
+		t.Cleanup(func() { _ = e.Close() })
+		return e
+	}
+
+	leader := mkElector("node-leader")
+	follower := mkElector("node-follower")
+
+	// Make `node-leader` actually win the election.
+	awaitCtx, awaitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer awaitCancel()
+	if err := leader.AwaitLeadership(awaitCtx); err != nil {
+		t.Fatalf("AwaitLeadership: %v", err)
+	}
+
+	// The background observeLoop should propagate the leader value to
+	// the follower without the test calling ObserveCurrentLeader.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if follower.LeaderID() == "node-leader" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("follower LeaderID = %q after 5s; want node-leader", follower.LeaderID())
+}
+
+// TestLeaderObserver_FollowerSeesLeaderHandover asserts the observer
+// goroutine reacts to leader changes so `LeaderID()` follows the
+// election, not just the first leader. The follower starts watching
+// `node-a`, we resign, `node-b` takes over, and the follower's
+// LeaderID() must flip to `node-b` within a few seconds.
+func TestLeaderObserver_FollowerSeesLeaderHandover(t *testing.T) {
+	endpoint := setupEmbedded(t)
+	key := "/dashd-test/" + t.Name()
+
+	mkElector := func(nodeID string) *EtcdElector {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		e, err := NewEtcdElector(ctx, EtcdConfig{
+			Endpoints:   []string{endpoint},
+			NodeID:      nodeID,
+			LeaseTTL:    2 * time.Second,
+			LeaderKey:   key,
+			DialTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("NewEtcdElector %s: %v", nodeID, err)
+		}
+		return e
+	}
+
+	follower := mkElector("node-follower")
+	t.Cleanup(func() { _ = follower.Close() })
+
+	nodeA := mkElector("node-a")
+	awaitCtx, awaitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer awaitCancel()
+	if err := nodeA.AwaitLeadership(awaitCtx); err != nil {
+		t.Fatalf("nodeA.AwaitLeadership: %v", err)
+	}
+	// Wait for observer to settle on node-a.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && follower.LeaderID() != "node-a" {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if follower.LeaderID() != "node-a" {
+		t.Fatalf("pre-handover LeaderID = %q; want node-a", follower.LeaderID())
+	}
+
+	// Close node-a (resigns cleanly + session torn down) and bring up node-b.
+	_ = nodeA.Close()
+	nodeB := mkElector("node-b")
+	t.Cleanup(func() { _ = nodeB.Close() })
+	awaitCtx2, awaitCancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer awaitCancel2()
+	if err := nodeB.AwaitLeadership(awaitCtx2); err != nil {
+		t.Fatalf("nodeB.AwaitLeadership: %v", err)
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && follower.LeaderID() != "node-b" {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if follower.LeaderID() != "node-b" {
+		t.Fatalf("post-handover LeaderID = %q; want node-b", follower.LeaderID())
+	}
+}
+
 // --- interface assertion ----------------------------------------------
 
 func TestEtcdElector_SatisfiesInterface(t *testing.T) {

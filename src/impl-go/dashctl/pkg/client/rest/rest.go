@@ -5,6 +5,7 @@
 package rest
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -283,6 +285,123 @@ func (c *Client) AdminEniPlacement(ctx context.Context) ([]client.EniPlacementRo
 		return nil, err
 	}
 	return raw.Items, nil
+}
+
+// --- Cluster topology (PE-G6 / PE-G7) ---
+
+// GetTopology fetches a unary topology snapshot from dashd REST.
+func (c *Client) GetTopology(ctx context.Context, includeEnis bool) (*client.TopologySnapshot, error) {
+	path := "/v1/cluster/topology"
+	if includeEnis {
+		path += "?include_enis=true"
+	}
+	out := &client.TopologySnapshot{}
+	if err := c.do(ctx, http.MethodGet, c.api(path), nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// StreamTopology opens dashd's SSE stream and decodes each `data:` line
+// as a TopologyEvent, invoking opts.OnEvent for every frame until the
+// context is cancelled, the server closes the stream, or OnEvent
+// returns a non-nil sentinel error.
+//
+// The cursor (opts.LastEventID) is sent both as the Last-Event-ID HTTP
+// header AND as a ?last_event_id query param so it works across any
+// reverse proxy that strips one or the other.
+func (c *Client) StreamTopology(ctx context.Context, opts client.TopologyWatchOptions) error {
+	if opts.OnEvent == nil {
+		return pkgerrors.New(pkgerrors.CodeInvalidArgument, "rest: StreamTopology requires OnEvent")
+	}
+	q := url.Values{}
+	if opts.IncludeEnis {
+		q.Set("include_enis", "true")
+	}
+	if opts.LastEventID > 0 {
+		q.Set("last_event_id", strconv.FormatUint(opts.LastEventID, 10))
+	}
+	path := "/v1/cluster/topology/watch"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.api(path), nil)
+	if err != nil {
+		return pkgerrors.Wrap(pkgerrors.CodeUnavailable, "rest: build watch request", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if opts.LastEventID > 0 {
+		req.Header.Set("Last-Event-ID", strconv.FormatUint(opts.LastEventID, 10))
+	}
+
+	// Use a NEW http.Client without the response-header timeout — the
+	// stream is intentionally long-lived. Reuse the configured transport
+	// so TLS / dial settings are shared.
+	streamHTTP := &http.Client{Transport: c.httpc.Transport}
+	resp, err := streamHTTP.Do(req)
+	if err != nil {
+		return pkgerrors.Wrap(pkgerrors.CodeUnavailable, "rest: open watch stream", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return pkgerrors.New(pkgerrors.CodeUnavailable,
+			fmt.Sprintf("rest: watch stream HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+	}
+
+	// SSE parser: accumulate `data:` lines until a blank line, then
+	// dispatch one event. Comment lines (`:keepalive`) and `id:`/`event:`
+	// metadata are recognised but skipped (the JSON body already carries
+	// kind + event_id).
+	rd := bufio.NewReaderSize(resp.Body, 64*1024)
+	var dataBuf strings.Builder
+	for {
+		line, err := rd.ReadString('\n')
+		if err != nil {
+			if err == io.EOF && dataBuf.Len() == 0 {
+				return nil
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return pkgerrors.Wrap(pkgerrors.CodeUnavailable, "rest: watch stream read", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		// Blank line = dispatch the accumulated event.
+		if line == "" {
+			if dataBuf.Len() == 0 {
+				continue
+			}
+			var ev client.TopologyEvent
+			if jerr := json.Unmarshal([]byte(dataBuf.String()), &ev); jerr == nil {
+				if cberr := opts.OnEvent(ev); cberr != nil {
+					return cberr
+				}
+			}
+			dataBuf.Reset()
+			continue
+		}
+		// Skip comments (keepalive) + meta fields.
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		const dataPrefix = "data:"
+		if strings.HasPrefix(line, dataPrefix) {
+			payload := strings.TrimPrefix(line, dataPrefix)
+			payload = strings.TrimPrefix(payload, " ")
+			if dataBuf.Len() > 0 {
+				dataBuf.WriteByte('\n')
+			}
+			dataBuf.WriteString(payload)
+			continue
+		}
+		// `id:`, `event:`, `retry:` are recognised SSE metadata but
+		// dashd embeds equivalents in the JSON body so we drop them.
+	}
 }
 
 // --- HTTP plumbing ---

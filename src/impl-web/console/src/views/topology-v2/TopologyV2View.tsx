@@ -26,7 +26,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Crown, Server, Cpu, HardDrive, Network, CheckCircle2,
   AlertTriangle, XCircle, Activity, Pause, Play, Radio, Wifi, WifiOff, X,
-  Square, Trash2, Info, RefreshCw,
+  Square, Trash2, Info, RefreshCw, Lock, Unlock, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -351,15 +351,114 @@ function InspectorDrawer() {
       width="lg"
     >
       {entity ? (
-        <pre className="text-xs font-mono overflow-auto text-[color:var(--text-primary)] p-3 rounded-md bg-[color:var(--bg-primary)] border border-[color:var(--border-subtle)]">
+        <div className="flex flex-col gap-3">
+          {selectedKind === 'dpu' && selectedId && (
+            <DpuActions dpuId={selectedId} cordoned={!!(entity as { cordoned?: boolean }).cordoned} />
+          )}
+          <pre className="text-xs font-mono overflow-auto text-[color:var(--text-primary)] p-3 rounded-md bg-[color:var(--bg-primary)] border border-[color:var(--border-subtle)]">
 {JSON.stringify(entity, null, 2)}
-        </pre>
+          </pre>
+        </div>
       ) : (
         <div className="text-sm text-[color:var(--text-muted)] flex items-center gap-2">
           <X size={14} /> Entity no longer present in topology (probably removed).
         </div>
       )}
     </Drawer>
+  );
+}
+
+// DpuActions renders the cordon / uncordon toggle for a DPU.
+//
+// Wire path: browser → dashw → dashd (browser NEVER calls dashd direct).
+// dashw proxies /api/v1/* through to dashd /v1/*, so POSTing to
+// /api/v1/inventory/{id}/cordon hits the same dashd endpoint operators
+// drive from dashctl + the REST docs.
+//
+// UX:
+//   * disabled while inflight
+//   * red-toned button when cordoned ("Uncordon")
+//   * amber-toned button when uncordoned ("Cordon")
+//   * banner shows the last result (success / error) until the next click
+//   * does NOT optimistically update the store — we rely on the dashd
+//     broadcaster's KIND_DPU_STATE event coming back through dashw and
+//     reaching the topology-v2 store organically. If streaming is OFF,
+//     the snapshot's 30s auto-refetch catches up. This matches the
+//     dashd-is-source-of-truth invariant the rest of the page follows.
+function DpuActions({ dpuId, cordoned }: { dpuId: string; cordoned: boolean }) {
+  const [inflight, setInflight] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const verb: 'cordon' | 'uncordon' = cordoned ? 'uncordon' : 'cordon';
+  const onClick = async () => {
+    setInflight(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/v1/inventory/${encodeURIComponent(dpuId)}/${verb}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: `operator action from /topology-v2` }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        setResult({ ok: false, msg: `HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ''}` });
+        return;
+      }
+      setResult({
+        ok: true,
+        msg: cordoned
+          ? 'Uncordoned. dashd will resume scheduling onto this DPU; next dpu_state event will reflect the change.'
+          : 'Cordoned. dashd will stop scheduling new workloads here; existing ENIs are unaffected.',
+      });
+    } catch (err) {
+      setResult({ ok: false, msg: String((err as Error)?.message ?? err) });
+    } finally {
+      setInflight(false);
+    }
+  };
+
+  const tone = cordoned
+    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+    : 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20';
+  const Icon = cordoned ? Unlock : Lock;
+
+  return (
+    <div className="rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-secondary)] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-[color:var(--text-secondary)] uppercase tracking-wider">DPU lifecycle</div>
+          <div className="text-xs text-[color:var(--text-muted)] mt-1">
+            Current state: {cordoned
+              ? <span className="text-amber-300">cordoned (no new workloads)</span>
+              : <span className="text-emerald-300">uncordoned (scheduling enabled)</span>}
+          </div>
+        </div>
+        <button
+          onClick={onClick}
+          disabled={inflight}
+          className={cn(
+            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-wait',
+            tone,
+          )}
+          title={cordoned
+            ? `POST /api/v1/inventory/${dpuId}/uncordon`
+            : `POST /api/v1/inventory/${dpuId}/cordon`}
+        >
+          {inflight
+            ? <><Loader2 size={12} className="animate-spin" /> Working…</>
+            : <><Icon size={12} /> {cordoned ? 'Uncordon DPU' : 'Cordon DPU'}</>}
+        </button>
+      </div>
+      {result && (
+        <div className={cn(
+          'mt-3 text-xs px-2 py-1.5 rounded border',
+          result.ok
+            ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200'
+            : 'border-red-500/30 bg-red-500/5 text-red-200',
+        )}>
+          {result.msg}
+        </div>
+      )}
+    </div>
   );
 }
 

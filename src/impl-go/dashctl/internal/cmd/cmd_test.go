@@ -37,6 +37,8 @@ type fakeClient struct {
 	adminDriftFn     func(ctx context.Context, dpu string) ([]client.DriftItem, error)
 	adminPlacementFn func(ctx context.Context) ([]client.EniPlacementRow, error)
 	simulateFn       func(ctx context.Context, opsJSON []byte) (*client.SimulateResult, error)
+	getTopologyFn    func(ctx context.Context, includeEnis bool) (*client.TopologySnapshot, error)
+	streamTopologyFn func(ctx context.Context, opts client.TopologyWatchOptions) error
 }
 
 type putCall struct {
@@ -132,6 +134,18 @@ func (f *fakeClient) Simulate(ctx context.Context, opsJSON []byte) (*client.Simu
 		return f.simulateFn(ctx, opsJSON)
 	}
 	return &client.SimulateResult{WouldSucceed: true}, nil
+}
+func (f *fakeClient) GetTopology(ctx context.Context, includeEnis bool) (*client.TopologySnapshot, error) {
+	if f.getTopologyFn != nil {
+		return f.getTopologyFn(ctx, includeEnis)
+	}
+	return &client.TopologySnapshot{}, nil
+}
+func (f *fakeClient) StreamTopology(ctx context.Context, opts client.TopologyWatchOptions) error {
+	if f.streamTopologyFn != nil {
+		return f.streamTopologyFn(ctx, opts)
+	}
+	return nil
 }
 
 // testApp returns an Application with fake client, captured streams,

@@ -99,6 +99,140 @@ type SimulateDpuImpact struct {
 	Reason            string `json:"reason,omitempty"`
 }
 
+// ── Cluster topology (PE-G6 / PE-G7) ─────────────────────────────────────
+//
+// The shapes below mirror the protojson wire format of
+// dashcenter.v1.{TopologyResponse,TopologyEvent,...} as served by dashd
+// REST `/v1/cluster/topology` + `/v1/cluster/topology/watch`. They are
+// kept hand-rolled here (rather than pulled from gen/go) to avoid
+// dragging the proto runtime into the dashctl binary — matches the same
+// pattern as PutResult / StoredItem above.
+
+// TopologyClusterNode is one dashd controller in the cluster.
+type TopologyClusterNode struct {
+	NodeID     string            `json:"node_id"`
+	RestAddr   string            `json:"rest_addr,omitempty"`
+	GrpcAddr   string            `json:"grpc_addr,omitempty"`
+	AdminAddr  string            `json:"admin_addr,omitempty"`
+	Version    string            `json:"version,omitempty"`
+	BuildSha   string            `json:"build_sha,omitempty"`
+	StartedAt  string            `json:"started_at,omitempty"`
+	IsLeader   bool              `json:"is_leader,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+}
+
+// TopologyClusterInfo mirrors dashcenter.v1.ClusterInfo.
+type TopologyClusterInfo struct {
+	Healthy   bool                  `json:"healthy"`
+	LeaderID  string                `json:"leader_id,omitempty"`
+	NodeCount int                   `json:"node_count"`
+	Nodes     []TopologyClusterNode `json:"nodes"`
+}
+
+// TopologyEni mirrors dashcenter.v1.EniTopInfo.
+type TopologyEni struct {
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace,omitempty"`
+	VnetName   string `json:"vnet_name,omitempty"`
+	MacAddress string `json:"mac_address,omitempty"`
+	AdminState string `json:"admin_state,omitempty"`
+}
+
+// TopologyDpu mirrors dashcenter.v1.DpuTopInfo.
+type TopologyDpu struct {
+	ID       string        `json:"id"`
+	Slot     int32         `json:"slot,omitempty"`
+	State    string        `json:"state"`
+	LastSeen string        `json:"last_seen,omitempty"`
+	EniCount int           `json:"eni_count"`
+	Cordoned bool          `json:"cordoned,omitempty"`
+	Enis     []TopologyEni `json:"enis,omitempty"`
+}
+
+// TopologyAppliance mirrors dashcenter.v1.ApplianceInfo.
+type TopologyAppliance struct {
+	ID   string        `json:"id"`
+	Zone string        `json:"zone,omitempty"`
+	Tier string        `json:"tier,omitempty"`
+	Dpus []TopologyDpu `json:"dpus"`
+}
+
+// TopologyZone mirrors dashcenter.v1.ZoneInfo.
+type TopologyZone struct {
+	Zone           string `json:"zone"`
+	ApplianceCount int    `json:"appliance_count"`
+	DpuCount       int    `json:"dpu_count"`
+	EniCount       int    `json:"eni_count"`
+}
+
+// TopologySummary mirrors dashcenter.v1.TopologySummary.
+type TopologySummary struct {
+	TotalNodes      int `json:"total_nodes"`
+	TotalAppliances int `json:"total_appliances"`
+	TotalDpus       int `json:"total_dpus"`
+	TotalEnis       int `json:"total_enis"`
+	HealthyDpus     int `json:"healthy_dpus"`
+	DegradedDpus    int `json:"degraded_dpus"`
+	OfflineDpus     int `json:"offline_dpus"`
+	CordonedDpus    int `json:"cordoned_dpus"`
+}
+
+// TopologyNamespaceObjectCounts mirrors dashcenter.v1.NamespaceObjectCounts.
+type TopologyNamespaceObjectCounts struct {
+	Vnets          int `json:"vnets,omitempty"`
+	Enis           int `json:"enis,omitempty"`
+	VnetMappings   int `json:"vnet_mappings,omitempty"`
+	AclPolicies    int `json:"acl_policies,omitempty"`
+	RoutePolicies  int `json:"route_policies,omitempty"`
+	HaSets         int `json:"ha_sets,omitempty"`
+	ServiceTunnels int `json:"service_tunnels,omitempty"`
+}
+
+// TopologySnapshot is the unary GetTopology reply (also the body of the
+// first SSE event with kind=KIND_SNAPSHOT).
+type TopologySnapshot struct {
+	ComputedAt  string                                   `json:"computed_at,omitempty"`
+	Cluster     *TopologyClusterInfo                     `json:"cluster,omitempty"`
+	Appliances  []TopologyAppliance                      `json:"appliances,omitempty"`
+	Zones       []TopologyZone                           `json:"zones,omitempty"`
+	Summary     *TopologySummary                         `json:"summary,omitempty"`
+	Objects     map[string]TopologyNamespaceObjectCounts `json:"objects,omitempty"`
+}
+
+// TopologyNotice mirrors dashcenter.v1.Notice (payload for KIND_KEEPALIVE
+// / KIND_DROPPED / KIND_RATE_LIMITED / KIND_RESYNC events).
+type TopologyNotice struct {
+	DroppedCount    uint64 `json:"dropped_count,omitempty"`
+	SuppressedCount uint64 `json:"suppressed_count,omitempty"`
+	Message         string `json:"message,omitempty"`
+	CurrentEventID  uint64 `json:"current_event_id,omitempty"`
+}
+
+// TopologyEvent mirrors dashcenter.v1.TopologyEvent. One frame per SSE
+// event. Kind values are the proto enum names with the KIND_ prefix:
+//
+//	KIND_SNAPSHOT      KIND_PEER_ADDED   KIND_PEER_REMOVED   KIND_PEER_UPDATED
+//	KIND_LEADER_CHANGED KIND_DPU_ADDED   KIND_DPU_REMOVED    KIND_DPU_STATE
+//	KIND_KEEPALIVE     KIND_DROPPED      KIND_RATE_LIMITED   KIND_RESYNC
+type TopologyEvent struct {
+	Kind        string               `json:"kind"`
+	Ts          string               `json:"ts,omitempty"`
+	EventID     uint64               `json:"event_id,omitempty"`
+	Snapshot    *TopologySnapshot    `json:"snapshot,omitempty"`
+	Peer        *TopologyClusterNode `json:"peer,omitempty"`
+	Dpu         *TopologyDpu         `json:"dpu,omitempty"`
+	Notice      *TopologyNotice      `json:"notice,omitempty"`
+	OldLeaderID string               `json:"old_leader_id,omitempty"`
+	NewLeaderID string               `json:"new_leader_id,omitempty"`
+}
+
+// TopologyWatchOptions narrows a StreamTopology call.
+type TopologyWatchOptions struct {
+	IncludeEnis     bool
+	LastEventID     uint64 // resume cursor
+	OnEvent         func(TopologyEvent) error // return non-nil to stop
+}
+
 // SimulateResult is the dashd reply to POST /v1/simulate (PB-2).
 type SimulateResult struct {
 	WouldSucceed     bool                 `json:"would_succeed"`
@@ -138,6 +272,13 @@ type Client interface {
 	// Admin views.
 	AdminDrift(ctx context.Context, dpuID string) ([]DriftItem, error)
 	AdminEniPlacement(ctx context.Context) ([]EniPlacementRow, error)
+
+	// Cluster topology (PE-G6 / PE-G7).
+	GetTopology(ctx context.Context, includeEnis bool) (*TopologySnapshot, error)
+	// StreamTopology opens an SSE stream and invokes opts.OnEvent for
+	// every received frame until the context is cancelled, the server
+	// closes the stream, or OnEvent returns a non-nil sentinel error.
+	StreamTopology(ctx context.Context, opts TopologyWatchOptions) error
 }
 
 // Factory builds a Client from a resolved config. Phase 1 only registers
