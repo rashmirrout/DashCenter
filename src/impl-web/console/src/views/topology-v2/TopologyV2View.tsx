@@ -45,13 +45,26 @@ function ConnectionBadge({ streaming }: { streaming: boolean }) {
   const ageMs = health.lastEventAt ? Date.now() - health.lastEventAt : Infinity;
   const isStale = ageMs > 45_000 && health.connection === 'open';
 
+  // Provenance line shown under the status badge whenever we have
+  // either source or via (the dashw BFF stamps both on every frame).
+  const provenance = (health.lastSource || health.lastVia) ? (
+    <span
+      className="text-[10px] text-[color:var(--text-muted)] font-mono tracking-tight"
+      title="Source = upstream dashd that produced this event · Via = dashw replica that relayed it"
+    >
+      {health.lastSource || '?'} <span className="text-[color:var(--border-strong)]">→</span> {health.lastVia || '?'}
+    </span>
+  ) : null;
+
   // When the user has streaming OFF, show a clean "Off" badge instead
   // of the underlying ConnectionState (which would say "idle").
   if (!streaming) {
     return (
-      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-secondary)]">
-        <WifiOff size={14} className="text-[color:var(--text-muted)]" />
-        <span className="text-xs font-medium text-[color:var(--text-muted)]">Live: Off</span>
+      <div className="flex flex-col items-end gap-0.5 px-3 py-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-secondary)]">
+        <div className="flex items-center gap-1.5">
+          <WifiOff size={14} className="text-[color:var(--text-muted)]" />
+          <span className="text-xs font-medium text-[color:var(--text-muted)]">Live: Off</span>
+        </div>
       </div>
     );
   }
@@ -263,6 +276,9 @@ function EventTicker() {
           showing last {recent.length} of {log.length}
         </span>
       </div>
+      <div className="grid grid-cols-[80px_140px_1fr_140px_60px] gap-2 px-4 py-1 border-b border-[color:var(--border-subtle)]/50 text-[10px] uppercase tracking-wider text-[color:var(--text-muted)]">
+        <span>Time</span><span>Kind</span><span>Detail</span><span className="text-right">Source → Via</span><span className="text-right">ID</span>
+      </div>
       <div className="max-h-48 overflow-y-auto font-mono text-[11px]">
         {recent.map((ev, idx) => (
           <EventRow key={`${ev.event_id ?? 0}-${idx}`} ev={ev} />
@@ -294,11 +310,27 @@ function EventRow({ ev }: { ev: TopologyEvent }) {
     ?? ev.new_leader_id
     ?? ev.notice?.message
     ?? '';
+  // Compact provenance string "dashd-1→dashw-0" rendered as a tooltip
+  // hint on the kind cell, so the column-grid stays tight.
+  const provenance = (ev.source || ev.via)
+    ? `${ev.source ?? '?'} → ${ev.via ?? '?'}`
+    : '';
   return (
-    <div className="grid grid-cols-[80px_140px_1fr_60px] gap-2 px-4 py-1 hover:bg-[color:var(--bg-primary)] border-b border-[color:var(--border-subtle)]/30">
+    <div className="grid grid-cols-[80px_140px_1fr_140px_60px] gap-2 px-4 py-1 hover:bg-[color:var(--bg-primary)] border-b border-[color:var(--border-subtle)]/30">
       <span className="text-[color:var(--text-muted)]">{ts}</span>
-      <span className={cn('uppercase tracking-wider', colorMap[kind] ?? 'text-[color:var(--text-secondary)]')}>{kind}</span>
+      <span
+        className={cn('uppercase tracking-wider', colorMap[kind] ?? 'text-[color:var(--text-secondary)]')}
+        title={provenance ? `from ${provenance}` : undefined}
+      >
+        {kind}
+      </span>
       <span className="text-[color:var(--text-primary)] truncate">{detail}</span>
+      <span
+        className="text-[color:var(--text-muted)] truncate text-right"
+        title={provenance}
+      >
+        {provenance || '—'}
+      </span>
       <span className="text-right text-[color:var(--text-muted)]">#{ev.event_id ?? '–'}</span>
     </div>
   );
@@ -484,15 +516,21 @@ export default function TopologyV2View() {
 function InstructionBanner({ streaming }: { streaming: boolean }) {
   // Tiny persistent helper text below the header. Tells the user the
   // page is interactive without the live stream + how to enable it.
+  const health = useTopologyV2Store(selectStreamHealth);
   return (
     <div className="flex items-start gap-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-secondary)] px-3 py-2 text-xs text-[color:var(--text-secondary)]">
       <Info size={14} className="text-cyan-400 mt-0.5 flex-shrink-0" />
       {streaming ? (
         <span>
           <strong className="text-emerald-300">Live stream is ON.</strong>{' '}
-          Snapshot + deltas arrive via SSE. Click any node, appliance, or DPU
-          to inspect. Use <strong>Stop live</strong> to pause without losing
-          the cached view.
+          Snapshot + deltas arrive via SSE from{' '}
+          <code className="text-[color:var(--text-primary)]">{health.lastSource || 'dashd (pending first event)'}</code>{' '}
+          relayed by{' '}
+          <code className="text-[color:var(--text-primary)]">{health.lastVia || 'this dashw'}</code>.
+          Click any node, appliance, or DPU to inspect. Use{' '}
+          <strong>Stop live</strong> to pause without losing the cached view.
+          Each event row shows its <code>source → via</code> path in the
+          fourth column.
         </span>
       ) : (
         <span>
@@ -500,7 +538,10 @@ function InstructionBanner({ streaming }: { streaming: boolean }) {
           any node, appliance, or DPU to inspect. To see real-time changes
           (peer add/remove, DPU state, leader change) click{' '}
           <strong className="text-emerald-300">Start live</strong> at the top right.
-          Snapshots auto-refresh every 30s; use <strong>Refresh</strong> for an on-demand fetch.
+          Every live event is stamped by dashw with its <code>source</code>
+          (originating dashd) and <code>via</code> (relaying dashw replica)
+          so you always know where it came from. Snapshots auto-refresh every
+          30s; use <strong>Refresh</strong> for an on-demand fetch.
         </span>
       )}
     </div>

@@ -119,4 +119,18 @@ export interface TopologyEvent {
   notice?: NoticePayload;
   old_leader_id?: string;
   new_leader_id?: string;
+  /**
+   * PE-G7 provenance fields stamped by dashw (the BFF) onto every
+   * fan-out frame so the browser can identify the path the event
+   * travelled:
+   *   - `source` = upstream dashd identity (e.g. "dashd-1:9443").
+   *               Present on EVERY frame including KEEPALIVE, so the
+   *               operator knows which dashd produced even idle frames.
+   *   - `via`    = this dashw replica's identity (hostname or
+   *               --node-id flag value). Useful when N dashw replicas
+   *               sit behind an LB and you need to know which one
+   *               handled a session.
+   */
+  source?: string;
+  via?: string;
 }

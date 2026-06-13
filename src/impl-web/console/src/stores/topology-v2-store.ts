@@ -41,6 +41,14 @@ export interface TopologyV2State {
   droppedEvents: number;         // total dropped (server-reported)
   suppressedEvents: number;      // total rate-limited (server-reported)
 
+  // Provenance (PE-G7): the SSE frame's `source` / `via` annotations
+  // copied from the most recent event so the UI can render
+  // "dashd-1:9443 → dashw-replica-2" in the connection badge. We keep
+  // the LATEST seen value so failovers (upstream leader switch) are
+  // surfaced organically.
+  lastSource?: string;
+  lastVia?: string;
+
   // Data.
   topology: TopologyV2Response | null;
 
@@ -87,6 +95,8 @@ export const useTopologyV2Store = create<TopologyV2State>((set, get) => ({
     if (typeof ev.event_id === 'number' && ev.event_id > st.lastEventId) {
       next.lastEventId = ev.event_id;
     }
+    if (ev.source) next.lastSource = ev.source;
+    if (ev.via) next.lastVia = ev.via;
     if (!st.topology) {
       return next;
     }
@@ -172,6 +182,8 @@ export const useTopologyV2Store = create<TopologyV2State>((set, get) => ({
     upstreamReconnects: 0,
     droppedEvents: 0,
     suppressedEvents: 0,
+    lastSource: undefined,
+    lastVia: undefined,
     topology: null,
     eventLog: [],
     selectedKind: undefined,
@@ -214,6 +226,8 @@ export const selectStreamHealth = (s: TopologyV2State) => ({
   droppedEvents: s.droppedEvents,
   suppressedEvents: s.suppressedEvents,
   lastError: s.lastError,
+  lastSource: s.lastSource,
+  lastVia: s.lastVia,
 });
 
 // findEntity finds a peer / appliance / dpu / eni by id for the

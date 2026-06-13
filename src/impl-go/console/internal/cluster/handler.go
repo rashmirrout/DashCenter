@@ -115,7 +115,7 @@ func (h *HTTPHandler) SSE(w http.ResponseWriter, r *http.Request) {
 			Ts:   timestamppb.Now(),
 			Body: &dashcenterv1.TopologyEvent_Snapshot{Snapshot: snap},
 		}
-		if frame, ferr := buildFrame(ev); ferr == nil {
+		if frame, ferr := h.hub.buildFrame(ev); ferr == nil {
 			if err := writeSSEFrame(w, flusher, frame); err != nil {
 				return
 			}
@@ -148,7 +148,7 @@ func (h *HTTPHandler) SSE(w http.ResponseWriter, r *http.Request) {
 			// for this watcher.
 			if n := watcher.TakeDroppedCount(); n > 0 {
 				notice := dropNotice(n)
-				if frame, ferr := buildFrame(notice); ferr == nil {
+				if frame, ferr := h.hub.buildFrame(notice); ferr == nil {
 					if err := writeSSEFrame(w, flusher, frame); err != nil {
 						return
 					}
@@ -204,7 +204,7 @@ func (h *HTTPHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 				Ts:   timestamppb.Now(),
 				Body: &dashcenterv1.TopologyEvent_Snapshot{Snapshot: snap},
 			}
-			if frame, ferr := buildFrame(ev); ferr == nil {
+			if frame, ferr := h.hub.buildFrame(ev); ferr == nil {
 				_ = conn.Write(r.Context(), websocket.MessageText, frame.JSON)
 			}
 		}
@@ -229,7 +229,7 @@ func (h *HTTPHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			if n := watcher.TakeDroppedCount(); n > 0 {
 				notice := dropNotice(n)
-				if frame, ferr := buildFrame(notice); ferr == nil {
+				if frame, ferr := h.hub.buildFrame(notice); ferr == nil {
 					_ = conn.Write(r.Context(), websocket.MessageText, frame.JSON)
 				}
 			}

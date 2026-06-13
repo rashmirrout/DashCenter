@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -94,6 +95,19 @@ type HubConfig struct {
 	// upstream gRPC WatchTopology stream.
 	UpstreamReconnectMin time.Duration
 	UpstreamReconnectMax time.Duration
+
+	// UpstreamLabel is the human-readable identity of the dashd this
+	// hub fans out from. Stamped on every outbound JSON frame as
+	// `source` so the browser can tell which dashd produced an
+	// event (including KEEPALIVE). Typically the dashd address (e.g.,
+	// "dashd-1:9443") supplied by the dashw server bootstrap.
+	UpstreamLabel string
+
+	// SelfLabel is this dashw replica's identity. Stamped on every
+	// outbound JSON frame as `via` so the browser can tell which BFF
+	// relayed the event. Typically the OS hostname or the
+	// DASHW_NODE_ID env var.
+	SelfLabel string
 }
 
 // DefaultHubConfig is the production-ready zero-config.
@@ -414,7 +428,7 @@ func (h *Hub) enqueueResyncLocked(w *watcher, current uint64, msg string) {
 			CurrentEventId: current,
 		}},
 	}
-	frame, _ := buildFrame(ev)
+	frame, _ := h.buildFrame(ev)
 	h.enqueueLocked(w, frame)
 }
 
@@ -498,7 +512,7 @@ func (h *Hub) runUpstreamOnce(ctx context.Context, cursor *uint64) error {
 			*cursor = id
 		}
 		// Build the pre-marshalled frame ONCE and fan out.
-		frame, ferr := buildFrame(ev)
+		frame, ferr := h.buildFrame(ev)
 		if ferr != nil {
 			if h.logger != nil {
 				h.logger.Warn("hub: marshal failed; dropping", "error", ferr)
@@ -576,7 +590,7 @@ func (h *Hub) fanoutResync(msg string) {
 			Message: msg,
 		}},
 	}
-	frame, _ := buildFrame(ev)
+	frame, _ := h.buildFrame(ev)
 	if frame == nil {
 		return
 	}
@@ -627,7 +641,11 @@ func (h *Hub) Stats() Stats {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-func buildFrame(ev *dashcenterv1.TopologyEvent) (*Frame, error) {
+// buildFrame marshals the event ONCE and splices the per-hub
+// source/via annotation into the JSON before returning. The splice
+// is a byte-level insert (no second protojson pass) so we preserve
+// the marshal-once-fanout-many invariant from PE-G7 D2.
+func (h *Hub) buildFrame(ev *dashcenterv1.TopologyEvent) (*Frame, error) {
 	js, err := protojson.MarshalOptions{
 		UseProtoNames:   true,
 		EmitUnpopulated: false,
@@ -635,7 +653,43 @@ func buildFrame(ev *dashcenterv1.TopologyEvent) (*Frame, error) {
 	if err != nil {
 		return nil, err
 	}
+	js = injectSourceVia(js, h.cfg.UpstreamLabel, h.cfg.SelfLabel)
 	return &Frame{Event: ev, JSON: js}, nil
+}
+
+// injectSourceVia splices `,"source":"X","via":"Y"` immediately before
+// the trailing `}` of a protojson object. Returns the original bytes
+// unchanged if both labels are empty or the input isn't a JSON object.
+func injectSourceVia(js []byte, source, via string) []byte {
+	if source == "" && via == "" {
+		return js
+	}
+	if n := len(js); n < 2 || js[n-1] != '}' {
+		return js
+	}
+	buf := make([]byte, 0, len(js)+len(source)+len(via)+24)
+	buf = append(buf, js[:len(js)-1]...)
+	// Protojson on a populated TopologyEvent always has at least
+	// `{"kind":...}` so a leading `,` is safe; but defend against
+	// the empty-object case for tests.
+	if len(js) > 2 {
+		buf = append(buf, ',')
+	}
+	wrote := false
+	if source != "" {
+		buf = append(buf, `"source":`...)
+		buf = strconv.AppendQuote(buf, source)
+		wrote = true
+	}
+	if via != "" {
+		if wrote {
+			buf = append(buf, ',')
+		}
+		buf = append(buf, `"via":`...)
+		buf = strconv.AppendQuote(buf, via)
+	}
+	buf = append(buf, '}')
+	return buf
 }
 
 func kindLabel(ev *dashcenterv1.TopologyEvent) string {

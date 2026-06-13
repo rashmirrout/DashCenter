@@ -63,6 +63,8 @@ SnapshotCacheTTL:     cfg.TopoSnapshotCacheTTL,
 IdleTimeout:          cfg.TopoIdleTimeout,
 UpstreamReconnectMin: cfg.TopoUpstreamReconnectMin,
 UpstreamReconnectMax: cfg.TopoUpstreamReconnectMax,
+UpstreamLabel:        cfg.DashdGrpcAddr, // best-effort dashd identity (addr); browser shows as `source`
+SelfLabel:            cfg.NodeID,        // this dashw replica id; browser shows as `via`
 }, logger)
 }
 }

@@ -56,6 +56,13 @@ type Config struct {
 	// ── Build info ──────────────────────────────────────────────
 	Version string
 
+	// ── Identity ────────────────────────────────────────────────
+	// NodeID is this dashw replica's human-readable identifier,
+	// stamped on every fan-out frame as `via` so browsers can tell
+	// which BFF replica relayed the event. Defaults to the OS
+	// hostname; override via --node-id or DASHW_NODE_ID.
+	NodeID string
+
 	// ── Topology streaming hub (PE-G7) ──────────────────────────
 	// MaxWatchers caps the in-flight downstream SSE/WS connections
 	// per dashw replica. Scale-out is horizontal: add more replicas
@@ -117,6 +124,7 @@ func DefaultConfig() *Config {
 		DashdInsecure: true,
 		LogLevel:      slog.LevelInfo,
 		Version:       "dev",
+		NodeID:        hostnameOr("dashw"),
 
 		TopoMaxWatchers:          512,
 		TopoMaxWatchersPerIP:     8,
@@ -185,6 +193,9 @@ func Parse(args []string) *Config {
 	fs.IntVar(&cfg.TopoRingSize, "topo-ring-size", cfg.TopoRingSize, "hub ring buffer event count")
 	fs.DurationVar(&cfg.TopoIdleTimeout, "topo-idle-timeout", cfg.TopoIdleTimeout, "idle-stream close timeout")
 
+	// Identity (stamped on every SSE frame as `via`)
+	fs.StringVar(&cfg.NodeID, "node-id", env("DASHW_NODE_ID", cfg.NodeID), "this dashw replica's identifier (also used in SSE `via` annotation)")
+
 	_ = fs.Parse(args)
 
 	cfg.LogLevel = parseLevel(logLvl)
@@ -242,4 +253,13 @@ func parseLevel(s string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// hostnameOr returns the OS hostname, or a fallback if the lookup
+// fails (e.g., minimal distroless container without /etc/hostname).
+func hostnameOr(fallback string) string {
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return fallback
 }
