@@ -174,6 +174,7 @@ describe("Sidebar · NAV_GROUPS", () => {
       "/commands",
       "/debug",
       "/topology",
+      "/topology-v2",
     ]);
   });
 });

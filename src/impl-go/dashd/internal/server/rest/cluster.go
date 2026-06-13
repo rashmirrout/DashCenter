@@ -1,6 +1,22 @@
-// PE-G6 REST handlers for ClusterService. Mirror dashcenter.v1
-// request/response shapes verbatim so `dashctl topology` and any HTTP
-// client speak the same JSON.
+// PE-G6 / PE-G7 REST handlers for ClusterService.
+//
+// Endpoints (REST :8443):
+//
+//   GET /v1/cluster/topology                  unary snapshot (?include_enis)
+//   GET /v1/cluster/topology/watch            SSE stream
+//
+// The SSE handler mirrors the gRPC WatchTopology semantics: honors
+// Last-Event-ID for cursor resume, synthesises KIND_DROPPED on
+// per-subscriber overflow, surfaces ErrTooManySubscribers as
+// HTTP 429 + Retry-After, and uses the SAME broadcaster instance as
+// the gRPC handler so per-tenant caps are enforced uniformly.
+//
+// Browsers SHOULD NOT hit dashd directly in production — see
+// docs/dashd-features/topology-streaming-design.md (dashw is the
+// multiplexer). This handler exists so:
+//   - `dashctl topology --follow` can use the simple REST + EventSource
+//     contract instead of speaking gRPC, and
+//   - operators can curl the SSE stream during incident response.
 package rest
 
 import (
@@ -8,11 +24,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/cluster"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (h *handler) requireCluster(w http.ResponseWriter) bool {
@@ -40,11 +61,22 @@ func (h *handler) getClusterTopology(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /v1/cluster/topology/watch — Server-Sent Events stream.
-// First event = SNAPSHOT (full TopologyResponse), subsequent events =
-// typed deltas (peer add/remove, leader change, DPU state change).
 //
-// Each line is emitted as `event: <kind>\ndata: <json>\n\n` per the
-// HTML5 EventSource spec. Optional ?include_enis=true.
+// Cursor resume: clients may set the `Last-Event-ID` request header
+// (per the EventSource spec) OR the `?last_event_id=N` query
+// parameter to ask the server to replay events with id > N. When the
+// cursor is stale the server emits a single KIND_RESYNC event and
+// the client MUST refetch GET /v1/cluster/topology before relying on
+// further deltas.
+//
+// Sentinels (clients should handle):
+//   - event: snapshot       — full TopologyResponse (cold start OR after RESYNC)
+//   - event: keepalive      — periodic no-op (safe to ignore)
+//   - event: dropped        — Notice.dropped_count; you missed events; resync
+//   - event: rate_limited   — Notice.suppressed_count; informational
+//   - event: resync         — refetch GetTopology; discard local state
+//
+// Caps: ErrTooManySubscribers → HTTP 429 + Retry-After: 30.
 func (h *handler) watchClusterTopology(w http.ResponseWriter, r *http.Request) {
 	if !h.requireCluster(w) {
 		return
@@ -56,55 +88,123 @@ func (h *handler) watchClusterTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	includeEnis := r.URL.Query().Get("include_enis") == "true"
+	cursor := parseLastEventID(r)
+	subj := auth.FromContext(r.Context())
+
+	subscription, cancel, err := h.cluster.Subscribe(service.SubscribeOptions{
+		SubjectName:        subj.Name,
+		ResumeAfterEventID: cursor,
+	})
+	if err != nil {
+		if errors.Is(err, cluster.ErrTooManySubscribers) {
+			w.Header().Set("Retry-After", "30")
+			writeErr(w, http.StatusTooManyRequests, err)
+			return
+		}
+		handleServiceErr(w, err)
+		return
+	}
+	defer cancel()
+
+	// Headers + status — set AFTER Subscribe so a 429 path can write a
+	// proper JSON error rather than an empty stream.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
 	w.WriteHeader(http.StatusOK)
 
-	includeEnis := r.URL.Query().Get("include_enis") == "true"
-
-	// Initial SNAPSHOT.
-	snap, err := h.cluster.GetTopology(r.Context(), &dashcenterv1.GetTopologyRequest{IncludeEnis: includeEnis})
-	if err != nil {
-		writeSSE(w, flusher, "error", map[string]string{"error": err.Error()})
-		return
+	// Cold-start snapshot: only when no cursor. Cursor paths get ring
+	// replay (or KIND_RESYNC) from the broadcaster directly.
+	if cursor == 0 {
+		snap, sErr := h.cluster.GetTopology(r.Context(), &dashcenterv1.GetTopologyRequest{IncludeEnis: includeEnis})
+		if sErr != nil {
+			writeSSE(w, flusher, "error", map[string]string{"error": sErr.Error()})
+			return
+		}
+		snapEv := &dashcenterv1.TopologyEvent{
+			Kind: dashcenterv1.TopologyEvent_KIND_SNAPSHOT,
+			Ts:   timestamppb.New(time.Now()),
+			Body: &dashcenterv1.TopologyEvent_Snapshot{Snapshot: snap},
+		}
+		if err := writeSSEProto(w, flusher, "snapshot", snapEv); err != nil {
+			return
+		}
 	}
-	snapEv := &dashcenterv1.TopologyEvent{
-		Kind: dashcenterv1.TopologyEvent_KIND_SNAPSHOT,
-		Body: &dashcenterv1.TopologyEvent_Snapshot{Snapshot: snap},
-	}
-	if err := writeSSEProto(w, flusher, "snapshot", snapEv); err != nil {
-		return
-	}
 
-	// Subscribe + drain.
-	ch, cancel := h.cluster.Subscribe()
-	defer cancel()
-
-	// Keep-alive ticker so proxies don't close the stream during long
-	// quiet periods.
-	keepAlive := time.NewTicker(30 * time.Second)
-	defer keepAlive.Stop()
+	ch := subscription.Recv()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-keepAlive.C:
-			// SSE comment line; ignored by EventSource clients but
-			// keeps the connection warm.
-			_, _ = fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
 		case ev, ok := <-ch:
 			if !ok {
 				return // broadcaster closed
 			}
-			if err := writeSSEProto(w, flusher, sseEventName(ev.Kind), ev); err != nil {
+			// Synthesise KIND_DROPPED notice if the broadcaster
+			// recorded any drops since our last successful send.
+			if n := subscription.TakeDroppedCount(); n > 0 {
+				notice := &dashcenterv1.TopologyEvent{
+					Kind: dashcenterv1.TopologyEvent_KIND_DROPPED,
+					Ts:   timestamppb.New(time.Now()),
+					Body: &dashcenterv1.TopologyEvent_Notice{Notice: &dashcenterv1.Notice{
+						DroppedCount: n,
+						Message:      fmt.Sprintf("subscriber buffer overflow; %d events lost — call GetTopology to resync", n),
+					}},
+				}
+				if err := writeSSEProto(w, flusher, "dropped", notice); err != nil {
+					return
+				}
+			}
+			if err := writeSSEFrame(w, flusher, ev); err != nil {
 				return
 			}
 		}
 	}
+}
+
+// parseLastEventID accepts the EventSource standard header OR a query
+// param. Header takes precedence (it's the one EventSource auto-sends
+// on reconnect). 0 = no resume cursor.
+func parseLastEventID(r *http.Request) uint64 {
+	if hdr := r.Header.Get("Last-Event-ID"); hdr != "" {
+		if v, err := strconv.ParseUint(hdr, 10, 64); err == nil {
+			return v
+		}
+	}
+	if q := r.URL.Query().Get("last_event_id"); q != "" {
+		if v, err := strconv.ParseUint(q, 10, 64); err == nil {
+			return v
+		}
+	}
+	return 0
+}
+
+// writeSSEFrame writes a broadcaster Frame using the pre-marshalled
+// JSON bytes (marshal-once-send-many) plus the standard EventSource
+// `id:` line so reconnect cursor flows for free.
+func writeSSEFrame(w http.ResponseWriter, flusher http.Flusher, f *cluster.Frame) error {
+	if f == nil || f.Event == nil {
+		return nil
+	}
+	name := sseEventName(f.Event.GetKind())
+	if name != "" {
+		if _, err := fmt.Fprintf(w, "event: %s\n", name); err != nil {
+			return err
+		}
+	}
+	if id := f.Event.GetEventId(); id > 0 {
+		if _, err := fmt.Fprintf(w, "id: %d\n", id); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", f.JSON); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 // writeProtoJSON serialises a proto.Message using protojson so field
@@ -170,6 +270,14 @@ func sseEventName(k dashcenterv1.TopologyEvent_Kind) string {
 		return "dpu_added"
 	case dashcenterv1.TopologyEvent_KIND_DPU_REMOVED:
 		return "dpu_removed"
+	case dashcenterv1.TopologyEvent_KIND_KEEPALIVE:
+		return "keepalive"
+	case dashcenterv1.TopologyEvent_KIND_DROPPED:
+		return "dropped"
+	case dashcenterv1.TopologyEvent_KIND_RATE_LIMITED:
+		return "rate_limited"
+	case dashcenterv1.TopologyEvent_KIND_RESYNC:
+		return "resync"
 	}
 	return "unknown"
 }

@@ -39,7 +39,7 @@ t.Errorf("Addr = %q, want %q", srv.httpSrv.Addr, ":8080")
 
 func TestServer_HealthzReturns200(t *testing.T) {
 cfg := config.DefaultConfig()
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 rec := httptest.NewRecorder()
@@ -61,7 +61,7 @@ t.Errorf("status = %v, want ok", body["status"])
 func TestServer_ReadyzReturns503WhenDashdDown(t *testing.T) {
 cfg := config.DefaultConfig()
 cfg.DashdAdminAddr = "http://127.0.0.1:1" // unreachable
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 rec := httptest.NewRecorder()
@@ -74,7 +74,7 @@ t.Errorf("/readyz status = %d, want 503", rec.Code)
 
 func TestServer_SPAFallback_ServesHTML(t *testing.T) {
 cfg := config.DefaultConfig()
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 // Request a non-API path → should get HTML (SPA fallback)
 req := httptest.NewRequest(http.MethodGet, "/fleet", nil)
@@ -98,7 +98,7 @@ t.Error("SPA fallback body should contain 'dashw'")
 
 func TestServer_SPAFallback_RootPath(t *testing.T) {
 cfg := config.DefaultConfig()
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 req := httptest.NewRequest(http.MethodGet, "/", nil)
 rec := httptest.NewRecorder()
@@ -116,7 +116,7 @@ t.Errorf("Content-Type = %q, want text/html", ct)
 
 func TestServer_SPAFallback_DeepPath(t *testing.T) {
 cfg := config.DefaultConfig()
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 req := httptest.NewRequest(http.MethodGet, "/dpu/dpu-sim-01", nil)
 rec := httptest.NewRecorder()
@@ -129,7 +129,7 @@ t.Errorf("/dpu/dpu-sim-01 status = %d, want 200", rec.Code)
 
 func TestServer_MetricsDisabledByDefault(t *testing.T) {
 cfg := config.DefaultConfig() // EnableMetrics = false
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 rec := httptest.NewRecorder()
@@ -146,7 +146,7 @@ t.Error("/metrics should not be registered when EnableMetrics=false")
 func TestServer_MetricsEnabledReturnsText(t *testing.T) {
 cfg := config.DefaultConfig()
 cfg.EnableMetrics = true
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 rec := httptest.NewRecorder()
@@ -164,7 +164,7 @@ t.Errorf("Content-Type = %q, want text/plain", ct)
 
 func TestServer_RequestIDHeader(t *testing.T) {
 cfg := config.DefaultConfig()
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 rec := httptest.NewRecorder()
@@ -180,7 +180,7 @@ t.Errorf("status = %d, want 200", rec.Code)
 func TestServer_CORSEnabled(t *testing.T) {
 cfg := config.DefaultConfig()
 cfg.EnableCORS = true
-handler := buildRouter(cfg, testLogger())
+handler := buildRouter(cfg, testLogger(), nil)
 
 // Send an OPTIONS preflight request
 req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)

@@ -56,6 +56,28 @@ type Config struct {
 	// ── Build info ──────────────────────────────────────────────
 	Version string
 
+	// ── Topology streaming hub (PE-G7) ──────────────────────────
+	// MaxWatchers caps the in-flight downstream SSE/WS connections
+	// per dashw replica. Scale-out is horizontal: add more replicas
+	// + a sticky-session L7 LB.
+	TopoMaxWatchers int
+	// MaxWatchersPerIP caps watchers per source IP so a single
+	// browser tab can't open more than N concurrent streams.
+	TopoMaxWatchersPerIP int
+	// SnapshotCacheTTL deduplicates GetTopology fan-outs when many
+	// pages mount within a short window (e.g. after a dashw deploy).
+	TopoSnapshotCacheTTL time.Duration
+	// RingSize is the number of events the hub retains for SSE
+	// reconnect resume via Last-Event-ID.
+	TopoRingSize int
+	// IdleTimeout closes downstream connections that have not sent
+	// any byte for this long (defends against abandoned tabs).
+	TopoIdleTimeout time.Duration
+	// UpstreamReconnectMin / Max bound the backoff schedule for the
+	// hub's single gRPC stream to dashd.
+	TopoUpstreamReconnectMin time.Duration
+	TopoUpstreamReconnectMax time.Duration
+
 	// ── Auth (env-only, not flags) ──────────────────────────────
 	DashdAuthToken string
 	DashdTLSCert   string
@@ -95,6 +117,14 @@ func DefaultConfig() *Config {
 		DashdInsecure: true,
 		LogLevel:      slog.LevelInfo,
 		Version:       "dev",
+
+		TopoMaxWatchers:          512,
+		TopoMaxWatchersPerIP:     8,
+		TopoSnapshotCacheTTL:     1 * time.Second,
+		TopoRingSize:             2048,
+		TopoIdleTimeout:          5 * time.Minute,
+		TopoUpstreamReconnectMin: 500 * time.Millisecond,
+		TopoUpstreamReconnectMax: 15 * time.Second,
 	}
 }
 
@@ -147,6 +177,13 @@ func Parse(args []string) *Config {
 	// Logging
 	var logLvl string
 	fs.StringVar(&logLvl, "log-level", env("DASHW_LOG_LEVEL", "info"), "log level (debug|info|warn|error)")
+
+	// Topology streaming hub (PE-G7)
+	fs.IntVar(&cfg.TopoMaxWatchers, "topo-max-watchers", cfg.TopoMaxWatchers, "max concurrent topology stream watchers (per replica)")
+	fs.IntVar(&cfg.TopoMaxWatchersPerIP, "topo-max-watchers-per-ip", cfg.TopoMaxWatchersPerIP, "max concurrent topology stream watchers per source IP")
+	fs.DurationVar(&cfg.TopoSnapshotCacheTTL, "topo-snapshot-ttl", cfg.TopoSnapshotCacheTTL, "snapshot dedup cache TTL")
+	fs.IntVar(&cfg.TopoRingSize, "topo-ring-size", cfg.TopoRingSize, "hub ring buffer event count")
+	fs.DurationVar(&cfg.TopoIdleTimeout, "topo-idle-timeout", cfg.TopoIdleTimeout, "idle-stream close timeout")
 
 	_ = fs.Parse(args)
 

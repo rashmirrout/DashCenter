@@ -238,3 +238,10 @@ Cargo.lock                       # libraries: ignore; binaries: commit. Re-evalu
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---- Scratch / experiments ----
+# scratch/ is for local experimentation (e.g., docs/concepts/* evidence
+# scripts). Scripts + READMEs are committed; large generated transcripts
+# (already matched by *.log above) and ephemeral payloads are not.
+scratch/**/*.log
+scratch/**/*.tmp

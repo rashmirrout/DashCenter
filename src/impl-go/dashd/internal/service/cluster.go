@@ -1,6 +1,13 @@
 // PE-G6 ClusterService transport-agnostic surface. The gRPC handler in
 // internal/server/grpc and the REST handler in internal/server/rest
 // both delegate here; tests can drive the interface directly.
+//
+// PE-G7 additions:
+//   - Subscribe accepts SubscribeOptions carrying ResumeAfterEventID
+//     (for last-event-id resume) + SubjectName (for per-tenant caps).
+//   - Returns *cluster.Subscription so handlers can query
+//     TakeDroppedCount() + LastDeliveredEventID() for KIND_DROPPED
+//     sentinel synthesis.
 package service
 
 import (
@@ -13,23 +20,33 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// SubscribeOptions narrows a watcher's behaviour. Mirrors the proto
+// WatchTopologyRequest shape so transport adapters can copy fields 1:1.
+type SubscribeOptions struct {
+	// SubjectName is the auth.Subject.Name of the caller — empty if
+	// auth.mode=none. Used by the broadcaster's per-tenant cap.
+	SubjectName string
+
+	// ResumeAfterEventID, when non-zero, causes the broadcaster to
+	// replay events with id > ResumeAfterEventID instead of starting
+	// fresh. See cluster.Broadcaster.Subscribe for resync semantics.
+	ResumeAfterEventID uint64
+}
+
 // ClusterService is the transport-agnostic surface for ClusterService
 // RPCs. Implementations MUST be safe for concurrent use; the production
 // wiring constructs exactly one.
 type ClusterService interface {
+	// GetTopology returns the current snapshot. Pure read, sub-ms.
 	GetTopology(ctx context.Context, req *dashcenterv1.GetTopologyRequest) (*dashcenterv1.TopologyResponse, error)
 
-	// Subscribe returns a channel that delivers TopologyEvents and a
-	// cancel function that MUST be called to release resources.
-	// Implementations buffer per-subscriber; events are dropped
-	// silently when the buffer is full.
-	Subscribe() (<-chan *dashcenterv1.TopologyEvent, func())
+	// Subscribe returns a *cluster.Subscription handle + a cancel
+	// function that MUST be called to release resources. Returns
+	// cluster.ErrTooManySubscribers when caps are exhausted (transport
+	// adapters map this to gRPC RESOURCE_EXHAUSTED / HTTP 429).
+	Subscribe(opts SubscribeOptions) (*cluster.Subscription, func(), error)
 }
 
-// clusterService wraps the cluster.Aggregator + cluster.Broadcaster and
-// owns the producer wiring (registry OnChange, inventory Subscribe,
-// elector polling) that converts internal state changes into broadcast
-// events.
 type clusterService struct {
 	agg  *cluster.Aggregator
 	bcst *cluster.Broadcaster
@@ -55,8 +72,6 @@ func (c *clusterService) GetTopology(ctx context.Context, req *dashcenterv1.GetT
 	}
 	resp, err := c.agg.Build(ctx, req)
 	if err != nil {
-		// Distinguish ctx cancel (the gRPC layer maps that to canceled
-		// natively) from genuine internal errors.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
 		}
@@ -68,6 +83,9 @@ func (c *clusterService) GetTopology(ctx context.Context, req *dashcenterv1.GetT
 	return resp, nil
 }
 
-func (c *clusterService) Subscribe() (<-chan *dashcenterv1.TopologyEvent, func()) {
-	return c.bcst.Subscribe()
+func (c *clusterService) Subscribe(opts SubscribeOptions) (*cluster.Subscription, func(), error) {
+	return c.bcst.Subscribe(cluster.SubscribeOptions{
+		SubjectName:        opts.SubjectName,
+		ResumeAfterEventID: opts.ResumeAfterEventID,
+	})
 }

@@ -712,7 +712,7 @@ flowchart LR
 
 ---
 
-## 10. Cluster topology (PE-G6)
+## 10. Cluster topology (PE-G6 / PE-G7)
 
 **Read-only fleet topology**: returns who runs the controller cluster
 (self-published via etcd lease), the DPU inventory grouped by appliance
@@ -720,7 +720,9 @@ flowchart LR
 are safe to call against any node; the data is local to each dashd
 (no per-request fan-out).
 
-Full design rationale: [cluster-topology-design.md](cluster-topology-design.md).
+Full design rationale: [cluster-topology-design.md](cluster-topology-design.md) (v1 / PE-G6).
+Production hardening + dashw multiplexer + `/topology-v2` SPA:
+[topology-streaming-design.md](topology-streaming-design.md) (v2 / PE-G7).
 
 ### 10.1 `GET /v1/cluster/topology`
 
@@ -772,11 +774,32 @@ full `TopologyResponse`; subsequent events are typed deltas:
 | `peer_added` / `peer_removed` / `peer_updated` | dashd joined/left the etcd peer registry |
 | `leader_changed` | controller election handoff |
 | `dpu_added` / `dpu_removed` / `dpu_state` | inventory change |
+| `keepalive` | (PE-G7) 30s heartbeat from the single global ticker |
+| `dropped` | (PE-G7) `Notice{dropped_count}` — slow subscriber missed N events |
+| `rate_limited` | (PE-G7) `Notice{suppressed_count}` — broadcaster shed events under churn |
+| `resync` | (PE-G7) cursor was stale; client should reapply the next `snapshot` and reset state |
 
-Each line: `event: <kind>\ndata: <protojson>\n\n`. A keep-alive comment
-is emitted every 30s so reverse proxies don't close the stream. The
-broadcaster is **drop-on-slow-subscriber**; sustained drops indicate
-the client should re-call `GetTopology` to resync.
+Each line: `id: <event_id>\nevent: <kind>\ndata: <protojson>\n\n`. The
+`id:` cursor is monotonic per broadcaster instance; clients reconnect
+with `Last-Event-ID: <N>` header (EventSource auto-sends this) or
+`?last_event_id=<N>` query param. The broadcaster replays from the
+ring; if the cursor is older than the ring's oldest entry it emits a
+`resync` Notice + fresh snapshot so the client cleanly re-derives.
+Keep-alive comments (`:keepalive\n\n`) every 30s prevent reverse-proxy
+timeouts.
+
+**Caps + rate limit** (PE-G7): the broadcaster caps subscribers globally
+(`MaxSubscribers=64`) and per-subject (`MaxSubscribersPerSubject=4`).
+A breach returns HTTP 429 + `Retry-After` (REST) or `ResourceExhausted`
+(gRPC). The publish path is rate-limited to 100 ev/s + burst 200; a
+leaky-bucket overflow yields a `rate_limited` Notice on every active
+subscription.
+
+> **Operator console clients SHOULD NOT call this endpoint directly.**
+> The dashw BFF (`/api/console/topology-v2/stream`) multiplexes N
+> browser tabs onto one upstream stream and adds per-IP caps,
+> snapshot dedup, and survivable reconnect. See
+> [topology-streaming-design.md §3](topology-streaming-design.md#3-three-tier-architecture).
 
 ### 10.3 `GET /admin/topology` (admin port :7443, unauthenticated)
 
@@ -849,6 +872,7 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 **See also**
 - [docs/dashd-features/](.) (this folder) — additional dashd feature notes as they land
 - [cluster-topology-design.md](cluster-topology-design.md) — PE-G6 design spec (problem / solution / architecture / acceptance criteria)
+- [topology-streaming-design.md](topology-streaming-design.md) — PE-G7 production hardening (D1-D7 defects, dashw multiplexer, `/topology-v2` SPA, Future Scopes ×14)
 - [proto/dashcenter/v1/](../../proto/dashcenter/v1) — proto sources of truth
 - [docs/CLI_GUIDE.md](../CLI_GUIDE.md) — `dashctl` equivalents
 - [deploy/test-setup/05-full-console/manual-handson.md](../../deploy/test-setup/05-full-console/manual-handson.md) — Lab 12.6 live captures of every diagnostic

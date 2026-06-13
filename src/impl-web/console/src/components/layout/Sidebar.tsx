@@ -12,6 +12,7 @@ import {
   Settings,
   Terminal,
   Bug,
+  Radio,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -72,6 +73,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Service",
     items: [
       { path: "/topology", label: "Topology", icon: Waypoints },
+      { path: "/topology-v2", label: "Topology v2 · Live", icon: Radio },
     ],
   },
 ] as const;

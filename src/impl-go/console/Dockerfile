@@ -36,6 +36,11 @@ COPY --from=web-builder /app/web/dist ./src/impl-go/console/web/dist/
 
 # Build the binary (GOWORK=off bypasses workspace — console has no external deps)
 ENV GOWORK=off
+# -mod=mod lets the build auto-resolve missing go.sum entries for
+# indirect deps (the module pulls prometheus/client_golang + grpc as
+# part of the PE-G7 topology hub; transitive entries are populated
+# during the first download).
+ENV GOFLAGS=-mod=mod
 RUN cd src/impl-go/console && \
 CGO_ENABLED=0 GOOS=linux go build \
 -trimpath \

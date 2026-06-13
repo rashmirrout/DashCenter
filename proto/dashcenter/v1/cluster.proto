@@ -68,6 +68,21 @@ message WatchTopologyRequest {
   // Same toggle as GetTopologyRequest.include_enis. Applies to the
   // initial SNAPSHOT event AND to subsequent KIND_DPU_* deltas.
   bool include_enis = 1;
+
+  // Optional resume cursor. When non-zero, the server skips the initial
+  // SNAPSHOT and replays every event with `event_id > resume_after_event_id`
+  // from its in-memory ring buffer.
+  //
+  // If the cursor is older than the oldest event still in the buffer
+  // (or the server restarted and the counter reset), the server emits a
+  // single KIND_RESYNC notice carrying `current_event_id` and follows
+  // it with a fresh SNAPSHOT. Clients MUST treat KIND_RESYNC as "discard
+  // local state, snapshot is the new truth".
+  //
+  // Wire shape mirrors EventSource's `Last-Event-ID` header semantics so
+  // browser clients flowing through dashw's SSE transport get seamless
+  // resume on reconnect.
+  uint64 resume_after_event_id = 2;
 }
 
 // -----------------------------------------------------------------------------
@@ -227,18 +242,65 @@ message TopologyEvent {
     KIND_DPU_STATE = 6;       // body = dpu (state field changed)
     KIND_DPU_ADDED = 7;       // body = dpu
     KIND_DPU_REMOVED = 8;     // body = dpu
+
+    // ── Resilience sentinels (PE-G7) ──
+    // Periodic no-op event emitted by a SINGLE global ticker so reverse
+    // proxies and EventSource clients keep the connection warm without
+    // burning one ticker goroutine per subscriber. Body = notice.
+    KIND_KEEPALIVE = 9;
+    // Sent to a specific subscriber when its per-stream buffer overflowed
+    // and one or more deltas were dropped. The Notice carries the dropped
+    // count. Clients MUST re-call GetTopology to resync; do NOT trust
+    // accumulated deltas after this event.
+    KIND_DROPPED = 10;
+    // Sent to all subscribers when the broadcaster's rate limiter kicked
+    // in and suppressed events during the previous window. Notice carries
+    // the suppressed count + window summary. State is still consistent
+    // (the suppressed events were coalesced, not lost); this is purely
+    // informational so operators can size limits.
+    KIND_RATE_LIMITED = 11;
+    // Sent when the server cannot honor `resume_after_event_id` (cursor
+    // older than ring buffer, or process restarted). The next event will
+    // be a fresh KIND_SNAPSHOT. Notice carries `current_event_id`.
+    KIND_RESYNC = 12;
   }
   Kind kind = 1;
   google.protobuf.Timestamp ts = 2;
+
+  // Monotonic per-process event identifier. Resets to zero on dashd
+  // restart. Clients use this as a cursor for resume_after_event_id on
+  // the next connection. Always set (including for KEEPALIVE / DROPPED).
+  uint64 event_id = 3;
 
   oneof body {
     TopologyResponse snapshot = 10;
     ClusterNodeInfo peer = 11;
     DpuTopInfo dpu = 13;
+    Notice notice = 15;
   }
 
   // For KIND_LEADER_CHANGED only; both may be empty (e.g. fresh boot
   // with no prior leader).
   string old_leader_id = 12;
   string new_leader_id = 14;
+}
+
+// Notice is the payload for KIND_KEEPALIVE / KIND_DROPPED /
+// KIND_RATE_LIMITED / KIND_RESYNC events. All fields optional; only the
+// fields relevant to the kind are populated.
+message Notice {
+  // KIND_DROPPED: count of events the subscriber missed since last
+  // delivery. Operators alerting on stream lag use this directly.
+  uint64 dropped_count = 1;
+
+  // KIND_RATE_LIMITED: count of events the broadcaster suppressed in
+  // the previous coalescing/rate-limit window (across all subscribers).
+  uint64 suppressed_count = 2;
+
+  // Human-readable description, safe to surface in operator UIs.
+  string message = 3;
+
+  // KIND_RESYNC: the server's current monotonic event_id ceiling so
+  // clients can compute the gap and decide whether to alert.
+  uint64 current_event_id = 4;
 }

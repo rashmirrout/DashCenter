@@ -230,8 +230,21 @@ if err != nil {
 	slog.Error("cluster aggregator init failed", "error", err)
 	os.Exit(1)
 }
-clusterBcast := cluster.NewBroadcaster()
+clusterBcast := cluster.NewBroadcaster(cluster.DefaultBroadcasterConfig())
 clusterService := service.NewCluster(clusterAgg, clusterBcast)
+
+// PE-G7: wire the peer registry → broadcaster bridge so peer
+// add/remove/update events stream live to WatchTopology subscribers.
+// Inventory + leader-change wiring follows the same pattern but
+// requires Subscribe APIs on the elector that are not yet exported;
+// tracked as a follow-up. For PE-G7 v1 the registry-driven cluster
+// pane is the primary live demo.
+clusterReg.Subscribe(func(kind cluster.ChangeKind, peer cluster.PeerInfo) {
+	cluster.ObserveRegistryChange(kind)
+	cluster.ObservePeerCount(clusterReg.PeerCount())
+	clusterBcast.Publish(cluster.RegistryEvent(kind, peer, elector.LeaderID()))
+})
+cluster.ObservePeerCount(clusterReg.PeerCount())
 
 // --- Dry-run mode ---
 if *dryRun {
