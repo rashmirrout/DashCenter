@@ -21,10 +21,12 @@
  *
  * Browser → ONLY dashw. Never dashd directly.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Crown, Server, Cpu, HardDrive, Network, CheckCircle2,
   AlertTriangle, XCircle, Activity, Pause, Play, Radio, Wifi, WifiOff, X,
+  Square, Trash2, Info, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -34,14 +36,25 @@ import {
   useTopologyV2Store, selectCluster, selectAppliances, selectSummary,
   selectStreamHealth, selectEventLog, findEntity,
 } from '@/stores/topology-v2-store';
-import type { TopologyEvent } from '@/api/topology-v2-types';
+import type { TopologyEvent, TopologyV2Response } from '@/api/topology-v2-types';
 
 /* ────────────────────────────────────────────────────────────── */
 
-function ConnectionBadge() {
+function ConnectionBadge({ streaming }: { streaming: boolean }) {
   const health = useTopologyV2Store(selectStreamHealth);
   const ageMs = health.lastEventAt ? Date.now() - health.lastEventAt : Infinity;
   const isStale = ageMs > 45_000 && health.connection === 'open';
+
+  // When the user has streaming OFF, show a clean "Off" badge instead
+  // of the underlying ConnectionState (which would say "idle").
+  if (!streaming) {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-secondary)]">
+        <WifiOff size={14} className="text-[color:var(--text-muted)]" />
+        <span className="text-xs font-medium text-[color:var(--text-muted)]">Live: Off</span>
+      </div>
+    );
+  }
 
   const map: Record<typeof health.connection, { label: string; icon: any; color: string }> = {
     idle:         { label: 'Idle',         icon: WifiOff,  color: 'text-[color:var(--text-muted)]' },
@@ -320,18 +333,90 @@ function InspectorDrawer() {
 
 /* ────────────────────────────────────────────────────────────── */
 
+const STREAM_PREF_KEY = 'topology-v2:streaming';
+const ENIS_PREF_KEY = 'topology-v2:include-enis';
+
+function loadBoolPref(key: string, defaultValue: boolean): boolean {
+  if (typeof window === 'undefined') return defaultValue;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return defaultValue;
+    return raw === 'true';
+  } catch {
+    return defaultValue;
+  }
+}
+
+function saveBoolPref(key: string, value: boolean): void {
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.setItem(key, value ? 'true' : 'false'); } catch { /* no-op */ }
+}
+
 export default function TopologyV2View() {
-  const [includeEnis, setIncludeEnis] = useState(false);
-  useTopologyStream({ includeEnis });
+  // Streaming is OPT-IN. The page does NOT auto-subscribe on mount
+  // because the SSE channel sustains traffic the operator may not need
+  // while idly navigating. We persist the preference in localStorage so
+  // power-users who always want live data don't have to re-enable on
+  // every page load.
+  const [streaming, setStreaming] = useState(() => loadBoolPref(STREAM_PREF_KEY, false));
+  const [includeEnis, setIncludeEnis] = useState(() => loadBoolPref(ENIS_PREF_KEY, false));
+  useEffect(() => saveBoolPref(STREAM_PREF_KEY, streaming), [streaming]);
+  useEffect(() => saveBoolPref(ENIS_PREF_KEY, includeEnis), [includeEnis]);
+
+  const applySnapshot = useTopologyV2Store((s) => s.applySnapshot);
+  const reset = useTopologyV2Store((s) => s.reset);
+
+  // Always-load snapshot. This is a one-shot HTTP GET (deduped by
+  // dashw's 1-second snapshot cache) so the page renders the
+  // topology immediately on load — user can browse + click nodes
+  // without enabling the live stream. When the stream IS on, the
+  // stream owns the cache via setQueryData() and this query becomes a
+  // no-op (staleTime: Infinity while streaming).
+  const snap = useQuery<TopologyV2Response>({
+    queryKey: ['topology-v2', includeEnis],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (includeEnis) params.set('include_enis', 'true');
+      const res = await fetch(`/api/console/topology-v2?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as TopologyV2Response;
+    },
+    staleTime: streaming ? Infinity : 30_000,
+    refetchOnWindowFocus: !streaming,
+  });
+
+  // Push fetched snapshot into the store so all widgets share one source
+  // of truth (the store is also what the SSE reducer mutates).
+  useEffect(() => {
+    if (snap.data) applySnapshot(snap.data, 0);
+  }, [snap.data, applySnapshot]);
+
+  // Hook is gated on the user's explicit Start. When `streaming` flips
+  // false the hook closes its EventSource; the cached snapshot stays
+  // in the store for inspection (see useTopologyStream cleanup note).
+  useTopologyStream({ includeEnis, enabled: streaming });
+
+  const hasData = !!useTopologyV2Store((s) => s.topology);
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Topology v2 — Live"
-        subtitle="Browser ↔ dashw ↔ dashd. Streaming via SSE with last-event-id resume + per-tenant caps."
+        title="Topology v2"
+        subtitle="Browser ↔ dashw ↔ dashd. Snapshot loads on open; live stream is optional."
         actions={
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-[color:var(--text-secondary)]">
+            <button
+              onClick={() => snap.refetch()}
+              disabled={snap.isFetching}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[color:var(--border-subtle)] text-xs text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)] disabled:opacity-50 transition-colors"
+              title="Re-fetch the snapshot from dashw (uses the BFF's 1s cache)"
+            >
+              <RefreshCw size={12} className={snap.isFetching ? 'animate-spin' : ''} /> Refresh
+            </button>
+            <label
+              className="flex items-center gap-2 text-xs text-[color:var(--text-secondary)] cursor-pointer"
+              title="When ON, every snapshot + dpu_state/dpu_added event includes the per-DPU ENI list (name, namespace, MAC, admin state). When OFF, only the ENI count per DPU is sent—smaller payload, faster fan-out."
+            >
               <input
                 type="checkbox"
                 checked={includeEnis}
@@ -340,20 +425,84 @@ export default function TopologyV2View() {
               />
               Include ENIs
             </label>
-            <ConnectionBadge />
+            <button
+              onClick={() => setStreaming((v) => !v)}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors',
+                streaming
+                  ? 'border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20'
+                  : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20',
+              )}
+              title={streaming
+                ? 'Stop the SSE stream. The cached snapshot stays visible.'
+                : 'Open the SSE stream to dashw for live deltas.'}
+            >
+              {streaming ? <><Square size={12} /> Stop live</> : <><Play size={12} /> Start live</>}
+            </button>
+            {hasData && (
+              <button
+                onClick={reset}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[color:var(--border-subtle)] text-xs text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)] transition-colors"
+                title="Clear the cached snapshot + event log"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+            <ConnectionBadge streaming={streaming} />
           </div>
         }
       />
 
-      <SummaryStrip />
+      <InstructionBanner streaming={streaming} />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-3">
-        <ClusterPanel />
-        <AppliancesGrid />
-      </div>
+      {snap.isError && !hasData && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">
+          Failed to load topology snapshot from dashw: {(snap.error as Error)?.message ?? 'unknown error'}.
+          <button onClick={() => snap.refetch()} className="ml-3 underline">Retry</button>
+        </div>
+      )}
 
-      <EventTicker />
+      {snap.isLoading && !hasData ? (
+        <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-secondary)] p-6 text-sm text-[color:var(--text-muted)] flex items-center gap-2">
+          <RefreshCw size={14} className="animate-spin" /> Loading topology snapshot…
+        </div>
+      ) : (
+        <>
+          <SummaryStrip />
+          <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-3">
+            <ClusterPanel />
+            <AppliancesGrid />
+          </div>
+          {streaming && <EventTicker />}
+        </>
+      )}
       <InspectorDrawer />
+    </div>
+  );
+}
+
+function InstructionBanner({ streaming }: { streaming: boolean }) {
+  // Tiny persistent helper text below the header. Tells the user the
+  // page is interactive without the live stream + how to enable it.
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-[color:var(--border-subtle)] bg-[color:var(--bg-secondary)] px-3 py-2 text-xs text-[color:var(--text-secondary)]">
+      <Info size={14} className="text-cyan-400 mt-0.5 flex-shrink-0" />
+      {streaming ? (
+        <span>
+          <strong className="text-emerald-300">Live stream is ON.</strong>{' '}
+          Snapshot + deltas arrive via SSE. Click any node, appliance, or DPU
+          to inspect. Use <strong>Stop live</strong> to pause without losing
+          the cached view.
+        </span>
+      ) : (
+        <span>
+          Showing the latest snapshot — the page is fully interactive: click
+          any node, appliance, or DPU to inspect. To see real-time changes
+          (peer add/remove, DPU state, leader change) click{' '}
+          <strong className="text-emerald-300">Start live</strong> at the top right.
+          Snapshots auto-refresh every 30s; use <strong>Refresh</strong> for an on-demand fetch.
+        </span>
+      )}
     </div>
   );
 }

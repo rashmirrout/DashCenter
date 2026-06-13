@@ -54,7 +54,6 @@ export function useTopologyStream(opts: UseTopologyStreamOptions = {}) {
   const setConnection = useTopologyV2Store((s) => s.setConnection);
   const applySnapshot = useTopologyV2Store((s) => s.applySnapshot);
   const applyEvent = useTopologyV2Store((s) => s.applyEvent);
-  const reset = useTopologyV2Store((s) => s.reset);
 
   // Mutable refs to avoid stale-closure issues in the EventSource handlers.
   const esRef = useRef<EventSource | null>(null);
@@ -191,7 +190,12 @@ export function useTopologyStream(opts: UseTopologyStreamOptions = {}) {
       document.removeEventListener('visibilitychange', onVisibility);
       if (hiddenTimer.current) window.clearTimeout(hiddenTimer.current);
       closeStream();
-      reset(); // free memory + reset cursor on unmount
+      // NOTE: we intentionally do NOT call reset() here. The user may
+      // toggle the live stream off via the page's Start/Stop control;
+      // they expect the last snapshot + event log to stay visible for
+      // inspection. The store's `reset()` is exposed for explicit
+      // "Clear cache" UX instead.
+      setConnection('idle');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, includeEnis]);
