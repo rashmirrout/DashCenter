@@ -22,3 +22,14 @@ reconcile:
 log:
   level:  info          # debug | info | warn | error
   format: json          # json | text
+
+# PE-3b / PE-G9: counter polling pipeline. dashd pulls
+# dashapi.v1.DashApi.GetDpuCounters from every DPU on this cadence and
+# caches the translated dashcenter.v1.CounterReport in memory; the
+# /admin/counters[?dpu=ID] endpoint dumps the cache and
+# /admin/counters/poll-interval + /admin/counters/enable flip the knobs
+# at runtime without restarting dashd.
+observability:
+  counters:
+    enabled: true       # set false to stop polling without unwiring
+    poll_interval: 5s   # minimum 100ms when enabled

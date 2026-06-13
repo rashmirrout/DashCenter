@@ -222,7 +222,9 @@ describe("EniView · partial-data degradation", () => {
     });
     wrap(<EniView />, "/eni/default/eni-blue-1");
     expect(screen.getAllByText("eni-blue-1").length).toBeGreaterThan(0);
-    expect(screen.getByText("aa:bb:cc:00:01:01")).toBeInTheDocument();
+    // The MAC now appears in two places (StatusHero + IdentityCard),
+    // so use getAllByText and assert at least one is present.
+    expect(screen.getAllByText("aa:bb:cc:00:01:01").length).toBeGreaterThan(0);
   });
 });
 

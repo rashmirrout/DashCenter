@@ -313,10 +313,124 @@ function EniDetailContent({ detail, navigate, ns, name }: ContentProps) {
         </GlassCard>
       )}
 
+      <StatusHero detail={detail} />
+
       <IdentityCard detail={detail} navigate={navigate} />
 
       <Tabs tabs={tabs} defaultTabId="overview" />
     </div>
+  );
+}
+
+/* ── Status hero (the "first impression" banner) ───────── */
+
+/**
+ * StatusHero is a wide banner that puts the most operationally
+ * important facts about the ENI front-and-center: a large pulsing
+ * admin-state dot, the parent Vnet's VNI in big mono type, the
+ * overlay→underlay address arrow, and the placement DPU count.
+ * Each block is also a quick-glance metric, so even a first-time
+ * operator gets "is this thing UP, and where is it?" in one look.
+ */
+function StatusHero({ detail }: { detail: EniDetail }) {
+  const id = detail.identity;
+  const placement = detail.placement;
+  const vnet = detail.vnet;
+  const haSet = detail.ha_set ?? null;
+  const stateRaw = stripStatePrefix(id.admin_state) || "UNKNOWN";
+  const isUp = stateRaw.toUpperCase() === "UP";
+  const dotColor = isUp
+    ? "var(--accent-green)"
+    : stateRaw.toUpperCase() === "DOWN"
+      ? "var(--accent-red)"
+      : "var(--text-muted)";
+
+  return (
+    <GlassCard glow={isUp ? "green" : "amber"}>
+      <div className="grid grid-cols-1 md:grid-cols-[auto_1fr_auto_auto_auto] items-center gap-6 md:gap-8">
+        {/* Admin-state hero dot */}
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className="inline-block rounded-full animate-pulse-slow"
+            style={{
+              width: 18,
+              height: 18,
+              backgroundColor: dotColor,
+              boxShadow: `0 0 8px ${dotColor}, 0 0 18px ${dotColor}, 0 0 28px color-mix(in srgb, ${dotColor} 60%, transparent)`,
+            }}
+          />
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-muted)]">
+              Admin state
+            </p>
+            <p
+              className="text-2xl font-mono font-semibold"
+              style={{ color: dotColor }}
+            >
+              {stateRaw}
+            </p>
+          </div>
+        </div>
+
+        {/* Overlay → Underlay address strip */}
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-muted)] mb-1">
+            Address
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {id.overlay_ip ? (
+              <span className="font-mono text-base text-[color:var(--accent-purple)]">
+                {formatIp(id.overlay_ip)}
+              </span>
+            ) : (
+              <span className="text-[color:var(--text-muted)]">overlay —</span>
+            )}
+            <span className="text-[color:var(--text-muted)]">→</span>
+            <span className="font-mono text-base">{formatIp(id.underlay_ip)}</span>
+            <span className="text-[color:var(--text-muted)]">·</span>
+            <span className="font-mono text-xs text-[color:var(--text-secondary)]">
+              {formatMac(id.mac_address)}
+            </span>
+          </div>
+        </div>
+
+        {/* VNI */}
+        <div className="text-center md:text-right">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-muted)]">
+            VNI
+          </p>
+          <p className="text-3xl font-mono font-bold text-[color:var(--accent-cyan)] leading-tight">
+            {vnet?.vni ?? "—"}
+          </p>
+        </div>
+
+        {/* Placement */}
+        <div className="text-center md:text-right">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-muted)]">
+            DPUs
+          </p>
+          <p className="text-3xl font-mono font-bold text-[color:var(--accent-cyan)] leading-tight">
+            {placement.dpu_ids.length}
+          </p>
+          {placement.ha_active_active && (
+            <p className="text-[9px] font-mono text-[color:var(--accent-cyan)] mt-0.5">
+              HA · A/A
+            </p>
+          )}
+        </div>
+
+        {/* HA / namespace badge column */}
+        <div className="text-center md:text-right">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-muted)]">
+            HA Set
+          </p>
+          <p className="text-base font-mono text-[color:var(--text-primary)] truncate">
+            {haSet ? haSet.name : "—"}
+          </p>
+        </div>
+      </div>
+    </GlassCard>
   );
 }
 
@@ -627,8 +741,71 @@ function MappingsSection({ mappings }: { mappings: VnetMappingSpec[] }) {
         defaultSort={{ key: "overlay_ip", direction: "asc" }}
         filterPlaceholder="Filter mappings…"
         emptyMessage="No mappings match this filter"
+        renderExpandedRow={(r) => <MappingRowDetail row={r} />}
       />
     </GlassCard>
+  );
+}
+
+/** Inline-expanded detail for one vnet-mapping. Surfaces the
+ *  full overlay→underlay translation plus any tunnel/action params. */
+function MappingRowDetail({ row }: { row: MappingRow }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+      <dl className="space-y-1">
+        <Row label="Mapping name" value={<span className="font-mono">{row.name || "—"}</span>} />
+        <Row
+          label="Overlay IP"
+          value={
+            <span className="font-mono text-[color:var(--accent-purple)]">
+              {formatIp(row.overlay_ip)}
+            </span>
+          }
+        />
+        <Row
+          label="Underlay IP"
+          value={<span className="font-mono">{formatIp(row.underlay_ip)}</span>}
+        />
+        <Row
+          label="MAC"
+          value={<span className="font-mono">{formatMac(row.mac_address)}</span>}
+        />
+        <Row
+          label="Action"
+          value={
+            <span className="px-1.5 py-0.5 rounded font-mono bg-white/5">
+              {row.action}
+            </span>
+          }
+        />
+        {row.tunnel && (
+          <Row
+            label="Tunnel"
+            value={
+              <span className="font-mono text-[color:var(--accent-cyan)]">{row.tunnel}</span>
+            }
+          />
+        )}
+      </dl>
+      <div>
+        <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-2">
+          Encapsulation path
+        </p>
+        <div className="flex items-center gap-2 px-2 py-2 rounded bg-white/[0.03] border border-[color:var(--border-subtle)]">
+          <span className="font-mono text-[color:var(--accent-purple)]">
+            {formatIp(row.overlay_ip)}
+          </span>
+          <span className="text-[color:var(--text-muted)]">→</span>
+          <span className="font-mono">{formatIp(row.underlay_ip)}</span>
+          <span className="text-[color:var(--text-muted)]">·</span>
+          <span className="font-mono">{formatMac(row.mac_address)}</span>
+        </div>
+        <p className="text-[10px] text-[color:var(--text-muted)] italic mt-2">
+          Tenants address the destination via the overlay IP; the DPU rewrites
+          to the underlay IP+MAC on the wire using the action above.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -1066,8 +1243,59 @@ function TunnelsSection({ tunnels }: { tunnels: ServiceTunnelSpec[] }) {
         defaultSort={{ key: "name", direction: "asc" }}
         filterPlaceholder="Filter tunnels…"
         emptyMessage="No tunnels match this filter"
+        renderExpandedRow={(r) => <TunnelRowDetail row={r} />}
       />
     </GlassCard>
+  );
+}
+
+/** Inline-expanded detail for one service tunnel. Shows the
+ *  local↔remote underlay path plus the VNI and action chip. */
+function TunnelRowDetail({ row }: { row: TunnelRow }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+      <dl className="space-y-1">
+        <Row label="Tunnel name" value={<span className="font-mono">{row.name}</span>} />
+        <Row
+          label="Local underlay"
+          value={<span className="font-mono">{formatIp(row.local_underlay_ip)}</span>}
+        />
+        <Row
+          label="Remote underlay"
+          value={<span className="font-mono">{formatIp(row.remote_underlay_ip)}</span>}
+        />
+        <Row
+          label="VNI"
+          value={
+            <span className="font-mono text-[color:var(--accent-cyan)]">{row.vni}</span>
+          }
+        />
+        <Row
+          label="Action"
+          value={
+            <span className="px-1.5 py-0.5 rounded font-mono bg-white/5">{row.action}</span>
+          }
+        />
+      </dl>
+      <div>
+        <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-2">
+          Path
+        </p>
+        <div className="flex items-center gap-2 px-2 py-2 rounded bg-white/[0.03] border border-[color:var(--border-subtle)]">
+          <span className="font-mono">{formatIp(row.local_underlay_ip)}</span>
+          <span className="text-[color:var(--accent-cyan)]">⟶</span>
+          <span className="font-mono">{formatIp(row.remote_underlay_ip)}</span>
+          <span className="ml-auto text-[10px] text-[color:var(--text-secondary)] font-mono">
+            VNI {row.vni}
+          </span>
+        </div>
+        <p className="text-[10px] text-[color:var(--text-muted)] italic mt-2">
+          Service tunnels carry encapsulated overlay traffic across DPU
+          underlay paths. Routes with <code>next_hop_type = service_tunnel</code>{" "}
+          point at one of these.
+        </p>
+      </div>
+    </div>
   );
 }
 

@@ -68,8 +68,19 @@ export function StatusBadge({
   className,
 }: StatusBadgeProps) {
   const safeStatus = status ?? "UNKNOWN";
-  const color = STATUS_COLORS[safeStatus] ?? STATUS_COLORS[stripStatePrefix(safeStatus)] ?? "var(--text-muted)";
-  const label = prettify ? stripStatePrefix(safeStatus) : safeStatus;
+  // dashd emits admin states as lowercase ("up", "down"), but the
+  // STATUS_COLORS map is keyed by uppercase canonical names. Normalize
+  // before the lookup so the green/red blink lands correctly for both
+  // wire formats. We try (a) the exact key, (b) the uppercased key, and
+  // (c) the prefix-stripped uppercased key, in that order.
+  const stripped = stripStatePrefix(safeStatus);
+  const color =
+    STATUS_COLORS[safeStatus] ??
+    STATUS_COLORS[safeStatus.toUpperCase()] ??
+    STATUS_COLORS[stripped] ??
+    STATUS_COLORS[stripped.toUpperCase()] ??
+    "var(--text-muted)";
+  const label = prettify ? stripped : safeStatus;
   const pulse = pulseClassForStatus(safeStatus);
 
   return (
