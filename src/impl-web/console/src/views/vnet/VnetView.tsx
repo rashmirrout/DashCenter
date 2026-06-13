@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Globe, Layers, Cpu } from "lucide-react";
+import { ArrowLeft, Globe, Layers, Cpu, Waypoints } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { GlassCard } from "@/components/feedback/GlassCard";
 import { ErrorState } from "@/components/feedback/ErrorState";
@@ -31,8 +31,18 @@ interface VnetEniRow {
   name: string;
   mac_address: string;
   underlay_ip: string;
+  overlay_ip: string;
   admin_state: string;
   dpus: string[];
+}
+
+interface VnetMappingRow {
+  name: string;
+  overlay_ip: string;
+  underlay_ip: string;
+  mac_address: string;
+  action: string;
+  tunnel: string;
 }
 
 export default function VnetView() {
@@ -99,16 +109,38 @@ function VnetDetailPanel({ vnetName }: { vnetName: string }) {
   const addrSpace: string[] =
     spec?.address_space ?? d?.address_space ?? overlayCidrs;
 
+  // Build an O(1) lookup from "underlay_ip|mac" → overlay_ip so each ENI
+  // row can be enriched with its tenant-facing address without a fresh
+  // server round-trip. Mirrors the join the Go BFF aggregator does for
+  // the dedicated ENI detail page (overlayIPFromMappings).
+  const overlayIPByEni = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const map of myMappings) {
+      const u = (map.underlay_ip ?? "").trim();
+      const mac = (map.mac_address ?? "").trim().toLowerCase();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ip = (map as any).ip_address ?? map.overlay_ip ?? "";
+      if (u && mac && ip) m.set(`${u}|${mac}`, ip);
+    }
+    return m;
+  }, [myMappings]);
+
+  const overlayFor = (underlay_ip: string, mac_address: string): string =>
+    overlayIPByEni.get(`${underlay_ip}|${mac_address.toLowerCase()}`) ?? "";
+
   // Filter the placement list to ENIs belonging to this vnet.
   const placementRows: VnetEniRow[] = useMemo(() => {
     const items = (placements.data?.items ?? []) as EniPlacement[];
     const out: VnetEniRow[] = [];
     for (const p of items) {
       if ((p.vnet_name ?? "") !== vnetName) continue;
+      const underlay = p.underlay_ip ?? "";
+      const mac = p.mac_address ?? "";
       out.push({
         name: placementEniName(p),
-        mac_address: p.mac_address ?? "",
-        underlay_ip: p.underlay_ip ?? "",
+        mac_address: mac,
+        underlay_ip: underlay,
+        overlay_ip: overlayFor(underlay, mac),
         admin_state: p.admin_state ?? "",
         dpus: placementDpuIds(p),
       });
@@ -118,28 +150,36 @@ function VnetDetailPanel({ vnetName }: { vnetName: string }) {
     for (const e of myEnis) {
       const name = e.metadata?.name ?? "";
       if (!name || seen.has(name)) continue;
+      const underlay = e.underlay_ip ?? "";
+      const mac = e.mac_address ?? "";
       out.push({
         name,
-        mac_address: e.mac_address ?? "",
-        underlay_ip: e.underlay_ip ?? "",
+        mac_address: mac,
+        underlay_ip: underlay,
+        overlay_ip: overlayFor(underlay, mac),
         admin_state: e.admin_state ?? "",
         dpus: e.placement_hint_dpu_ids ?? [],
       });
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
-  }, [placements.data, vnetName, myEnis]);
+  }, [placements.data, vnetName, myEnis, overlayIPByEni]);
 
   // Merge: prefer placement rows (have MAC/IP/DPUs); fall back to detail's enis.
   const eniRows: VnetEniRow[] = useMemo(() => {
     if (placementRows.length > 0) return placementRows;
-    return detailEnis.map((e: any) => ({
-      name: e?.metadata?.name ?? e?.name ?? "",
-      mac_address: e?.mac_address ?? "",
-      underlay_ip: e?.underlay_ip ?? "",
-      admin_state: e?.admin_state ?? "",
-      dpus: e?.dpu_id ? [e.dpu_id] : [],
-    }));
-  }, [placementRows, detailEnis]);
+    return detailEnis.map((e: any) => {
+      const underlay: string = e?.underlay_ip ?? "";
+      const mac: string = e?.mac_address ?? "";
+      return {
+        name: e?.metadata?.name ?? e?.name ?? "",
+        mac_address: mac,
+        underlay_ip: underlay,
+        overlay_ip: overlayFor(underlay, mac),
+        admin_state: e?.admin_state ?? "",
+        dpus: e?.dpu_id ? [e.dpu_id] : [],
+      };
+    });
+  }, [placementRows, detailEnis, overlayIPByEni]);
 
   // Set of unique DPUs hosting this vnet's ENIs.
   const dpuSet = useMemo(() => {
@@ -184,6 +224,24 @@ function VnetDetailPanel({ vnetName }: { vnetName: string }) {
       header: "Underlay IP",
       accessor: (r) => r.underlay_ip,
       cell: (r) => <span className="font-mono text-xs">{formatIp(r.underlay_ip)}</span>,
+    },
+    {
+      key: "overlay_ip",
+      header: "Overlay IP",
+      accessor: (r) => r.overlay_ip,
+      cell: (r) =>
+        r.overlay_ip ? (
+          <span className="font-mono text-xs text-[color:var(--accent-purple)]">
+            {formatIp(r.overlay_ip)}
+          </span>
+        ) : (
+          <span
+            className="text-[color:var(--text-muted)]"
+            title="No vnet-mapping matches this ENI's (underlay_ip + mac_address)"
+          >
+            —
+          </span>
+        ),
     },
     {
       key: "dpus",
@@ -377,6 +435,102 @@ function VnetDetailPanel({ vnetName }: { vnetName: string }) {
     </div>
   );
 
+  // ── Vnet Mappings tab ──────────────────────────────────────
+  // Reuses the same overlay/underlay/mac data the BFF would otherwise
+  // expose; here we surface it as a first-class table so operators can
+  // see how the Vnet's overlay address space is realized end-to-end.
+  const mappingRows: VnetMappingRow[] = useMemo(
+    () =>
+      myMappings.map((m) => {
+        const raw = m as any;
+        return {
+          name: raw.metadata?.name ?? raw.name ?? "",
+          overlay_ip: raw.ip_address ?? raw.overlay_ip ?? "",
+          underlay_ip: raw.underlay_ip ?? "",
+          mac_address: raw.mac_address ?? "",
+          action: raw.action ?? "vnet_encap",
+          tunnel: raw.params?.tunnel ?? "",
+        };
+      }),
+    [myMappings]
+  );
+
+  const mappingColumns: Column<VnetMappingRow>[] = [
+    {
+      key: "overlay_ip",
+      header: "Overlay IP",
+      accessor: (r) => r.overlay_ip,
+      cell: (r) => (
+        <span className="font-mono text-xs text-[color:var(--accent-purple)]">
+          {formatIp(r.overlay_ip)}
+        </span>
+      ),
+    },
+    {
+      key: "underlay_ip",
+      header: "→ Underlay IP",
+      accessor: (r) => r.underlay_ip,
+      cell: (r) => (
+        <span className="font-mono text-xs">{formatIp(r.underlay_ip)}</span>
+      ),
+    },
+    {
+      key: "mac_address",
+      header: "MAC",
+      accessor: (r) => r.mac_address,
+      cell: (r) => (
+        <span className="font-mono text-xs">{formatMac(r.mac_address)}</span>
+      ),
+    },
+    {
+      key: "action",
+      header: "Action",
+      accessor: (r) => r.action,
+      cell: (r) => (
+        <span className="px-1.5 py-0.5 text-[10px] rounded font-mono bg-white/5">
+          {r.action}
+        </span>
+      ),
+      width: "w-32",
+    },
+    {
+      key: "tunnel",
+      header: "Tunnel",
+      accessor: (r) => r.tunnel,
+      cell: (r) =>
+        r.tunnel ? (
+          <span className="font-mono text-xs text-[color:var(--accent-cyan)]">
+            {r.tunnel}
+          </span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
+    },
+  ];
+
+  const mappingsTab = (
+    <div className="space-y-4">
+      {mappingRows.length === 0 ? (
+        <GlassCard>
+          <p className="text-center text-[color:var(--text-muted)] py-6">
+            No vnet-mappings declared for this vnet yet.
+          </p>
+        </GlassCard>
+      ) : (
+        <GlassCard className="p-0">
+          <DataTable
+            columns={mappingColumns}
+            data={mappingRows}
+            rowKey={(r) => `${r.overlay_ip}-${r.underlay_ip}-${r.mac_address}`}
+            defaultSort={{ key: "overlay_ip", direction: "asc" }}
+            filterPlaceholder="Filter mappings…"
+            emptyMessage="No mappings match this filter"
+          />
+        </GlassCard>
+      )}
+    </div>
+  );
+
   const tabs: TabDef[] = [
     {
       id: "overview",
@@ -390,6 +544,13 @@ function VnetDetailPanel({ vnetName }: { vnetName: string }) {
       badge: eniRows.length,
       icon: <Layers size={14} />,
       content: enisTab,
+    },
+    {
+      id: "mappings",
+      label: "Vnet Mappings",
+      badge: mappingRows.length,
+      icon: <Waypoints size={14} />,
+      content: mappingsTab,
     },
     {
       id: "dpus",
@@ -428,10 +589,10 @@ function VnetDetailPanel({ vnetName }: { vnetName: string }) {
         />
         <button
           type="button"
-          onClick={() => navigate("/fleet")}
+          onClick={() => navigate("/vnets")}
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs bg-white/5 hover:bg-white/10 border border-[color:var(--border-subtle)] text-[color:var(--text-secondary)]"
         >
-          <ArrowLeft size={12} /> Back to Fleet
+          <ArrowLeft size={12} /> Back to Vnets
         </button>
       </div>
       <Tabs tabs={tabs} defaultTabId="overview" />

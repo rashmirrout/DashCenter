@@ -24,6 +24,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/cluster"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/counters"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/flow"
@@ -310,6 +311,19 @@ grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch
 adminSrv := adminserver.NewWithElector(inv, st, obs, rec, elector)
 adminSrv.SetClusterService(clusterService)
 
+// 9d. Counters pipeline (PE-3b / PE-G9). Store caches the most-recent
+// CounterReport per DPU; Poller pulls every cfg.Observability.Counters.PollInterval.
+// Both are always-on subsystems (counter visibility is wanted on leader
+// AND follower; PD-G5 will stream the store events to operators).
+cntStore := counters.NewStore()
+var cntPoller *counters.Poller
+if cfg.Observability.Counters.Enabled {
+	cntPoller = counters.NewPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
+} else {
+	cntPoller = counters.NewDisabledPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
+}
+adminSrv.SetCountersWiring(cntStore, cntPoller)
+
 // 10. Create subscribe PumpSet — wired with the production DpuClient
 // factory so each Pump can open real Subscribe streams.
 pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
@@ -362,6 +376,11 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 		prober.Run(rootCtx)
 	}()
 
+	// Counter poller goroutine. Always-on — runs on leader AND follower
+	// so admin /counters endpoints are populated everywhere. Disabled
+	// pollers no-op until /admin/counters/enable flips them on.
+	cntPoller.Start(rootCtx)
+
 	// 13. Leader-only subsystems — reconciler + per-DPU dispatch workers +
 	// per-DPU subscribe pumps. Backend is selected by
 	// cfg.HA.Controller.Elector.Backend ("none" for single-node dev /
@@ -388,6 +407,7 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 	restSrv.Stop()
 	grpcSrv.Stop()
 	adminSrv.Stop()
+	cntPoller.Stop()
 	pumpSet.StopAll()
 	mgr.Stop()
 	_ = elector.Close()

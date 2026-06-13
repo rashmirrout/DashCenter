@@ -980,6 +980,15 @@ if mappingsErr != nil {
 warnings = append(warnings, "vnet-mappings fetch failed: "+mappingsErr.Error())
 }
 
+// ── Derive overlay IP from this ENI's matching vnet-mapping ─
+// dashd's data model puts the overlay address on the VnetMapping,
+// not the ENI. Join on (underlay_ip + mac_address) so the UI can
+// surface the ENI's overlay IP without a second round-trip.
+if identity.UnderlayIP != "" && identity.MacAddress != "" {
+identity.OverlayIP = overlayIPFromMappings(
+myMappings, identity.UnderlayIP, identity.MacAddress)
+}
+
 // ── Resolve referenced service tunnels ──────────────────────
 referencedTunnels := referencedTunnelNames(myRoutes, myMappings)
 var myTunnels []map[string]any
@@ -1281,6 +1290,55 @@ return v
 }
 if spec, ok := m["spec"].(map[string]any); ok {
 return stringField(spec, "vnet_name")
+}
+return ""
+}
+
+// overlayIPFromMappings walks the already-filtered vnet-mappings and
+// returns the overlay IP (mapping.ip_address) for the entry whose
+// (underlay_ip + mac_address) tuple matches the ENI. Returns "" when
+// no mapping matches — the UI is expected to show a blank/placeholder
+// in that case rather than fail the whole detail render.
+//
+// Mappings are searched in spec-nested first then top-level so the
+// helper works with both wire shapes.
+func overlayIPFromMappings(mappings []map[string]any, underlayIP, mac string) string {
+if underlayIP == "" || mac == "" {
+return ""
+}
+wantMac := strings.ToLower(mac)
+for _, m := range mappings {
+src := m
+if spec, ok := m["spec"].(map[string]any); ok {
+src = spec
+}
+mUnderlay := stringField(src, "underlay_ip")
+if mUnderlay == "" {
+mUnderlay = stringField(m, "underlay_ip")
+}
+mMac := stringField(src, "mac_address")
+if mMac == "" {
+mMac = stringField(m, "mac_address")
+}
+if mUnderlay != underlayIP {
+continue
+}
+if strings.ToLower(mMac) != wantMac {
+continue
+}
+// dashd uses `ip_address`; legacy `overlay_ip` alias also accepted.
+if ip := stringField(src, "ip_address"); ip != "" {
+return ip
+}
+if ip := stringField(m, "ip_address"); ip != "" {
+return ip
+}
+if ip := stringField(src, "overlay_ip"); ip != "" {
+return ip
+}
+if ip := stringField(m, "overlay_ip"); ip != "" {
+return ip
+}
 }
 return ""
 }

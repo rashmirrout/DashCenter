@@ -92,10 +92,14 @@ export function StatusBadge({
         aria-hidden
         className={cn("inline-block rounded-full shrink-0", pulse)}
         style={{
-          width: size === "sm" ? 6 : 8,
-          height: size === "sm" ? 6 : 8,
+          width: size === "sm" ? 7 : 9,
+          height: size === "sm" ? 7 : 9,
           backgroundColor: color,
-          boxShadow: pulse ? `0 0 6px ${color}` : undefined,
+          // Layered glow: tight inner ring + wider outer halo. Both fade in/out
+          // with the pulse animation so the dot reads as a live "heartbeat".
+          boxShadow: pulse
+            ? `0 0 4px ${color}, 0 0 10px ${color}, 0 0 16px color-mix(in srgb, ${color} 60%, transparent)`
+            : undefined,
         }}
       />
       {label}

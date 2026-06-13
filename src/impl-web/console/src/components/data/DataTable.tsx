@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { Fragment, useState, useMemo, useCallback } from 'react';
 import { cn } from '@/lib/cn';
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -57,6 +57,18 @@ export interface DataTableProps<T> {
   compact?: boolean;
   /** Sticky header */
   stickyHeader?: boolean;
+  /**
+   * When provided, each row becomes click-to-expand. The returned node
+   * is rendered inline in a full-width cell beneath the row. A chevron
+   * toggle is automatically prepended in the leftmost column.
+   *
+   * Mutually-exclusive with `onRowClick` — when both are set, the
+   * row's click toggles the expanded panel instead of firing onRowClick.
+   */
+  renderExpandedRow?: (row: T) => React.ReactNode;
+  /** 'single' (default) lets only one row be expanded at a time;
+   *  'multi' lets the user expand independently. */
+  expandMode?: 'single' | 'multi';
 }
 
 /* ── Sort icon ─────────────────────────────────────────────── */
@@ -84,10 +96,34 @@ export function DataTable<T>({
   showFilter = true,
   compact = false,
   stickyHeader = true,
+  renderExpandedRow,
+  expandMode = 'single',
 }: DataTableProps<T>) {
   const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
   const [filter, setFilter] = useState('');
   const [page, setPage] = useState(0);
+  // Track which row keys are currently expanded. Only meaningful when
+  // renderExpandedRow is provided. We deliberately keep this as a Set
+  // even in 'single' mode so the toggle logic is uniform.
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+
+  const expandable = typeof renderExpandedRow === 'function';
+
+  const toggleExpand = useCallback(
+    (key: string) => {
+      setExpandedKeys((prev) => {
+        const next = new Set(expandMode === 'multi' ? prev : []);
+        if (prev.has(key)) {
+          // Clicking the expanded row again collapses it.
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+        return next;
+      });
+    },
+    [expandMode],
+  );
 
   // Visible columns
   const visibleColumns = useMemo(
@@ -195,6 +231,12 @@ export function DataTable<T>({
         <table className="w-full text-sm" role="grid">
           <thead className={cn(stickyHeader && 'sticky top-0 z-10')}>
             <tr className="bg-bg-elevated border-b border-border">
+              {expandable && (
+                <th
+                  aria-hidden
+                  className={cn('w-8 px-2', compact ? 'py-1.5' : 'py-2')}
+                />
+              )}
               {visibleColumns.map((col) => {
                 const isSortable = col.sortable !== false;
                 const isActive = sort?.key === col.key;
@@ -225,49 +267,98 @@ export function DataTable<T>({
             {paginated.length === 0 ? (
               <tr>
                 <td
-                  colSpan={visibleColumns.length}
+                  colSpan={visibleColumns.length + (expandable ? 1 : 0)}
                   className="px-3 py-8 text-center text-text-muted"
                 >
                   {emptyMessage}
                 </td>
               </tr>
             ) : (
-              paginated.map((row) => (
-                <tr
-                  key={rowKey(row)}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={cn(
-                    'border-b border-border/50 transition-colors',
-                    onRowClick && 'cursor-pointer hover:bg-bg-elevated/50',
-                  )}
-                  role="row"
-                  tabIndex={onRowClick ? 0 : undefined}
-                  onKeyDown={
-                    onRowClick
-                      ? (e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            onRowClick(row);
-                          }
-                        }
-                      : undefined
-                  }
-                >
-                  {visibleColumns.map((col) => (
-                    <td
-                      key={col.key}
+              paginated.map((row) => {
+                const k = rowKey(row);
+                const isExpanded = expandable && expandedKeys.has(k);
+
+                // When expand is enabled, clicking the row toggles
+                // expansion. Otherwise, fall back to the (older)
+                // onRowClick contract so existing callers keep working.
+                const rowOnClick: (() => void) | undefined = expandable
+                  ? () => toggleExpand(k)
+                  : onRowClick
+                    ? () => onRowClick(row)
+                    : undefined;
+
+                return (
+                  <Fragment key={k}>
+                    <tr
+                      onClick={rowOnClick}
                       className={cn(
-                        'px-3',
-                        compact ? 'py-1.5' : 'py-2',
-                        col.width,
-                        cellAlign(col.align),
+                        'border-b border-border/50 transition-colors',
+                        rowOnClick && 'cursor-pointer hover:bg-bg-elevated/50',
+                        isExpanded && 'bg-bg-elevated/40',
                       )}
+                      role="row"
+                      tabIndex={rowOnClick ? 0 : undefined}
+                      aria-expanded={expandable ? isExpanded : undefined}
+                      onKeyDown={
+                        rowOnClick
+                          ? (e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                rowOnClick();
+                              }
+                            }
+                          : undefined
+                      }
                     >
-                      {col.cell ? col.cell(row) : String(col.accessor(row) ?? '—')}
-                    </td>
-                  ))}
-                </tr>
-              ))
+                      {expandable && (
+                        <td
+                          className={cn(
+                            'w-8 px-2 text-text-muted',
+                            compact ? 'py-1.5' : 'py-2',
+                          )}
+                          aria-hidden
+                        >
+                          {/* Pure-CSS chevron, rotated 90° when expanded. */}
+                          <span
+                            className={cn(
+                              'inline-block transition-transform duration-150',
+                              isExpanded && 'rotate-90 text-accent-cyan',
+                            )}
+                          >
+                            ▶
+                          </span>
+                        </td>
+                      )}
+                      {visibleColumns.map((col) => (
+                        <td
+                          key={col.key}
+                          className={cn(
+                            'px-3',
+                            compact ? 'py-1.5' : 'py-2',
+                            col.width,
+                            cellAlign(col.align),
+                          )}
+                        >
+                          {col.cell ? col.cell(row) : String(col.accessor(row) ?? '—')}
+                        </td>
+                      ))}
+                    </tr>
+                    {isExpanded && (
+                      <tr
+                        className="bg-bg-elevated/20 border-b border-border/50"
+                        role="row"
+                      >
+                        <td
+                          colSpan={visibleColumns.length + 1}
+                          className="px-4 py-3"
+                        >
+                          {renderExpandedRow!(row)}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>

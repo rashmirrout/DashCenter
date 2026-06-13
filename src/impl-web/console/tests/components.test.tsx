@@ -165,6 +165,12 @@ describe("Sidebar · NAV_GROUPS", () => {
       "/dashboard",
       "/fleet",
       "/enis",
+      // Vnets + Mappings were added when the dedicated VnetListView /
+      // MappingsView pages were introduced. They sit between ENIs and
+      // Routing inside the Observe group to keep the "what's declared"
+      // resources clustered together.
+      "/vnets",
+      "/mappings",
       "/routing",
       "/tunnels",
       "/policies",

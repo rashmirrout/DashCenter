@@ -21,6 +21,8 @@ const TopologyV2View = lazy(() => import('./views/topology-v2/TopologyV2View'));
 const DebugView = lazy(() => import('./views/debug/DebugView'));
 const EniListView = lazy(() => import('./views/eni/EniListView'));
 const EniView = lazy(() => import('./views/eni/EniView'));
+const VnetListView = lazy(() => import('./views/vnet/VnetListView'));
+const MappingsView = lazy(() => import('./views/mapping/MappingsView'));
 
 /* ── Loading fallback + error boundary ─────────────────────── */
 function ViewLoader({ children, name }: { children: ReactNode; name?: string }) {
@@ -72,6 +74,8 @@ export const router = createBrowserRouter([
       { path: 'vnet/:vnetName', element: <ViewLoader name="Vnet Detail"><VnetView /></ViewLoader> },
       { path: 'enis', element: <ViewLoader name="ENIs"><EniListView /></ViewLoader> },
       { path: 'eni/:namespace/:name', element: <ViewLoader name="ENI Detail"><EniView /></ViewLoader> },
+      { path: 'vnets', element: <ViewLoader name="Vnets"><VnetListView /></ViewLoader> },
+      { path: 'mappings', element: <ViewLoader name="Mappings"><MappingsView /></ViewLoader> },
       { path: 'routing', element: <ViewLoader name="Routing"><RoutingView /></ViewLoader> },
       { path: 'tunnels', element: <ViewLoader name="Tunnels"><TunnelView /></ViewLoader> },
       { path: 'policies', element: <ViewLoader name="Policies"><PolicyView /></ViewLoader> },
@@ -81,9 +85,11 @@ export const router = createBrowserRouter([
       { path: 'admin', element: <ViewLoader name="Admin Ops"><AdminOpsView /></ViewLoader> },
       { path: 'commands', element: <ViewLoader name="Commands"><CommandView /></ViewLoader> },
       { path: 'debug', element: <ViewLoader name="Debug"><DebugView /></ViewLoader> },
-      /* Backward-compat redirects from old paths */
+      /* Backward-compat redirects from old paths.
+       * NOTE: the legacy `vnets → /fleet` redirect was removed when the
+       * dedicated VnetListView was added above. `/vnets` now serves the
+       * list view directly. */
       { path: 'fleet/dpu/:dpuId', element: <Navigate to="/dpu/__redir__" replace /> },
-      { path: 'vnets', element: <Navigate to="/fleet" replace /> },
       { path: 'vnets/:vnetName', element: <Navigate to="/vnet/__redir__" replace /> },
       { path: 'admin-ops', element: <Navigate to="/admin" replace /> },
       { path: 'command', element: <Navigate to="/commands" replace /> },

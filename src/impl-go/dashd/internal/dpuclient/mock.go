@@ -31,11 +31,20 @@ DeleteCalls []DeleteCall
 ApplyErr     error
 DeleteErr    error
 SubscribeErr error
+CountersErr  error // injected on the next GetDpuCounters call
 
 // Events delivered (in order) on every Subscribe stream until the
 // list is exhausted, after which Recv blocks until ctx is done and
 // then returns io.EOF.
 EventsToSend []*dashapiv1.Event
+
+// CountersResp, if non-nil, is returned by every GetDpuCounters call
+// (in addition to CountersErr).
+CountersResp *dashapiv1.DpuCountersResponse
+
+// CountersFn, if non-nil, overrides CountersResp/CountersErr per call
+// — useful when the test wants per-poll-round counter values.
+CountersFn func(callNum int, req *dashapiv1.DpuCountersRequest) (*dashapiv1.DpuCountersResponse, error)
 
 // CallHook, if non-nil, runs at the start of every Apply/Delete and
 // can return an override error. Useful for "fail nth call" patterns.
@@ -50,6 +59,7 @@ closed       atomic.Bool
 applyCount   atomic.Int64
 deleteCount  atomic.Int64
 subCallCount atomic.Int64
+cntCount     atomic.Int64
 }
 
 // DeleteCall captures one Delete invocation for assertion.
@@ -131,6 +141,31 @@ m.closed.Store(true)
 return nil
 }
 
+// GetDpuCounters implements DpuClient. Returns CountersFn(callNum,req)
+// if set, otherwise CountersResp / CountersErr. Records the call count
+// regardless.
+func (m *MockClient) GetDpuCounters(ctx context.Context, req *dashapiv1.DpuCountersRequest) (*dashapiv1.DpuCountersResponse, error) {
+if m.closed.Load() {
+return nil, fmt.Errorf("mockclient: closed")
+}
+if err := ctx.Err(); err != nil {
+return nil, err
+}
+n := int(m.cntCount.Add(1))
+if m.CountersFn != nil {
+return m.CountersFn(n, req)
+}
+m.mu.Lock()
+resp := m.CountersResp
+err := m.CountersErr
+m.mu.Unlock()
+return resp, err
+}
+
+// GetDpuCountersCallCount returns the total number of GetDpuCounters
+// invocations (including ones that returned an error).
+func (m *MockClient) GetDpuCountersCallCount() int { return int(m.cntCount.Load()) }
+
 // Reset clears recorded calls and counters. Keeps the configured
 // EventsToSend / hooks intact so test setup can be reused.
 func (m *MockClient) Reset() {
@@ -141,6 +176,7 @@ m.mu.Unlock()
 m.applyCount.Store(0)
 m.deleteCount.Store(0)
 m.subCallCount.Store(0)
+m.cntCount.Store(0)
 }
 
 // ApplyCallCount returns the total number of Apply invocations

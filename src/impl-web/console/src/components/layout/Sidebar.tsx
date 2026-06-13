@@ -14,6 +14,7 @@ import {
   Bug,
   Radio,
   Plug,
+  Globe,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -50,6 +51,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { path: "/fleet", label: "Fleet", icon: Network },
       { path: "/enis", label: "ENIs", icon: Plug },
+      { path: "/vnets", label: "Vnets", icon: Globe },
+      { path: "/mappings", label: "Mappings", icon: Waypoints },
       { path: "/routing", label: "Routing", icon: Route },
       { path: "/tunnels", label: "Tunnels", icon: Cable },
       { path: "/policies", label: "Policies", icon: Shield },

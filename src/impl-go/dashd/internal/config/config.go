@@ -38,6 +38,12 @@ type Config struct {
 	// HA is the mode-specific HA block. Only the sub-block matching Mode
 	// may be populated. See internal/config/ha.go.
 	HA HAConfig `yaml:"ha"`
+
+	// Observability holds the polling + caching knobs for the counter
+	// ingestion pipeline (PE-3b / PE-G9). Defaults: enabled, poll every
+	// 5s. Operators flip the gate or change the interval through this
+	// block + the corresponding admin endpoints.
+	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 // ListenConfig holds network listener addresses.
@@ -97,6 +103,29 @@ type LogConfig struct {
 	Format string `yaml:"format"` // json|text, default json
 }
 
+// ObservabilityConfig is the top-level observability block. Today it
+// only holds counter polling knobs (PE-3b); diagnostics + audit moved
+// here in future phases.
+type ObservabilityConfig struct {
+	Counters CountersConfig `yaml:"counters"`
+}
+
+// CountersConfig tunes the dashd → dash-sim/DPU counter polling loop.
+//
+//   - Enabled defaults to true. Set to false to stop polling without
+//     unwiring the pipeline (admin endpoints stay reachable and the
+//     poller can be re-enabled at runtime).
+//   - PollInterval default 5s; minimum 100ms (anything tighter just
+//     thrashes sims with no observable benefit).
+//
+// Per-DPU overrides are deferred to PE-3c — the runtime
+// SetInterval admin endpoint covers the fleet-wide knob today and
+// the per-DPU branch slots in cleanly when needed.
+type CountersConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+}
+
 // Default returns a Config with all production defaults filled in.
 func Default() *Config {
 	return &Config{
@@ -126,6 +155,12 @@ Source: "api",
 		},
 		Auth: defaultAuthConfig(),
 		HA:   defaultHAConfig(),
+		Observability: ObservabilityConfig{
+			Counters: CountersConfig{
+				Enabled:      true,
+				PollInterval: 5 * time.Second,
+			},
+		},
 	}
 }
 
@@ -243,6 +278,17 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
+	// Observability.Counters. Enabled requires a non-zero PollInterval
+	// that is >= 100ms. (Defaults already filled in by applyDefaults;
+	// validation guards explicitly-bad YAML.)
+	if c.Observability.Counters.Enabled {
+		if c.Observability.Counters.PollInterval <= 0 {
+			errs = append(errs, errors.New("observability.counters.poll_interval must be > 0 when enabled"))
+		} else if c.Observability.Counters.PollInterval < 100*time.Millisecond {
+			errs = append(errs, fmt.Errorf("observability.counters.poll_interval = %s; minimum is 100ms", c.Observability.Counters.PollInterval))
+		}
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -295,5 +341,13 @@ func applyDefaults(c *Config) {
 	}
 	if c.Log.Format == "" {
 		c.Log.Format = d.Log.Format
+	}
+
+	// Observability — only the counters sub-block exists today.
+	if !c.Observability.Counters.Enabled && c.Observability.Counters.PollInterval == 0 {
+		// Zero value: never specified in YAML — inherit full defaults.
+		c.Observability.Counters = d.Observability.Counters
+	} else if c.Observability.Counters.PollInterval == 0 {
+		c.Observability.Counters.PollInterval = d.Observability.Counters.PollInterval
 	}
 }

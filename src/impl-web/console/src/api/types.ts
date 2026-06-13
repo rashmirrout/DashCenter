@@ -790,6 +790,10 @@ export interface EniDetailIdentity {
   vnet_name: string;
   mac_address?: string;
   underlay_ip?: string;
+  /** Overlay (tenant) IP, derived server-side by joining
+   *  (underlay_ip + mac_address) against the parent vnet's
+   *  vnet-mapping table. Absent when no mapping matches. */
+  overlay_ip?: string;
   admin_state?: string;
   generation?: number;
   labels?: Record<string, string>;

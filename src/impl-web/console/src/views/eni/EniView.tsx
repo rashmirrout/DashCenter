@@ -361,6 +361,23 @@ function IdentityCard({ detail, navigate }: { detail: EniDetail; navigate: Retur
         />
         <Row label="MAC address" value={<span className="font-mono text-xs">{formatMac(id.mac_address)}</span>} />
         <Row label="Underlay IP" value={<span className="font-mono text-xs">{formatIp(id.underlay_ip)}</span>} />
+        <Row
+          label="Overlay IP"
+          value={
+            id.overlay_ip ? (
+              <span className="font-mono text-xs text-[color:var(--accent-purple)]">
+                {formatIp(id.overlay_ip)}
+              </span>
+            ) : (
+              <span
+                className="text-[color:var(--text-muted)]"
+                title="No vnet-mapping matches this ENI's (underlay_ip + mac_address) yet"
+              >
+                —
+              </span>
+            )
+          }
+        />
         <Row label="Admin state" value={<StatusBadge status={stripStatePrefix(id.admin_state) || "UNKNOWN"} />} />
         <Row
           label="Generation"
@@ -718,9 +735,64 @@ function AclPolicyCard({ acl }: { acl: AclPolicySpec }) {
           rowKey={(r) => String(r.priority)}
           defaultSort={{ key: "priority", direction: "asc" }}
           emptyMessage="No rules"
+          renderExpandedRow={(r) => <AclRuleDetail rule={r} />}
         />
       )}
     </GlassCard>
+  );
+}
+
+/** Inline-expanded detail panel for a single AclRule, shown beneath
+ *  the row when the user clicks it. Mirrors RouteEntryDetail in style. */
+function AclRuleDetail({ rule }: { rule: AclRule }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+      <dl className="space-y-1">
+        <Row label="Priority" value={<span className="font-mono">{rule.priority}</span>} />
+        <Row label="Action" value={<StatusBadge status={rule.action ?? "—"} />} />
+        {rule.description && (
+          <Row
+            label="Description"
+            value={<span className="text-[color:var(--text-secondary)]">{rule.description}</span>}
+          />
+        )}
+        <Row label="Protocols" value={<ChipList items={rule.protocols} />} />
+        {rule.terminating != null && (
+          <Row
+            label="Terminating"
+            value={
+              <span className="font-mono">
+                {rule.terminating ? "true" : "false"}
+              </span>
+            }
+          />
+        )}
+      </dl>
+      <div className="space-y-2">
+        <div>
+          <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-1">
+            Source
+          </p>
+          <ChipList items={rule.src_prefixes} mono />
+          {rule.src_ports && rule.src_ports.length > 0 && (
+            <div className="mt-1">
+              <ChipList items={rule.src_ports.map((p) => `port ${p}`)} mono dim />
+            </div>
+          )}
+        </div>
+        <div>
+          <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-1">
+            Destination
+          </p>
+          <ChipList items={rule.dst_prefixes} mono />
+          {rule.dst_ports && rule.dst_ports.length > 0 && (
+            <div className="mt-1">
+              <ChipList items={rule.dst_ports.map((p) => `port ${p}`)} mono dim />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -844,9 +916,69 @@ function RoutePolicyCard({
           rowKey={(r) => r.prefix}
           defaultSort={{ key: "prefix", direction: "asc" }}
           emptyMessage="No routes"
+          renderExpandedRow={(r) => <RouteEntryDetail entry={r} />}
         />
       )}
     </GlassCard>
+  );
+}
+
+/** Inline-expanded detail panel for a single RouteEntry, shown
+ *  beneath the row when the user clicks it. Keeps everything on
+ *  the same page so the operator never loses context. */
+function RouteEntryDetail({ entry }: { entry: RouteEntry }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+      <dl className="space-y-1">
+        <Row label="Prefix" value={<span className="font-mono">{entry.prefix}</span>} />
+        <Row
+          label="Next-hop type"
+          value={
+            <span className="px-1.5 py-0.5 rounded font-mono bg-white/5">
+              {entry.next_hop_type ?? "—"}
+            </span>
+          }
+        />
+        <Row
+          label="Next-hop target"
+          value={
+            entry.next_hop_target ? (
+              <span className="font-mono">{entry.next_hop_target}</span>
+            ) : (
+              <span className="text-[color:var(--text-muted)]">—</span>
+            )
+          }
+        />
+        {entry.metric != null && (
+          <Row label="Metric" value={<span className="font-mono">{entry.metric}</span>} />
+        )}
+      </dl>
+      {entry.ecmp_members && entry.ecmp_members.length > 0 && (
+        <div>
+          <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-2">
+            ECMP members ({entry.ecmp_members.length})
+          </p>
+          <ul className="space-y-1">
+            {entry.ecmp_members.map((m, i) => (
+              <li
+                key={i}
+                className="flex items-center gap-2 px-2 py-1 rounded bg-white/[0.03] border border-[color:var(--border-subtle)]"
+              >
+                <span className="px-1.5 py-0.5 text-[10px] rounded font-mono bg-white/5">
+                  {m.next_hop_type}
+                </span>
+                <span className="font-mono">{m.next_hop_target ?? "—"}</span>
+                {m.weight != null && (
+                  <span className="ml-auto text-[10px] text-[color:var(--text-secondary)] font-mono">
+                    weight {m.weight}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 

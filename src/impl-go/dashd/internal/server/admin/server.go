@@ -29,6 +29,8 @@ dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1
 type Server struct {
 	srv        *http.Server
 	clusterSvc service.ClusterService // PE-G2; set later via SetClusterService
+	cntStore   CountersStore          // PE-3b; set later via SetCountersWiring
+	cntPoller  CountersPoller         // PE-3b; set later via SetCountersWiring
 	handler    *handler                // back-ref so SetClusterService can wire it through
 }
 
@@ -73,6 +75,9 @@ func NewWithElector(inv *inventory.Inventory, st store.DesiredStore, obs *model.
 	mux.HandleFunc("GET /admin/eni-placement", h.eniPlacement)
 	mux.HandleFunc("POST /admin/reconcile", h.reconcile)
 	mux.HandleFunc("GET /admin/topology", h.topology)
+	mux.HandleFunc("GET /admin/counters", h.countersList)
+	mux.HandleFunc("POST /admin/counters/poll-interval", h.countersPollInterval)
+	mux.HandleFunc("POST /admin/counters/enable", h.countersEnable)
 	return &Server{
 		srv: &http.Server{
 			Handler:           mux,
@@ -107,6 +112,8 @@ obs     *model.ObsCache
 rec     *reconciler.Reconciler
 elector LeaderObserver
 clusterSvc service.ClusterService // PE-G2; nil until main.go calls Server.SetClusterService
+cntStore   CountersStore          // PE-3b; nil until SetCountersWiring
+cntPoller  CountersPoller         // PE-3b; nil until SetCountersWiring
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {

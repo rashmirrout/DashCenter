@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { GlassCard } from "@/components/feedback/GlassCard";
 import { useTraceFlow, useExplainMatch, useEniList } from "@/queries/hooks";
@@ -442,14 +443,27 @@ type TabId = "trace" | "explain";
 
 export default function FlowTraceView() {
   const [tab, setTab] = useState<TabId>("trace");
-  const [flow, setFlow] = useState<TraceFlowInput>({
-    direction: 1,
-    eni_name: "",
-    src_ip: "",
-    dst_ip: "",
-    src_port: 0,
-    dst_port: 443,
-    protocol: "tcp",
+
+  // Seed the form from URL query params so deep-links like
+  //   /flow-trace?eni_name=eni-bank-web-04&vni=2001
+  // (used by the ENI detail page's "Trace a flow…" button) land
+  // with the relevant fields already filled in. Reading once on
+  // mount via useState's lazy initializer keeps the form fully
+  // controllable afterwards — we don't fight user edits.
+  const [searchParams] = useSearchParams();
+  const [flow, setFlow] = useState<TraceFlowInput>(() => {
+    const eniName = searchParams.get("eni_name") ?? "";
+    const vniRaw = searchParams.get("vni");
+    return {
+      direction: 1,
+      eni_name: eniName,
+      src_ip: "",
+      dst_ip: "",
+      src_port: 0,
+      dst_port: 443,
+      protocol: "tcp",
+      vni: vniRaw ?? undefined,
+    };
   });
   const [subject, setSubject] = useState<number>(EXPLAIN_SUBJECTS.ACL);
 

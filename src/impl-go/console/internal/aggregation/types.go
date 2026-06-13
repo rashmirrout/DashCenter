@@ -287,10 +287,17 @@ Warnings []string          `json:"warnings,omitempty"`
 // EniIdentity is the ENI's own spec, projected to the fields the
 // UI cares about. We keep raw `labels` for the chip cluster and
 // `generation` so the UI can detect stale data after writes.
+//
+// OverlayIP is NOT a field on the ENI spec — dashd's data model
+// puts the overlay address on the matching VnetMapping. We derive
+// it server-side by joining (underlay_ip + mac_address) against
+// the vnet's mapping table so the UI gets a single, pre-joined view.
+// See: docs/concepts/dashd-configuration-concepts.md §VNI inheritance.
 type EniIdentity struct {
 VnetName   string            `json:"vnet_name"`
 MacAddress string            `json:"mac_address,omitempty"`
 UnderlayIP string            `json:"underlay_ip,omitempty"`
+OverlayIP  string            `json:"overlay_ip,omitempty"`
 AdminState string            `json:"admin_state,omitempty"`
 Generation int64             `json:"generation,omitempty"`
 Labels     map[string]string `json:"labels,omitempty"`
