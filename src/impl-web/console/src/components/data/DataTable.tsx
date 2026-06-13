@@ -17,6 +17,15 @@ export interface Column<T> {
   width?: string;
   /** Hide this column by default */
   hidden?: boolean;
+  /**
+   * When true, hide this column automatically if every row has a
+   * nullish or empty-string value for the accessor. Useful for
+   * "optional" fields where dashd may omit the value across the
+   * entire result set (e.g. tunnel on vnet-mappings). Evaluated
+   * against the *unfiltered* row data so the column doesn't appear
+   * or disappear as the user types in the filter box.
+   */
+  hideWhenEmpty?: boolean;
   /** Alignment */
   align?: 'left' | 'center' | 'right';
 }
@@ -125,10 +134,24 @@ export function DataTable<T>({
     [expandMode],
   );
 
-  // Visible columns
+  // Visible columns: drop explicitly-hidden columns, then drop any
+  // `hideWhenEmpty` column whose accessor is null/empty for every
+  // row. Evaluated against `data` (not `filtered`) so the layout is
+  // stable regardless of filter text.
   const visibleColumns = useMemo(
-    () => columns.filter((c) => !c.hidden),
-    [columns],
+    () =>
+      columns.filter((c) => {
+        if (c.hidden) return false;
+        if (c.hideWhenEmpty) {
+          const allEmpty = data.every((row) => {
+            const v = c.accessor(row);
+            return v == null || v === '';
+          });
+          if (allEmpty) return false;
+        }
+        return true;
+      }),
+    [columns, data],
   );
 
   // Default filter: stringify all accessor values and search

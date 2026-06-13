@@ -1,3 +1,4 @@
+
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -368,7 +369,7 @@ function StatusHero({ detail }: { detail: EniDetail }) {
               className="text-2xl font-mono font-semibold"
               style={{ color: dotColor }}
             >
-              {stateRaw}
+              {stateRaw.toUpperCase()}
             </p>
           </div>
         </div>
@@ -655,26 +656,39 @@ function Counter({
 
 interface MappingRow {
   name: string;
+  vnet_name: string;
   overlay_ip: string;
   underlay_ip: string;
   mac_address: string;
   action: string;
   tunnel: string;
+  // Carries the full spec for the expand panel so we can show
+  // every field dashd returns, including any forward-compat keys.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  raw: any;
 }
 
 function MappingsSection({ mappings }: { mappings: VnetMappingSpec[] }) {
   const rows: MappingRow[] = useMemo(
     () =>
       mappings.map((m) => {
+        // dashd wraps every resource field inside a `spec` sub-object on
+        // the wire (e.g. `{name, kind, spec:{ip_address, underlay_ip…}}`).
+        // We accept both shapes — spec-nested (the live BFF) and flat
+        // (older mocks/tests) — so the table renders real values either
+        // way.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const any = m as any;
+        const s = any.spec ?? {};
         return {
-          name: any.metadata?.name ?? any.name ?? "",
-          overlay_ip: any.ip_address ?? any.overlay_ip ?? "",
-          underlay_ip: any.underlay_ip ?? "",
-          mac_address: any.mac_address ?? "",
-          action: any.action ?? "vnet_encap",
-          tunnel: any.params?.tunnel ?? "",
+          name: any.name ?? any.metadata?.name ?? s.name ?? "",
+          vnet_name: s.vnet_name ?? any.vnet_name ?? "",
+          overlay_ip: s.ip_address ?? s.overlay_ip ?? any.ip_address ?? any.overlay_ip ?? "",
+          underlay_ip: s.underlay_ip ?? any.underlay_ip ?? "",
+          mac_address: s.mac_address ?? any.mac_address ?? "",
+          action: s.action ?? any.action ?? "vnet_encap",
+          tunnel: s.params?.tunnel ?? any.params?.tunnel ?? "",
+          raw: any,
         };
       }),
     [mappings]
@@ -691,22 +705,50 @@ function MappingsSection({ mappings }: { mappings: VnetMappingSpec[] }) {
 
   const cols: Column<MappingRow>[] = [
     {
+      key: "name",
+      header: "Name",
+      accessor: (r) => r.name,
+      cell: (r) =>
+        r.name ? (
+          <span className="font-mono text-xs">{r.name}</span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
+    },
+    {
       key: "overlay_ip",
       header: "Overlay IP",
       accessor: (r) => r.overlay_ip,
-      cell: (r) => <span className="font-mono text-xs">{formatIp(r.overlay_ip)}</span>,
+      cell: (r) =>
+        r.overlay_ip ? (
+          <span className="font-mono text-xs text-[color:var(--accent-purple)]">
+            {formatIp(r.overlay_ip)}
+          </span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
     },
     {
       key: "underlay_ip",
       header: "→ Underlay IP",
       accessor: (r) => r.underlay_ip,
-      cell: (r) => <span className="font-mono text-xs">{formatIp(r.underlay_ip)}</span>,
+      cell: (r) =>
+        r.underlay_ip ? (
+          <span className="font-mono text-xs">{formatIp(r.underlay_ip)}</span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
     },
     {
       key: "mac_address",
       header: "MAC",
       accessor: (r) => r.mac_address,
-      cell: (r) => <span className="font-mono text-xs">{formatMac(r.mac_address)}</span>,
+      cell: (r) =>
+        r.mac_address ? (
+          <span className="font-mono text-xs">{formatMac(r.mac_address)}</span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
     },
     {
       key: "action",
@@ -729,6 +771,7 @@ function MappingsSection({ mappings }: { mappings: VnetMappingSpec[] }) {
         ) : (
           <span className="text-[color:var(--text-muted)]">—</span>
         ),
+      hideWhenEmpty: true,
     },
   ];
 
@@ -737,7 +780,7 @@ function MappingsSection({ mappings }: { mappings: VnetMappingSpec[] }) {
       <DataTable
         columns={cols}
         data={rows}
-        rowKey={(r) => `${r.overlay_ip}-${r.underlay_ip}`}
+        rowKey={(r) => r.name || `${r.overlay_ip}-${r.underlay_ip}-${r.mac_address}`}
         defaultSort={{ key: "overlay_ip", direction: "asc" }}
         filterPlaceholder="Filter mappings…"
         emptyMessage="No mappings match this filter"
@@ -748,27 +791,63 @@ function MappingsSection({ mappings }: { mappings: VnetMappingSpec[] }) {
 }
 
 /** Inline-expanded detail for one vnet-mapping. Surfaces the
- *  full overlay→underlay translation plus any tunnel/action params. */
+ *  full overlay→underlay translation plus any tunnel/action params,
+ *  and dumps every additional spec key the BFF returned so the
+ *  operator can see forward-compatible fields without leaving the
+ *  page. */
 function MappingRowDetail({ row }: { row: MappingRow }) {
+  // Pull everything else dashd returned that we haven't already
+  // surfaced as a first-class row. Most-curious-first.
+  const spec = (row.raw && row.raw.spec) || {};
+  const knownKeys = new Set([
+    "ip_address",
+    "overlay_ip",
+    "underlay_ip",
+    "mac_address",
+    "action",
+    "vnet_name",
+    "params",
+    "name",
+  ]);
+  const extra = Object.entries(spec).filter(([k]) => !knownKeys.has(k));
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
       <dl className="space-y-1">
         <Row label="Mapping name" value={<span className="font-mono">{row.name || "—"}</span>} />
+        {row.vnet_name && (
+          <Row label="Vnet" value={<span className="font-mono">{row.vnet_name}</span>} />
+        )}
         <Row
           label="Overlay IP"
           value={
-            <span className="font-mono text-[color:var(--accent-purple)]">
-              {formatIp(row.overlay_ip)}
-            </span>
+            row.overlay_ip ? (
+              <span className="font-mono text-[color:var(--accent-purple)]">
+                {formatIp(row.overlay_ip)}
+              </span>
+            ) : (
+              <span className="text-[color:var(--text-muted)]">—</span>
+            )
           }
         />
         <Row
           label="Underlay IP"
-          value={<span className="font-mono">{formatIp(row.underlay_ip)}</span>}
+          value={
+            row.underlay_ip ? (
+              <span className="font-mono">{formatIp(row.underlay_ip)}</span>
+            ) : (
+              <span className="text-[color:var(--text-muted)]">—</span>
+            )
+          }
         />
         <Row
           label="MAC"
-          value={<span className="font-mono">{formatMac(row.mac_address)}</span>}
+          value={
+            row.mac_address ? (
+              <span className="font-mono">{formatMac(row.mac_address)}</span>
+            ) : (
+              <span className="text-[color:var(--text-muted)]">—</span>
+            )
+          }
         />
         <Row
           label="Action"
@@ -793,17 +872,34 @@ function MappingRowDetail({ row }: { row: MappingRow }) {
         </p>
         <div className="flex items-center gap-2 px-2 py-2 rounded bg-white/[0.03] border border-[color:var(--border-subtle)]">
           <span className="font-mono text-[color:var(--accent-purple)]">
-            {formatIp(row.overlay_ip)}
+            {row.overlay_ip ? formatIp(row.overlay_ip) : "—"}
           </span>
           <span className="text-[color:var(--text-muted)]">→</span>
-          <span className="font-mono">{formatIp(row.underlay_ip)}</span>
+          <span className="font-mono">{row.underlay_ip ? formatIp(row.underlay_ip) : "—"}</span>
           <span className="text-[color:var(--text-muted)]">·</span>
-          <span className="font-mono">{formatMac(row.mac_address)}</span>
+          <span className="font-mono">{row.mac_address ? formatMac(row.mac_address) : "—"}</span>
         </div>
         <p className="text-[10px] text-[color:var(--text-muted)] italic mt-2">
           Tenants address the destination via the overlay IP; the DPU rewrites
           to the underlay IP+MAC on the wire using the action above.
         </p>
+        {extra.length > 0 && (
+          <div className="mt-3">
+            <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-1">
+              Additional fields
+            </p>
+            <dl className="space-y-0.5">
+              {extra.map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-2">
+                  <dt className="text-[color:var(--text-secondary)] font-mono">{k}</dt>
+                  <dd className="font-mono text-[color:var(--text-primary)] truncate max-w-[60%] text-right">
+                    {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -840,9 +936,13 @@ function AclSection({
 function AclPolicyCard({ acl }: { acl: AclPolicySpec }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const any = acl as any;
+  // Same spec-nesting story as VnetMappings: the live BFF wraps
+  // `rules`, `stage`, `eni_names` under `spec.*`. Accept both shapes
+  // so flat fixtures still work.
+  const s = any.spec ?? {};
   const name = getName(acl);
-  const stage = any.stage ?? "—";
-  const rules: AclRule[] = any.rules ?? [];
+  const stage = s.stage ?? any.stage ?? "—";
+  const rules: AclRule[] = s.rules ?? any.rules ?? [];
 
   const cols: Column<AclRule>[] = [
     {
@@ -1015,8 +1115,10 @@ function RoutePolicyCard({
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const any = rp as any;
+  // Spec-nesting normalization (see AclPolicyCard above for context).
+  const s = any.spec ?? {};
   const name = getName(rp);
-  const entries: RouteEntry[] = any.routes ?? any.rules ?? [];
+  const entries: RouteEntry[] = s.routes ?? s.rules ?? any.routes ?? any.rules ?? [];
 
   const cols: Column<RouteEntry>[] = [
     {
@@ -1167,20 +1269,30 @@ interface TunnelRow {
   remote_underlay_ip: string;
   vni: number | string;
   action: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  params: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  raw: any;
 }
 
 function TunnelsSection({ tunnels }: { tunnels: ServiceTunnelSpec[] }) {
   const rows: TunnelRow[] = useMemo(
     () =>
       tunnels.map((t) => {
+        // Spec-nesting normalization (same pattern as MappingsSection).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const any = t as any;
+        const s = any.spec ?? {};
+        const params = (s.params ?? any.params ?? {}) as Record<string, unknown>;
         return {
-          name: any.metadata?.name ?? any.name ?? "",
-          local_underlay_ip: any.local_underlay_ip ?? "",
-          remote_underlay_ip: any.remote_underlay_ip ?? "",
-          vni: any.vni ?? "—",
-          action: any.params?.action ?? "—",
+          name: any.name ?? any.metadata?.name ?? s.name ?? "",
+          local_underlay_ip: s.local_underlay_ip ?? any.local_underlay_ip ?? "",
+          remote_underlay_ip: s.remote_underlay_ip ?? any.remote_underlay_ip ?? "",
+          vni: s.vni ?? any.vni ?? "—",
+          action: (params.action as string) ?? "—",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          params: params as Record<string, any>,
+          raw: any,
         };
       }),
     [tunnels]
@@ -1200,19 +1312,34 @@ function TunnelsSection({ tunnels }: { tunnels: ServiceTunnelSpec[] }) {
       key: "name",
       header: "Tunnel",
       accessor: (r) => r.name,
-      cell: (r) => <span className="font-mono text-xs">{r.name}</span>,
+      cell: (r) =>
+        r.name ? (
+          <span className="font-mono text-xs">{r.name}</span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
     },
     {
       key: "local_underlay_ip",
       header: "Local underlay",
       accessor: (r) => r.local_underlay_ip,
-      cell: (r) => <span className="font-mono text-xs">{formatIp(r.local_underlay_ip)}</span>,
+      cell: (r) =>
+        r.local_underlay_ip ? (
+          <span className="font-mono text-xs">{formatIp(r.local_underlay_ip)}</span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
     },
     {
       key: "remote_underlay_ip",
       header: "Remote underlay",
       accessor: (r) => r.remote_underlay_ip,
-      cell: (r) => <span className="font-mono text-xs">{formatIp(r.remote_underlay_ip)}</span>,
+      cell: (r) =>
+        r.remote_underlay_ip ? (
+          <span className="font-mono text-xs">{formatIp(r.remote_underlay_ip)}</span>
+        ) : (
+          <span className="text-[color:var(--text-muted)]">—</span>
+        ),
     },
     {
       key: "vni",
@@ -1250,19 +1377,47 @@ function TunnelsSection({ tunnels }: { tunnels: ServiceTunnelSpec[] }) {
 }
 
 /** Inline-expanded detail for one service tunnel. Shows the
- *  local↔remote underlay path plus the VNI and action chip. */
+ *  local↔remote underlay path plus the VNI and action chip, and
+ *  dumps every additional `params.*` key the BFF returned so the
+ *  operator can audit tunnel configuration without leaving the page. */
 function TunnelRowDetail({ row }: { row: TunnelRow }) {
+  // Show every param key except `action` (already promoted above)
+  // so we don't repeat it.
+  const params = Object.entries(row.params || {}).filter(([k]) => k !== "action");
+  // Dump every additional top-level spec key (e.g. vendor extensions
+  // or fields the SPA doesn't yet model) so nothing is hidden.
+  const spec = (row.raw && row.raw.spec) || {};
+  const knownSpecKeys = new Set([
+    "local_underlay_ip",
+    "remote_underlay_ip",
+    "vni",
+    "params",
+    "name",
+  ]);
+  const extraSpec = Object.entries(spec).filter(([k]) => !knownSpecKeys.has(k));
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
       <dl className="space-y-1">
         <Row label="Tunnel name" value={<span className="font-mono">{row.name}</span>} />
         <Row
           label="Local underlay"
-          value={<span className="font-mono">{formatIp(row.local_underlay_ip)}</span>}
+          value={
+            row.local_underlay_ip ? (
+              <span className="font-mono">{formatIp(row.local_underlay_ip)}</span>
+            ) : (
+              <span className="text-[color:var(--text-muted)]">—</span>
+            )
+          }
         />
         <Row
           label="Remote underlay"
-          value={<span className="font-mono">{formatIp(row.remote_underlay_ip)}</span>}
+          value={
+            row.remote_underlay_ip ? (
+              <span className="font-mono">{formatIp(row.remote_underlay_ip)}</span>
+            ) : (
+              <span className="text-[color:var(--text-muted)]">—</span>
+            )
+          }
         />
         <Row
           label="VNI"
@@ -1282,9 +1437,13 @@ function TunnelRowDetail({ row }: { row: TunnelRow }) {
           Path
         </p>
         <div className="flex items-center gap-2 px-2 py-2 rounded bg-white/[0.03] border border-[color:var(--border-subtle)]">
-          <span className="font-mono">{formatIp(row.local_underlay_ip)}</span>
+          <span className="font-mono">
+            {row.local_underlay_ip ? formatIp(row.local_underlay_ip) : "—"}
+          </span>
           <span className="text-[color:var(--accent-cyan)]">⟶</span>
-          <span className="font-mono">{formatIp(row.remote_underlay_ip)}</span>
+          <span className="font-mono">
+            {row.remote_underlay_ip ? formatIp(row.remote_underlay_ip) : "—"}
+          </span>
           <span className="ml-auto text-[10px] text-[color:var(--text-secondary)] font-mono">
             VNI {row.vni}
           </span>
@@ -1294,6 +1453,40 @@ function TunnelRowDetail({ row }: { row: TunnelRow }) {
           underlay paths. Routes with <code>next_hop_type = service_tunnel</code>{" "}
           point at one of these.
         </p>
+        {params.length > 0 && (
+          <div className="mt-3">
+            <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-1">
+              Params
+            </p>
+            <dl className="space-y-0.5">
+              {params.map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-2">
+                  <dt className="text-[color:var(--text-secondary)] font-mono">{k}</dt>
+                  <dd className="font-mono text-[color:var(--text-primary)] truncate max-w-[60%] text-right">
+                    {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+        {extraSpec.length > 0 && (
+          <div className="mt-3">
+            <p className="text-[10px] text-[color:var(--text-muted)] uppercase tracking-wider mb-1">
+              Additional fields
+            </p>
+            <dl className="space-y-0.5">
+              {extraSpec.map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-2">
+                  <dt className="text-[color:var(--text-secondary)] font-mono">{k}</dt>
+                  <dd className="font-mono text-[color:var(--text-primary)] truncate max-w-[60%] text-right">
+                    {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
       </div>
     </div>
   );
