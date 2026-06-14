@@ -52,6 +52,20 @@ type CounterReader interface {
 	Clear(dpuID string) bool
 }
 
+// CounterResetter provides the ability to reset counter accumulators
+// on the southbound DPU/sim. Used by DELETE ?reset_sim=true. Optional;
+// when nil, the reset_sim param is silently ignored and the handler
+// only clears the dashd-side cache.
+type CounterResetter interface {
+	// ResetDpuCounters calls ResetDpuCounters on the sim for the named
+	// DPU. Returns the number of keys reset, or an error.
+	ResetDpuCounters(dpuID string) (int, error)
+	// ResetAllDpuCounters calls ResetDpuCounters on every known DPU.
+	// Returns total keys reset across all DPUs. Errors from individual
+	// DPUs are logged but not fatal (best-effort observability).
+	ResetAllDpuCounters() (int, error)
+}
+
 // DpuCounterEntry is the snapshot payload returned by
 // CounterReader.ListReports.
 type DpuCounterEntry struct {
@@ -372,10 +386,24 @@ func (h *handler) clearCountersAll(w http.ResponseWriter, r *http.Request) {
 	if !h.requireCountersWired(w) {
 		return
 	}
+	resetSim := r.URL.Query().Get("reset_sim") == "true"
+	var simReset int
+	if resetSim && h.cntResetter != nil {
+		n, err := h.cntResetter.ResetAllDpuCounters()
+		if err != nil {
+			// Best-effort: log and continue with cache-only clear.
+			_ = err
+		}
+		simReset = n
+	}
 	n := h.cntReader.ClearAll()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, `{"cleared":%d}`, n)
+	if resetSim {
+		_, _ = fmt.Fprintf(w, `{"cleared":%d,"sim_keys_reset":%d}`, n, simReset)
+	} else {
+		_, _ = fmt.Fprintf(w, `{"cleared":%d}`, n)
+	}
 }
 
 // DELETE /v1/observability/counters/{dpu_id} — clears one entry.
@@ -383,6 +411,9 @@ func (h *handler) clearCountersAll(w http.ResponseWriter, r *http.Request) {
 // 404 + `{"cleared": false}` when the dpu_id is unknown. Idempotent
 // from the client's perspective (calling twice is safe; the second
 // call returns 404).
+//
+// With ?reset_sim=true, additionally calls ResetDpuCounters on the
+// target DPU's sim/agent, zeroing its accumulators.
 func (h *handler) clearCounter(w http.ResponseWriter, r *http.Request) {
 	if !h.requireCountersWired(w) {
 		return
@@ -392,13 +423,26 @@ func (h *handler) clearCounter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("dpu_id path segment required"))
 		return
 	}
+	resetSim := r.URL.Query().Get("reset_sim") == "true"
+	var simReset int
+	if resetSim && h.cntResetter != nil {
+		n, err := h.cntResetter.ResetDpuCounters(id)
+		if err != nil {
+			_ = err // best-effort; continue with cache clear
+		}
+		simReset = n
+	}
 	ok := h.cntReader.Clear(id)
 	w.Header().Set("Content-Type", "application/json")
-	if !ok {
+	if !ok && !resetSim {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = fmt.Fprintf(w, `{"cleared":false,"dpu_id":%q}`, id)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, `{"cleared":true,"dpu_id":%q}`, id)
+	if resetSim {
+		_, _ = fmt.Fprintf(w, `{"cleared":%v,"dpu_id":%q,"sim_keys_reset":%d}`, ok, id, simReset)
+	} else {
+		_, _ = fmt.Fprintf(w, `{"cleared":true,"dpu_id":%q}`, id)
+	}
 }

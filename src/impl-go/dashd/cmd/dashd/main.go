@@ -314,8 +314,9 @@ restSrv := restserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch
 	AuditWriter:   auditWriter,
 	Diagnostics:   diagService,
 	Cluster:       clusterService,
-	CounterBcast:  cntBcast,
-	CounterReader: &restCounterReader{store: cntStore},
+	CounterBcast:    cntBcast,
+	CounterReader:   &restCounterReader{store: cntStore},
+	CounterResetter: &counterResetter{inv: inv, factory: dpuclient.DefaultFactory},
 })
 grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, grpcserver.Options{
 	TLSConfig:   grpcCreds,

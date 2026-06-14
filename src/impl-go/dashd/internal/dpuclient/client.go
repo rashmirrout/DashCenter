@@ -51,6 +51,11 @@ type DpuClient interface {
 	// Wraps transport + Ack errors in a single error value.
 	GetDpuCounters(ctx context.Context, req *dashapiv1.DpuCountersRequest) (*dashapiv1.DpuCountersResponse, error)
 
+	// ResetDpuCounters zeroes every per-object counter accumulator on
+	// the DPU/sim without disturbing programmed objects (PE-3c add-on).
+	// Returns the number of keys reset.
+	ResetDpuCounters(ctx context.Context, req *dashapiv1.ResetDpuCountersRequest) (*dashapiv1.ResetDpuCountersResponse, error)
+
 	// Close releases the underlying transport. Idempotent.
 	Close() error
 }
@@ -143,6 +148,18 @@ func (c *realClient) GetDpuCounters(ctx context.Context, req *dashapiv1.DpuCount
 	resp, err := c.api.GetDpuCounters(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("dpuclient: GetDpuCounters rpc: %w", err)
+	}
+	return resp, nil
+}
+
+// ResetDpuCounters implements DpuClient.
+func (c *realClient) ResetDpuCounters(ctx context.Context, req *dashapiv1.ResetDpuCountersRequest) (*dashapiv1.ResetDpuCountersResponse, error) {
+	if req == nil {
+		req = &dashapiv1.ResetDpuCountersRequest{}
+	}
+	resp, err := c.api.ResetDpuCounters(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("dpuclient: ResetDpuCounters rpc: %w", err)
 	}
 	return resp, nil
 }

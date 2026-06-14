@@ -55,11 +55,17 @@ CallHook func(kind string, callNum int) error
 // before EventsToSend are replayed. Returning err aborts the call.
 SubscribeHook func(callNum int) error
 
+// ResetErr is returned by the next ResetDpuCounters call.
+ResetErr error
+// ResetKeysReset is the value returned by ResetDpuCounters on success.
+ResetKeysReset int32
+
 closed       atomic.Bool
 applyCount   atomic.Int64
 deleteCount  atomic.Int64
 subCallCount atomic.Int64
 cntCount     atomic.Int64
+resetCount   atomic.Int64
 }
 
 // DeleteCall captures one Delete invocation for assertion.
@@ -165,6 +171,28 @@ return resp, err
 // GetDpuCountersCallCount returns the total number of GetDpuCounters
 // invocations (including ones that returned an error).
 func (m *MockClient) GetDpuCountersCallCount() int { return int(m.cntCount.Load()) }
+
+// ResetDpuCounters implements DpuClient.
+func (m *MockClient) ResetDpuCounters(ctx context.Context, _ *dashapiv1.ResetDpuCountersRequest) (*dashapiv1.ResetDpuCountersResponse, error) {
+	if m.closed.Load() {
+		return nil, fmt.Errorf("mockclient: closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.resetCount.Add(1)
+	m.mu.Lock()
+	err := m.ResetErr
+	keys := m.ResetKeysReset
+	m.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &dashapiv1.ResetDpuCountersResponse{KeysReset: keys}, nil
+}
+
+// ResetDpuCountersCallCount returns the total number of ResetDpuCounters calls.
+func (m *MockClient) ResetDpuCountersCallCount() int { return int(m.resetCount.Load()) }
 
 // Reset clears recorded calls and counters. Keeps the configured
 // EventsToSend / hooks intact so test setup can be reused.

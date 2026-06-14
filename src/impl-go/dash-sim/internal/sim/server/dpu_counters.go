@@ -138,3 +138,15 @@ func bucketToProto(b counters.Bucket) *dashapi.CounterBucket {
 		Drops:      b.Drops,
 	}
 }
+
+// ResetDpuCounters implements DashApi.ResetDpuCounters.
+// Zeroes every counter accumulator on this sim without touching the
+// programmed objects (ENIs, VNETs, policies, etc.). The next
+// GetDpuCounters call will see fresh-from-zero values.
+func (s *Server) ResetDpuCounters(_ context.Context, _ *dashapi.ResetDpuCountersRequest) (*dashapi.ResetDpuCountersResponse, error) {
+	if err := s.faults.Apply("ResetDpuCounters"); err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	n := s.counters.ResetAll()
+	return &dashapi.ResetDpuCountersResponse{KeysReset: int32(n)}, nil
+}

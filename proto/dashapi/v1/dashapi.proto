@@ -256,6 +256,20 @@ message DpuCountersResponse {
   repeated ScopedCounters vnets = 5;
 }
 
+// ResetDpuCounters — zero every counter accumulator on the DPU (or sim)
+// without disturbing the programmed object state (ENIs, VNETs, policies,
+// etc.). Added in PE-3c add-on so `DELETE /v1/observability/counters`
+// can cascade to the southbound device and truly reset values to zero.
+message ResetDpuCountersRequest {
+  // Empty for now = reset ALL accumulators on this device.
+  // Future: optional scope filter (per-ENI, per-VNET).
+}
+
+message ResetDpuCountersResponse {
+  // Number of per-object counter entries that were zeroed.
+  int32 keys_reset = 1;
+}
+
 // -----------------------------------------------------------------------------
 // SimulatePacket — exercise the behavioural DASH pipeline.
 // -----------------------------------------------------------------------------
@@ -353,6 +367,12 @@ service DashApi {
   // semantics. Added in PE-3a (PE-G8). The legacy per-object GetCounters
   // RPC remains for back-compat with existing tooling.
   rpc GetDpuCounters (DpuCountersRequest) returns (DpuCountersResponse);
+
+  // ResetDpuCounters zeroes every per-object counter accumulator on the
+  // device without disturbing object state. Added in PE-3c so dashd's
+  // DELETE counter-clear can cascade to the sim. A real DPU would map
+  // this to its hardware counter-reset mechanism.
+  rpc ResetDpuCounters (ResetDpuCountersRequest) returns (ResetDpuCountersResponse);
 
   // SimulatePacket runs one synthetic packet through the behavioural DASH
   // pipeline (direction lookup -> ACL 1..5 -> route lookup -> vnet_mapping

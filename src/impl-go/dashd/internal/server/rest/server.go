@@ -65,11 +65,12 @@ type Options struct {
 	// the endpoints returning 503 "counter pipeline not wired".
 	CounterBcast *broadcaster.Broadcaster
 	CounterReader CounterReader
+	CounterResetter CounterResetter // PE-3c add-on; may be nil
 }
 
 // NewWithOptions is the production constructor.
 func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService, opts Options) *Server {
-h := &handler{cp: cp, obs: obs, ha: ha, mig: mig, diag: opts.Diagnostics, cluster: opts.Cluster, cntBcast: opts.CounterBcast, cntReader: opts.CounterReader}
+h := &handler{cp: cp, obs: obs, ha: ha, mig: mig, diag: opts.Diagnostics, cluster: opts.Cluster, cntBcast: opts.CounterBcast, cntReader: opts.CounterReader, cntResetter: opts.CounterResetter}
 var handlerChain http.Handler = h.router()
 // Compose OUTSIDE -> IN so auth runs first and audit reads Subject
 // from ctx.
@@ -139,8 +140,9 @@ cluster service.ClusterService // may be nil; /v1/cluster/* returns 503 when so
 // PE-3c counter streaming. Both nil => /v1/observability/counters
 // endpoints return 503 ("counter pipeline not wired"). Late-injected
 // from the parent Options in NewWithOptions.
-cntBcast  *broadcaster.Broadcaster
-cntReader CounterReader
+cntBcast    *broadcaster.Broadcaster
+cntReader   CounterReader
+cntResetter CounterResetter // PE-3c add-on; may be nil (reset_sim ignored)
 }
 
 // urlKindToStoreKind maps plural URL path segments to singular store kind names.

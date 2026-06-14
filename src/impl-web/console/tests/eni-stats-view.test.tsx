@@ -30,9 +30,9 @@ function installFetchStub() {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
 
-    // ── DELETE /api/v1/observability/counters[/{id}] ──
+    // ── DELETE /api/v1/observability/counters[/{id}][?reset_sim=true] ──
     if (method === 'DELETE' && url.startsWith('/api/v1/observability/counters')) {
-      const dpuMatch = url.match(/\/api\/v1\/observability\/counters\/([^/]+)$/);
+      const dpuMatch = url.match(/\/api\/v1\/observability\/counters\/([^/?]+)/);
       if (dpuMatch) {
         const id = decodeURIComponent(dpuMatch[1]!);
         deleteCallLog.push(id);

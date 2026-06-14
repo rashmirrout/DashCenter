@@ -628,6 +628,98 @@ Full design, scope-membership rules, and Future Scopes:
 
 ---
 
+## 12b. reset-counters (PE-3c add-on) — zero accumulators without deleting objects
+
+`counters` (§12) and `dpu-counters` (§12a) read counter values. Those
+values are **cumulative** — they grow monotonically since the sim/DPU
+process started. `reset-counters` zeroes every per-object counter
+accumulator **without** disturbing any programmed objects (ENIs, VNETs,
+policies, etc.).
+
+### Direct sim call (dash-sim-client)
+
+```powershell
+# Zero all accumulators on the target sim:
+& $c reset-counters --target localhost:50051
+# reset 69 counter accumulator key(s)
+
+# JSON output:
+& $c reset-counters --target localhost:50051 -o json
+# {
+#   "keys_reset": 69
+# }
+
+# YAML output:
+& $c reset-counters --target localhost:50051 -o yaml
+# keys_reset: 69
+```
+
+**Proto RPC**: `dashapi.v1.DashApi.ResetDpuCounters`.
+
+### Via dashd (dashctl counters clear --reset-sim)
+
+`dashctl counters clear` wipes dashd's **cache** only. Adding
+`--reset-sim` tells dashd to also call `ResetDpuCounters` on each
+target sim/DPU via the southbound gRPC proto before clearing the cache.
+
+```powershell
+# Bulk: cache + all sim accumulators:
+dashctl counters clear --reset-sim --endpoint http://localhost:28443 --insecure
+# cleared 10 cached counter entries + reset 729 sim accumulator key(s)
+
+# Single DPU: cache + that sim's accumulators:
+dashctl counters clear --dpu=dpu-sim-03 --reset-sim --endpoint http://localhost:28443 --insecure
+# cleared dpu-sim-03 + reset 90 sim accumulator key(s)
+
+# Cache-only (no sim reset — backwards compatible):
+dashctl counters clear --endpoint http://localhost:28443 --insecure
+# cleared 10 cached counter entries
+```
+
+### Via REST API (DELETE ?reset_sim=true)
+
+```powershell
+# Bulk clear + sim reset:
+curl.exe -X DELETE "http://localhost:28443/v1/observability/counters?reset_sim=true"
+# {"cleared":10,"sim_keys_reset":729}
+
+# Single DPU clear + sim reset:
+curl.exe -X DELETE "http://localhost:28443/v1/observability/counters/dpu-sim-01?reset_sim=true"
+# {"cleared":true,"dpu_id":"dpu-sim-01","sim_keys_reset":69}
+
+# Via dashw proxy (same — browser SPA uses this path):
+curl.exe -X DELETE "http://localhost:3000/api/v1/observability/counters?reset_sim=true"
+# {"cleared":10,"sim_keys_reset":729}
+```
+
+### Verify (after 5–6s poll refill)
+
+```powershell
+Start-Sleep -Seconds 6
+dashctl counters --endpoint http://localhost:28443 --insecure
+# Values near zero (fresh accumulation from the ~6s since reset)
+```
+
+### Fault injection
+
+```powershell
+# Inject a one-shot error:
+Invoke-RestMethod -Method POST `
+  http://localhost:8080/admin/faults `
+  -ContentType application/json `
+  -Body '{"op":"ResetDpuCounters","mode":"error","count":1,"message":"injected"}'
+
+# First call fails:
+& $c reset-counters
+# rpc error: code = Unavailable desc = injected
+
+# Second call succeeds (fault exhausted):
+& $c reset-counters
+# reset 69 counter accumulator key(s)
+```
+
+---
+
 ## 13. SimulatePacket (dash-sim only)
 
 Walks the full DASH pipeline:
@@ -772,8 +864,21 @@ $c = ".\bin\dash-sim-client.exe"
 & $c delete --kind <k> --key <a:b:...>
 & $c subscribe [--snapshot] [--kinds <k1,k2>]
 & $c counters --kind <k> --key <a:b:...>          [-o json|yaml|table]
+& $c dpu-counters [--include-enis] [--include-vnets] [--watch] [-o table|json|yaml|csv]
+& $c reset-counters                                [-o table|json|yaml]
 & $c simulate --direction outbound|inbound --eni <e> \
               [--vni <n>] [--src-mac ...] [--dst-mac ...] \
               [--src-ip ...] [--dst-ip ...] [--protocol ...] \
               [--src-port ...] [--dst-port ...] [--trace]
+```
+
+### dashctl counter commands (via dashd)
+
+```powershell
+dashctl counters                                       # per-DPU snapshot table
+dashctl counters --follow                              # SSE live stream
+dashctl counters details --dpu=<id>                    # per-ENI/per-VNET breakdown
+dashctl counters clear                                 # wipe dashd cache (auto-refills in 5s)
+dashctl counters clear --reset-sim                     # wipe cache + zero sim accumulators
+dashctl counters clear --dpu=<id> --reset-sim          # single DPU: cache + sim reset
 ```

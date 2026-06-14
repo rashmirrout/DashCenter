@@ -176,6 +176,18 @@ func (c *Client) ClearCounters(ctx context.Context) (int, error) {
 	return reply.Cleared, nil
 }
 
+// ClearCountersWithReset wipes every cache + resets sim accumulators.
+func (c *Client) ClearCountersWithReset(ctx context.Context) (int, int, error) {
+	var reply struct {
+		Cleared      int `json:"cleared"`
+		SimKeysReset int `json:"sim_keys_reset"`
+	}
+	if err := c.do(ctx, http.MethodDelete, c.api("/v1/observability/counters?reset_sim=true"), nil, &reply); err != nil {
+		return 0, 0, err
+	}
+	return reply.Cleared, reply.SimKeysReset, nil
+}
+
 // ClearCounter wipes the cached entry for dpuID. Returns true when an
 // entry was present (200), false on 404 — the latter is returned
 // without a wrapped error so callers can render "nothing to clear"
@@ -197,4 +209,24 @@ func (c *Client) ClearCounter(ctx context.Context, dpuID string) (bool, error) {
 		return false, err
 	}
 	return reply.Cleared, nil
+}
+
+// ClearCounterWithReset wipes one cache entry + resets its sim accumulators.
+func (c *Client) ClearCounterWithReset(ctx context.Context, dpuID string) (bool, int, error) {
+	if dpuID == "" {
+		return false, 0, pkgerrors.New(pkgerrors.CodeInvalidArgument, "rest: ClearCounterWithReset requires dpuID")
+	}
+	path := fmt.Sprintf("/v1/observability/counters/%s?reset_sim=true", url.PathEscape(dpuID))
+	var reply struct {
+		Cleared      bool `json:"cleared"`
+		SimKeysReset int  `json:"sim_keys_reset"`
+	}
+	if err := c.do(ctx, http.MethodDelete, c.api(path), nil, &reply); err != nil {
+		var ce *pkgerrors.Error
+		if errors.As(err, &ce) && ce.Code == pkgerrors.CodeNotFound {
+			return false, 0, nil
+		}
+		return false, 0, err
+	}
+	return reply.Cleared, reply.SimKeysReset, nil
 }

@@ -295,6 +295,63 @@ In `--watch` mode the same injected error is logged to stderr as
 `dpu-counters: rpc error: …` and the loop keeps polling — does NOT
 exit on transient failures.
 
+## 9b. PE-3c add-on — `ResetDpuCounters` (counter-only reset)
+
+**RPC**: `dashapi.v1.DashApi.ResetDpuCounters`. **REST cascade**: dashd
+`DELETE /v1/observability/counters[/{dpu_id}]` with `?reset_sim=true`
+calls this RPC on each target DPU's sim before clearing the local cache.
+**CLI**: `dashctl counters clear [--dpu=ID] --reset-sim`.
+
+**Motivation**: `POST /admin/reset` on dash-sim wipes ALL objects (ENIs,
+VNETs, etc.) — far too destructive. Operators need a counter-only reset
+that zeros the accumulators without disturbing the programmed state.
+
+**Proto change** (additive):
+```proto
+// proto/dashapi/v1/dashapi.proto
+message ResetDpuCountersRequest {
+  // Empty = reset all counters on this DPU.
+  // Future: optional filter fields (per-ENI, per-VNET scope).
+}
+
+message ResetDpuCountersResponse {
+  int32 keys_reset = 1; // number of object-counter entries zeroed
+}
+
+service DashApi {
+  // ... existing RPCs ...
+  rpc ResetDpuCounters (ResetDpuCountersRequest) returns (ResetDpuCountersResponse);
+}
+```
+
+**Implementation plan**:
+
+| Layer | What | LOC est. |
+|---|---|---|
+| `counters.Registry.ResetAll()` | Zero every `objectCounters` entry atomically (swap buckets) | ~12 |
+| `sim/server.ResetDpuCounters()` | gRPC handler: call `Registry.ResetAll()`, return count | ~15 |
+| `dpuclient.DpuClient` interface | Add `ResetDpuCounters(ctx, req)` method | ~5 |
+| `dpuclient.realClient` | gRPC wrapper | ~10 |
+| `dpuclient.MockClient` | Test mock with `ResetErr` / `ResetCallCount` | ~15 |
+| dashd REST handler | `DELETE` gains `?reset_sim=true` query param; cascades to `dpuclient.ResetDpuCounters` before cache wipe | ~25 |
+| dashctl cmd | `--reset-sim` flag on `counters clear` | ~10 |
+| Tests | sim handler UT, dpuclient UT, REST handler UT, dashctl cmd UT, live e2e | ~80 |
+
+**Test plan**:
+
+```powershell
+# Before:
+dashctl counters --endpoint http://localhost:28443 --insecure
+# (values at ~7M)
+
+# Reset + clear:
+dashctl counters clear --reset-sim --endpoint http://localhost:28443 --insecure
+# "cleared 10 + reset 10 DPU counter accumulators"
+
+# After (wait 6s for refill):
+dashctl counters --endpoint http://localhost:28443 --insecure
+# (values near zero — fresh accumulation from the ~6s of ticking since reset)
+```
 
 
 ## 10. Object kinds

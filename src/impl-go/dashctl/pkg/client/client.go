@@ -419,6 +419,15 @@ type Client interface {
 	// ClearCounter wipes a single cached entry. Returns true when an
 	// entry was present, false when the dpu_id was unknown.
 	ClearCounter(ctx context.Context, dpuID string) (bool, error)
+
+	// ClearCountersWithReset is like ClearCounters but additionally
+	// calls ResetDpuCounters on every sim, zeroing accumulators.
+	// Returns (cacheCleared, simKeysReset, error).
+	ClearCountersWithReset(ctx context.Context) (int, int, error)
+
+	// ClearCounterWithReset is like ClearCounter but additionally
+	// calls ResetDpuCounters on the target DPU's sim.
+	ClearCounterWithReset(ctx context.Context, dpuID string) (bool, int, error)
 }
 
 // Factory builds a Client from a resolved config. Phase 1 only registers

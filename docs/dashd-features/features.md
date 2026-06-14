@@ -884,6 +884,7 @@ Wipe every cached counter entry. Returns `{"cleared": <int>}`.
 - **Idempotent**: second call returns `{"cleared": 0}`.
 - The next poll round (≤ `poll_interval`, default 5s) refills entries for DPUs still in inventory.
 - Decommissioned DPUs stay cleared.
+- **`?reset_sim=true`**: additionally calls `ResetDpuCounters` on every known DPU's sim/agent via the southbound `dashapi.v1.DashApi` gRPC, zeroing the source accumulators. Returns `{"cleared":<int>,"sim_keys_reset":<int>}`. Without the param, sim accumulators are untouched (backward-compatible default).
 
 ### 10A.5 `DELETE /v1/observability/counters/{dpu_id}`
 
@@ -892,10 +893,15 @@ Wipe one cached entry.
 - **200**: `{"cleared": true, "dpu_id": "..."}` when an entry was present.
 - **404**: `{"cleared": false, "dpu_id": "..."}` when the DPU is unknown (idempotent; not an error).
 - **503**: counter pipeline not wired.
+- **`?reset_sim=true`**: additionally calls `ResetDpuCounters` on this DPU's sim. Returns `{"cleared":<bool>,"dpu_id":"...","sim_keys_reset":<int>}`. With `reset_sim=true` a 404 cache-miss is upgraded to 200 if the sim reset succeeded (the operator's intent was "zero everything for this DPU").
 
-### gRPC equivalents
+### Southbound gRPC equivalents
 
-- `rpc GetCounters(CounterRequest) returns (stream CounterEvent)` — same envelope; supports `resume_after_event_id`, `dpu_ids` filter, `follow` mode.
+| RPC | Direction | Purpose |
+|---|---|---|
+| `rpc GetCounters(CounterRequest) returns (stream CounterEvent)` | dashd → browser (northbound) | Per-DPU counter streaming (PE-3c) |
+| `rpc GetDpuCounters(DpuCountersRequest) returns (DpuCountersResponse)` | dashd → sim (southbound) | Poller fetches per-DPU + per-ENI/VNET rollups (PE-3a) |
+| `rpc ResetDpuCounters(ResetDpuCountersRequest) returns (ResetDpuCountersResponse)` | dashd → sim (southbound) | Zero accumulators without deleting objects (PE-3c add-on) |
 
 Full wire contract (proto messages, sentinel kinds, gRPC error codes): [counter-streaming.md §4](counter-streaming.md#4-wire-contract).
 

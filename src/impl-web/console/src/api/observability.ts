@@ -28,7 +28,7 @@ export interface ClearCounterTargetResult {
  */
 export async function clearCounterTarget(dpuId: string): Promise<ClearCounterTargetResult> {
   if (!dpuId) throw new Error('clearCounterTarget: dpuId required');
-  const url = `${BASE}/${encodeURIComponent(dpuId)}`;
+  const url = `${BASE}/${encodeURIComponent(dpuId)}?reset_sim=true`;
   const res = await fetch(url, { method: 'DELETE' });
   if (res.status === 404) {
     return { cleared: false, dpuId };
@@ -53,7 +53,7 @@ export interface ClearAllCountersResult {
  * entry on dashd. Returns the number of entries removed.
  */
 export async function clearAllCounters(): Promise<ClearAllCountersResult> {
-  const res = await fetch(BASE, { method: 'DELETE' });
+  const res = await fetch(`${BASE}?reset_sim=true`, { method: 'DELETE' });
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`DELETE ${BASE} returned ${res.status}: ${body.slice(0, 200)}`);

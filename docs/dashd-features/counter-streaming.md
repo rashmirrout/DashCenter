@@ -681,6 +681,32 @@ $ dashctl counters clear --dpu=dpu-edge-99
 no cached entry for dpu-edge-99 (already clear)
 ```
 
+#### 7.1.3 `dashctl counters clear --reset-sim` — wipe cache + zero sim accumulators
+
+```
+# Bulk: cache + all sim accumulators zeroed:
+$ dashctl counters clear --reset-sim
+cleared 10 cached counter entries + reset 729 sim accumulator key(s)
+
+# Single DPU: cache + that sim's accumulators:
+$ dashctl counters clear --dpu=dpu-sim-03 --reset-sim
+cleared dpu-sim-03 + reset 90 sim accumulator key(s)
+```
+
+After `--reset-sim`, the next `dashctl counters` snapshot (≤5s poll)
+shows values near zero — fresh accumulation since the reset, not the
+cumulative total since sim start.
+
+Backed by `DELETE /v1/observability/counters[/{dpu_id}]?reset_sim=true` — see §4.5.
+
+The same reset is available directly from the sim-side CLI (bypassing dashd):
+```
+$ dash-sim-client reset-counters --target <sim-endpoint>
+reset 69 counter accumulator key(s)
+```
+
+Backed by `dashapi.v1.DashApi.ResetDpuCounters` gRPC RPC.
+
 Backed by `DELETE /v1/observability/counters[/{dpu_id}]` — see §4.5.
 
 ### 7.2 SPA — `/topology-v2` inspector drawer
@@ -972,15 +998,15 @@ Three independent layers, three different operations:
 
 | Layer | What it clears | How |
 |---|---|---|
-| **SPA local ring** (60 samples/DPU) | The sparklines you're looking at | Click **Clear** in the `CounterWidget` header. Calls `useCountersStore.clearDpu(dpuId)`. Local-only; no network. |
+| **SPA local ring** (60 samples/DPU) | The sparklines you're looking at | Click **Clear** in the `CounterWidget` header. Calls `useCountersStore.clearDpu(dpuId)` + `DELETE …/{dpu_id}` (server-side cache clear). Local sparkline ring wipes immediately; server cache refills at next poll. |
 | **dashd cache** (in-memory snapshot per DPU) | The reports served by `GET /v1/observability/counters` and the cold-start snapshots of new SSE/gRPC subscribers | `dashctl counters clear [--dpu=<id>]` **or** `curl -X DELETE http://dashd:8443/v1/observability/counters[/<dpu_id>]`. See §4.5 + §7.1.2. The next successful poll round (≤ `poll_interval`, default 5 s) refills entries for DPUs still in inventory; decommissioned DPUs stay cleared. |
-| **Sim-side counter accumulators** (monotonic in dispatch.Manager) | The actual values dash-sim returns from `GetDpuCounters` | Not exposed today; restart the sim container (`docker restart dc-console-sim-NN`). A sim-side reset RPC is a Future Scope candidate. |
+| **Sim-side counter accumulators** (monotonic since process start) | The actual values dash-sim returns from `GetDpuCounters` | **`dashctl counters clear --reset-sim`** (via dashd → gRPC `ResetDpuCounters`), **or** `dash-sim-client reset-counters --target <endpoint>` (direct sim call), **or** `curl -X DELETE "…?reset_sim=true"`. Zeroes every per-object accumulator without deleting objects. After reset, values near zero (~fresh accumulation since reset). See §7.1.3. |
 
 Common operator playbook:
 
 ```powershell
 # "My dashboard is showing stale spikes — let me get a fresh window."
-# → Click Clear on the widget (local-only; no server impact).
+# → Click Clear on the widget (local sparkline ring + server cache clear).
 
 # "I just retired dpu-edge-99 from inventory; stop showing its row."
 dashctl counters clear --dpu=dpu-edge-99
@@ -989,7 +1015,14 @@ dashctl counters clear --dpu=dpu-edge-99
 dashctl counters clear
 # then watch for ~5s while the poller refills.
 
-# "I want dash-sim itself back to zero" (load test reset, etc.):
+# "I want the counters TRULY back to zero" (load test reset, etc.):
+dashctl counters clear --reset-sim
+# Values near zero after the next poll round (~5s).
+
+# Same via direct sim call (bypasses dashd):
+dash-sim-client reset-counters --target localhost:50051
+
+# Nuclear option (restart destroys all sim state including objects):
 docker restart dc-console-sim-01
 ```
 

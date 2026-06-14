@@ -113,6 +113,7 @@ Examples:
 
 func (a *Application) newCountersClearCmd() *cobra.Command {
 	var dpuID string
+	var resetSim bool
 	c := &cobra.Command{
 		Use:   "clear",
 		Short: "Clear cached counter entries on dashd (one DPU or all)",
@@ -120,6 +121,10 @@ func (a *Application) newCountersClearCmd() *cobra.Command {
 
 Without --dpu, every cached entry is removed and the count is printed.
 With --dpu, only the named entry is removed.
+
+With --reset-sim, additionally calls ResetDpuCounters on each target
+DPU's sim/agent, zeroing the source accumulators so the next poll
+round starts from zero (not from the cumulative total since sim start).
 
 The next successful poll round (within poll_interval, default 5s)
 refills entries for DPUs still in inventory; subscribers continue to
@@ -129,6 +134,8 @@ DPUs stay cleared.
 Examples:
   dashctl counters clear                           # wipe all cached entries
   dashctl counters clear --dpu=dpu-edge-01         # wipe one entry
+  dashctl counters clear --reset-sim               # wipe cache + zero sim accumulators
+  dashctl counters clear --dpu=dpu-edge-01 --reset-sim
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -140,26 +147,47 @@ Examples:
 			tctx, cancel := withTimeout(ctx, rc)
 			defer cancel()
 			if dpuID != "" {
-				ok, err := cl.ClearCounter(tctx, dpuID)
-				if err != nil {
-					return err
-				}
-				if ok {
-					fmt.Fprintf(os.Stdout, "cleared %s\n", dpuID)
+				if resetSim {
+					ok, simKeys, err := cl.ClearCounterWithReset(tctx, dpuID)
+					if err != nil {
+						return err
+					}
+					if ok {
+						fmt.Fprintf(os.Stdout, "cleared %s + reset %d sim accumulator key(s)\n", dpuID, simKeys)
+					} else {
+						fmt.Fprintf(os.Stdout, "no cached entry for %s (already clear); reset %d sim key(s)\n", dpuID, simKeys)
+					}
 				} else {
-					fmt.Fprintf(os.Stdout, "no cached entry for %s (already clear)\n", dpuID)
+					ok, err := cl.ClearCounter(tctx, dpuID)
+					if err != nil {
+						return err
+					}
+					if ok {
+						fmt.Fprintf(os.Stdout, "cleared %s\n", dpuID)
+					} else {
+						fmt.Fprintf(os.Stdout, "no cached entry for %s (already clear)\n", dpuID)
+					}
 				}
 				return nil
 			}
-			n, err := cl.ClearCounters(tctx)
-			if err != nil {
-				return err
+			if resetSim {
+				n, simKeys, err := cl.ClearCountersWithReset(tctx)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stdout, "cleared %d cached counter entr%s + reset %d sim accumulator key(s)\n", n, plural(n, "y", "ies"), simKeys)
+			} else {
+				n, err := cl.ClearCounters(tctx)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stdout, "cleared %d cached counter entr%s\n", n, plural(n, "y", "ies"))
 			}
-			fmt.Fprintf(os.Stdout, "cleared %d cached counter entr%s\n", n, plural(n, "y", "ies"))
 			return nil
 		},
 	}
 	c.Flags().StringVar(&dpuID, "dpu", "", "clear one DPU id (default: clear all)")
+	c.Flags().BoolVar(&resetSim, "reset-sim", false, "also zero counter accumulators on the target DPU sim/agent")
 	return c
 }
 

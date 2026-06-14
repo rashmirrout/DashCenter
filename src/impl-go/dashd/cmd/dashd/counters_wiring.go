@@ -13,11 +13,17 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/counters"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/observability/broadcaster"
+	dashapiv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashapi/v1"
 	grpcserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/grpc"
 	restserver "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/server/rest"
 	dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
@@ -118,4 +124,49 @@ func counterStreamConfigFrom(s config.StreamConfig) broadcaster.Config {
 		BurstSize:                s.RateLimitBurst,
 		KeepaliveInterval:        s.KeepaliveInterval,
 	}
+}
+
+// counterResetter implements rest.CounterResetter. It opens a
+// short-lived gRPC connection to each target DPU's sim/agent and
+// calls ResetDpuCounters. Connections are per-call (not pooled) —
+// the operator hits this endpoint rarely; no need to hold open
+// connections.
+type counterResetter struct {
+	inv     *inventory.Inventory
+	factory dpuclient.ClientFactory
+}
+
+func (cr *counterResetter) ResetDpuCounters(dpuID string) (int, error) {
+	entry, err := cr.inv.Get(dpuID)
+	if err != nil || entry.Endpoint == "" {
+		return 0, fmt.Errorf("DPU %q not in inventory or has no endpoint", dpuID)
+	}
+	cli, cliErr := cr.factory(entry.Endpoint)
+	if cliErr != nil {
+		return 0, fmt.Errorf("dial %s: %w", dpuID, cliErr)
+	}
+	defer cli.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, rpcErr := cli.ResetDpuCounters(ctx, &dashapiv1.ResetDpuCountersRequest{})
+	if rpcErr != nil {
+		return 0, fmt.Errorf("ResetDpuCounters %s: %w", dpuID, rpcErr)
+	}
+	return int(resp.GetKeysReset()), nil
+}
+
+func (cr *counterResetter) ResetAllDpuCounters() (int, error) {
+	dpus := cr.inv.List()
+	total := 0
+	var lastErr error
+	for _, d := range dpus {
+		n, err := cr.ResetDpuCounters(d.ID)
+		if err != nil {
+			slog.Warn("ResetDpuCounters failed", "dpu", d.ID, "error", err)
+			lastErr = err
+			continue
+		}
+		total += n
+	}
+	return total, lastErr
 }

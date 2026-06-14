@@ -84,6 +84,7 @@ one. Each is enforceable in review; each compounds over time.
 | **Resource lifecycle hygiene** | Every `Open` has a paired `Close` (in `defer`, error path included). Every goroutine has a documented stop signal (`ctx.Done()` or close-of-channel) and a test that proves it exits. Every `context.Context` is honored on receive and on send. Every channel has a single, documented closer. Every timer / ticker is stopped. |
 | **Concurrency discipline** | State ownership is explicit and documented ("`m.subs` is mutated only under `m.mu`"). The `-race` detector is on by default for any test touching shared state. Mutexes are scoped tightly; long-held locks across I/O are forbidden. No "it's fine because Go". Channels for ownership transfer, mutexes for shared state — pick deliberately. |
 | **Convention consistency** | Match the surrounding code's style, naming, error-wrapping idiom, log-key convention, package layout, and test naming. Divergence is a tax the next reader pays. If the existing convention is wrong, fix it everywhere via a tracker row — not just in your patch. |
+| **Clean up after yourself** | Every `curl -o <file>` during integration testing, every temp `.json` / `.log` / `.tmp` dumped into the tree during a smoke test, must be deleted before the session ends. The workspace must be left with zero untracked test artifacts. Use `git status --short` to verify. If you wrote a temp file, you own its deletion — don't leave it for the user to find in their `git status`. |
 
 ### 0.3 What this mindset rejects
 
@@ -172,6 +173,8 @@ Ask yourself, out loud if it helps:
 14. Am I shipping a complete slice, or am I leaving an in-scope gap?
 15. Would I be comfortable defending every line of this change in a
     design review six months from now, with no further context?
+16. Did I clean up every temp/test artifact I created (`git status
+    --short | Select-String '^\?\?'` returns empty)? (§10.12)
 
 If any answer is "no" or "I'm not sure", the change is not done.
 Go back.
@@ -781,8 +784,30 @@ shortcut would have created a one-off shape divergent from every
 other streaming RPC in the repo. Pattern reconnaissance caught it
 before code landed; the slice switched to the established wrapper.
 
-The general anti-pattern: **searching the codebase is cheaper than
-defending divergence later.** When in doubt, copy.
+### 10.12 Don't leave temp/test artifacts in the workspace
+
+During integration testing, `curl -o det.json`, `curl -o snap.json`,
+etc. produce scratch files that show up as untracked in `git status`.
+Delete them before ending the session. The rule: **if `git status
+--short` shows any `??` line for a file you created, delete it.** The
+workspace MUST be left clean — zero untracked test artifacts. This
+applies equally to `.json`, `.log`, `.tmp`, pipe-dumps, and any other
+format produced by smoke-test commands.
+
+**Concrete checklist** (run before session close):
+
+```powershell
+# Show untracked:
+git status --short | Select-String '^\?\?'
+# If any are yours, delete:
+Remove-Item <file> -ErrorAction SilentlyContinue
+# Verify clean:
+git status --short | Select-String '^\?\?'  # should be empty
+```
+
+The general anti-pattern: **the next person looking at `git status`
+should see only YOUR intentional changes — never your diagnostic
+detritus.**
 
 ---
 

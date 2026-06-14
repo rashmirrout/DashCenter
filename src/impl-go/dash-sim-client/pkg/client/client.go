@@ -166,5 +166,12 @@ func (c *Client) GetDpuCounters(ctx context.Context, req *dashapi.DpuCountersReq
 	return c.api.GetDpuCounters(ctx, req)
 }
 
+// ResetDpuCounters zeroes every per-object counter accumulator on the
+// target DPU/sim without disturbing programmed objects (PE-3c add-on).
+// Returns the number of per-object counter entries that were zeroed.
+func (c *Client) ResetDpuCounters(ctx context.Context) (*dashapi.ResetDpuCountersResponse, error) {
+	return c.api.ResetDpuCounters(ctx, &dashapi.ResetDpuCountersRequest{})
+}
+
 // Compile-time check.
 var _ proto.Message = (*dashapi.Object)(nil)

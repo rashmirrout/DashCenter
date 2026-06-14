@@ -187,6 +187,20 @@ func (f *fakeClient) ClearCounter(ctx context.Context, dpuID string) (bool, erro
 	}
 	return false, nil
 }
+func (f *fakeClient) ClearCountersWithReset(ctx context.Context) (int, int, error) {
+	if f.clearCountersFn != nil {
+		n, err := f.clearCountersFn(ctx)
+		return n, 0, err
+	}
+	return 0, 0, nil
+}
+func (f *fakeClient) ClearCounterWithReset(ctx context.Context, dpuID string) (bool, int, error) {
+	if f.clearCounterFn != nil {
+		ok, err := f.clearCounterFn(ctx, dpuID)
+		return ok, 0, err
+	}
+	return false, 0, nil
+}
 
 // testApp returns an Application with fake client, captured streams,
 // and an in-memory config.

@@ -264,7 +264,7 @@ describe('CounterWidget · Clear button', () => {
 
     // The DELETE was issued against the public REST surface.
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      '/api/v1/observability/counters/dpu-clk',
+      '/api/v1/observability/counters/dpu-clk?reset_sim=true',
       expect.objectContaining({ method: 'DELETE' }),
     );
 
