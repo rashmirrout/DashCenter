@@ -22,6 +22,7 @@ import type {
   AclPolicySpec,
   RoutePolicySpec,
   ServiceTunnelSpec,
+  VnetMappingSpec,
   HaSetSpec,
   SimulateRequest,
   ReconcileRequest,
@@ -296,6 +297,31 @@ export function usePutServiceTunnel() {
       void qc.invalidateQueries({ queryKey: queryKeys.fleet.all });
     },
     onError: (err) => toast.error(`Failed to save Service Tunnel: ${err.message}`),
+  });
+}
+
+/**
+ * Create or update a Vnet Mapping (overlay-IP → underlay-IP entry).
+ *
+ * Mappings affect data-plane forwarding for every ENI in the parent
+ * vnet, so we invalidate the vnet/mapping/fleet caches on success.
+ *
+ * Added in A-IF1-G2 — the previous tracker was missing this hook
+ * even though `vnetMappingApi` was already wired into the delete
+ * dispatcher.
+ */
+export function usePutVnetMapping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ns, name, body }: { ns: string; name: string; body: VnetMappingSpec }) =>
+      vnetMappingApi.put(ns, name, body),
+    onSuccess: (_data, vars) => {
+      toast.success(`Vnet Mapping ${vars.name} saved`);
+      void qc.invalidateQueries({ queryKey: queryKeys.mapping.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.vnet.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.fleet.all });
+    },
+    onError: (err) => toast.error(`Failed to save Vnet Mapping: ${err.message}`),
   });
 }
 

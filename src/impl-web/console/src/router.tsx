@@ -24,6 +24,8 @@ const EniListView = lazy(() => import('./views/eni/EniListView'));
 const EniView = lazy(() => import('./views/eni/EniView'));
 const VnetListView = lazy(() => import('./views/vnet/VnetListView'));
 const MappingsView = lazy(() => import('./views/mapping/MappingsView'));
+/* A-IF: new interactive-forms page (zero impact on existing views). */
+const ResourcesView = lazy(() => import('./views/resources/ResourcesView'));
 
 /* ── Loading fallback + error boundary ─────────────────────── */
 function ViewLoader({ children, name }: { children: ReactNode; name?: string }) {
@@ -84,6 +86,10 @@ export const router = createBrowserRouter([
       { path: 'eni-stats', element: <ViewLoader name="ENI Statistics"><EniStatisticsView /></ViewLoader> },
       { path: 'audit', element: <ViewLoader name="Audit"><AuditView /></ViewLoader> },
       { path: 'health', element: <ViewLoader name="Health"><HealthView /></ViewLoader> },
+      /* A-IF: customer-facing interactive CRUD page. Lives in
+       * "Operate" group above /admin (which is preserved as the
+       * developer YAML/JSON experimentation surface). */
+      { path: 'resources', element: <ViewLoader name="Resources"><ResourcesView /></ViewLoader> },
       { path: 'admin', element: <ViewLoader name="Admin Ops"><AdminOpsView /></ViewLoader> },
       { path: 'commands', element: <ViewLoader name="Commands"><CommandView /></ViewLoader> },
       { path: 'debug', element: <ViewLoader name="Debug"><DebugView /></ViewLoader> },

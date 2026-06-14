@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
+  LayoutGrid,
   Network,
   Waypoints,
   Route,
@@ -71,6 +72,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Operate",
     items: [
+      /* A-IF: new interactive-forms page for customer-grade CRUD.
+       * Sits ABOVE Admin Ops (which is preserved for developer
+       * YAML/JSON experimentation). */
+      { path: "/resources", label: "Resources", icon: LayoutGrid },
       { path: "/admin", label: "Admin Ops", icon: Settings },
       { path: "/commands", label: "Commands", icon: Terminal },
       { path: "/debug", label: "Debug", icon: Bug },

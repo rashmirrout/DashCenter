@@ -6,7 +6,7 @@
 > [`specs/LLD/dashw-web-lld.md`](../LLD/dashw-web-lld.md).
 > **Companion**: dashctl phase tracker is [`dashctl-impl-phases.md`](dashctl-impl-phases.md);
 > dashd phase tracker is [`impl-phases.md`](impl-phases.md).
-> **Last updated**: 2026-06-14 (Phase A-PH **Production Hardening** section added: 26 gates across 6 sub-phases — security baseline, resilience & error UX, performance, testing & quality, accessibility, observability & UX polish. Sequenced as Sprints 1–6. Phase A1–A+ remain ✅; A-PH is ❌ not started.)
+> **Last updated**: 2026-06-14 (Phase A-IF **Interactive Forms** sub-phases A-IF1 through A-IF4 shipped — 24/32 gates ✅. New `/resources` page live at `http://<host>/resources` with all 7 typed forms. `lib/schemas.ts` rewritten to mirror real dashd wire shapes. `denormalizeForPut` added so every PUT round-trips correctly. 8 reusable form primitives + 7 resource forms + new ResourcesView page + Sidebar entry. **Zero** existing views touched — `AdminOpsView` preserved as developer experimentation surface. **359/359 tests pass** (113 new). Production build verified clean. Remaining: A-IF5 UX polish (5 gates) + A-IF6 dedicated test gates (3 gates).)
 
 ---
 
@@ -36,7 +36,8 @@
 | | **A8** | Deployment & polish | 6 | 6 | 0 | ✅ |
 | | **A+** | UX hardening: API-shape alignment, cross-resource index, Drawers, click-through nav | 9 | 9 | 0 | ✅ |
 | | **A-PH** | Production hardening: security, resilience, performance, testing, a11y, observability (6 sub-phases × 26 gates) | 26 | 0 | 26 | ❌ |
-| | | **Phase A total** | **107** | **79** | **26+2⬜** | **⏳ 74%** |
+| | **A-IF** | Interactive forms — new `/resources` page with typed forms for all 7 resources (6 sub-phases × 32 gates). Zero existing views touched. | 32 | 24 | 8 | ⏳ 75% |
+| | | **Phase A total** | **139** | **103** | **34+2⬜** | **⏳ 75%** |
 | **B** | **B1** | WebSocket ↔ gRPC bridge | 6 | 0 | 6 | ❌ |
 | | **B2** | SPA WebSocket hooks | 5 | 0 | 5 | ❌ |
 | | **B3** | View upgrades (real-time) | 6 | 0 | 6 | ❌ |
@@ -56,7 +57,7 @@
 | | **E4** | Capability Matrix + Dependency Graph | 4 | 0 | 4 | ❌ |
 | | **E5** | Polish & integration | 6 | 0 | 6 | ❌ |
 | | | **Phase E total** | **27** | **0** | **27** | **❌** |
-| | | **GRAND TOTAL** | **187** | **32** | **153+2⬜** | **17%** |
+| | | **GRAND TOTAL** | **219** | **56** | **161+2⬜** | **26%** |
 
 ### What's Done (Phase A BFF — 21 gates, 84 tests)
 
@@ -102,7 +103,7 @@
 
 | Phase | Objective | Status | Gates |
 |---|---|---|---|
-| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. **Functional console (A1–A+) is ✅ complete; A-PH production hardening is ❌ not started.** | ⏳ A-PH pending | 79 / 107 (26+2⬜) |
+| **Phase A** — REST-only (functional console) | BFF proxy + aggregation + SPA with all 13 views using REST polling. In-process cache, circuit breaker, rate limiter, readiness probe. No WebSocket, no gRPC. **Functional console (A1–A+) is ✅ complete; A-PH production hardening and A-IF interactive forms are ❌ not started.** | ⏳ A-PH + A-IF pending | 79 / 139 (58+2⬜) |
 | **Phase B** — gRPC streaming (real-time) | WebSocket ↔ gRPC bridge in BFF; real-time DPU status, events, flows, counters, audit in SPA. | ❌ Not started | 0 / 17 |
 | **Phase C** — Diagnostics & advanced (full fidelity) | TraceFlow animation, ACL hit stats streaming, basic HA/Migration stream UIs, E2E tests. | ❌ Not started | 0 / 16 |
 | **Phase D** — HA Theater + Migration Center + Capacity | Full HA orchestration theater, 10-phase migration control center, capacity planner with what-if simulator. 3 new views. | ❌ Not started | 0 / 29 |
@@ -438,6 +439,136 @@ Sprint 1–6 for sequential delivery (security first, polish last).
 | **Sprint 4** | A-PH5 + A-PH6-G1 + A-PH6-G2 + A-PH6-G3 | 1–2 days | a11y + ops observability |
 | **Sprint 5** | A-PH3-G2 + A-PH3-G3 + A-PH3-G4 + A-PH6-G4 + A-PH6-G5 | 2–3 days | Scale + UX polish |
 | **Sprint 6** | A-PH4-G3 + A-PH4-G4 | 2 days | View integration tests + Playwright E2E |
+
+#### A-IF — Interactive Forms / new `/resources` page (post-A-PH, 2026-06-14)
+
+After a holistic UX audit, the existing `/admin` view was judged
+unsuitable for non-developer operators (raw YAML/JSON paste-and-submit
+with no validation, no field types, no live cross-references — the
+Submit button doesn't even read the textarea today). This sub-phase
+ships **one new top-level page at `/resources`** that delivers
+customer-grade interactive CRUD for all 7 dashd resource types
+(Vnet, ENI, VnetMapping, ServiceTunnel, AclPolicy, RoutePolicy,
+HaSet) **without touching a single existing view file**.
+
+> **Scope rationale:**
+> - Existing read-only views (`/enis`, `/vnets`, `/mappings`, `/tunnels`,
+>   `/routing`, `/policies`, `/health`, `/dashboard`, etc.) stay
+>   **100% untouched** — no row actions, no "+ Create" buttons added.
+> - `AdminOpsView` (`/admin`) is **preserved as-is** for developer
+>   experimentation with raw YAML/JSON (current broken Submit behavior
+>   not in scope to fix here).
+> - Sidebar gains **one** new entry "Resources" in the "Operate" group.
+> - All form work uses zod schemas REWRITTEN to match the real
+>   A+-aligned dashd wire shape (the existing `lib/schemas.ts`
+>   describes a pre-A+ aspirational shape that never matched dashd).
+> - A `denormalizeForPut` helper is added so SPA-flattened bodies
+>   round-trip back to dashd's `{kind, name, namespace, spec:{…}}`
+>   wire format (today's `usePut*` hooks would silently 4xx without it).
+
+##### A-IF1 — Foundation (4 gates · ~1 day)
+
+| Gate | Task | Status | AI Agent Instructions |
+|---|---|---|---|
+| **A-IF1-G1** | **Rewrite `lib/schemas.ts`** to mirror the real A+ API shapes. Add `aclRuleSchema` with `stage`/`action`(lowercase enum: `allow`/`deny`/`allow_and_continue`)/`src_prefixes[]`/`dst_prefixes[]`/`src_ports[]`/`dst_ports[]`/`protocols[]`/`description`. Add `routeEntrySchema` with `prefix`/`next_hop_type`(enum: `vnet`/`service_tunnel`/`drop`)/`next_hop_target?`/`metric?`/`ecmp_members?[]`. Fix `vnetMappingSchema` (`ip_address` not `overlay_ip`, `action` enum, `params.tunnel?`). Fix `serviceTunnelSchema` (`local_underlay_ip`/`remote_underlay_ip`/`vni`/`params`). Fix `aclPolicySchema` (`stage` not `direction`, no `default_action`). Fix `routePolicySchema` (`routes` not `rules`). Drop `vnetSchema.address_space` (derived from mappings/ENIs, not stored). | ✅ | File: `src/impl-web/console/src/lib/schemas.ts`. Validate against fixtures from `deploy/test-setup/05-full-console/manifest/*.yaml`. Add `tests/schemas.test.ts` updates verifying real-shape parsing. Removed `.default()` to fix zod input/output type drift. 24 new schema tests added (rewrote `tests/schemas.test.ts`). |
+| **A-IF1-G2** | Add **`usePutVnetMapping`** mutation hook in `queries/hooks.ts` (mirror existing `usePutVnet` etc.); add `vnet-mappings` entry to `useDeleteResource`'s `apis` dispatcher map (it's already there, double-check). | ✅ | File: `src/impl-web/console/src/queries/hooks.ts`. Added `usePutVnetMapping` mutation mirroring the 6 sibling PUT hooks. |
+| **A-IF1-G3** | Add **`denormalizeForPut(spec, kind, name, ns)`** in `api/dashd-rest.ts`. Inverse of `normalizeItem`: takes the SPA's `{metadata: {namespace, name}, …flat_spec}` form and produces `{kind, name, namespace, spec: {…}}`. Wire into the `crudApi.put` so every `usePut*` mutation goes through it. Without this, all form submits silently 4xx. | ✅ | File: `src/impl-web/console/src/api/dashd-rest.ts`. Added `denormalizeForPut(body, kindSlug, name, ns)` + `wireKindForSlug(slug)` + `WIRE_KIND_BY_SLUG` map. Wired into `crudApi.put` so every PUT round-trips. |
+| **A-IF1-G4** | Build **`useResourceList<T>(kind: ResourceKind, ns?)`** generic dispatcher hook that wraps the existing `useEniList`/`useVnetList`/`useAclPolicies`/`useRoutePolicies`/`useServiceTunnels`/`useVnetMappings`/`useHaSets`/`useInventory` and returns `{items, isLoading, isError, refetch}`. Used by `ResourceSelect`/`ResourceMultiSelect` so any form can populate a dropdown without repeating the per-kind wiring. | ✅ | New file: `src/impl-web/console/src/queries/use-resource-list.ts`. Switches on `kind`, wraps all 8 existing list hooks, returns uniform `{items, isLoading, isError, error, refetch}` shape. |
+
+**Gate verification:** `npm run build` clean; new schema tests pass; `denormalizeForPut(normalizeItem(x)) === x` round-trip test passes; `useResourceList('enis')` returns the same `items[]` as `useEniList()`.
+
+##### A-IF2 — Reusable form primitives (8 gates · ~2 days)
+
+| Gate | Task | Status | AI Agent Instructions |
+|---|---|---|---|
+| **A-IF2-G1** | **`<FormDialog>`** — modal wrapper. Props: `open`, `onClose`, `title`, `submitLabel`, `onSubmit(values)`, `schema: ZodType`, `defaultValues`, `children` (render-prop receiving `{values, errors, setField}`). Validates on submit via zod, shows inline errors, loading state during mutation, error banner on failure. Reuses existing `<Drawer>` infrastructure (Escape close, body scroll lock, animated backdrop). | ✅ | New file: `src/impl-web/console/src/components/form/FormDialog.tsx`. Render-prop controller `{values, errorAt, setField, setValues}`. Dotted-path error lookup. Sticky footer, scroll lock, Esc close, animated entry. |
+| **A-IF2-G2** | **`<LabelsEditor>`** — `Record<string, string>` editor: list of `<key, value>` rows + "+ Add label" button + per-row trash icon. Used for `metadata.labels` in every form. | ✅ | New file: `src/impl-web/console/src/components/form/LabelsEditor.tsx`. Unique-key enforcement. |
+| **A-IF2-G3** | **`<StringArrayEditor>`** — chip-style strings: shows chips with × close button + free-text input that adds chip on Enter or comma. Used for ad-hoc string lists. | ✅ | New file: `src/impl-web/console/src/components/form/StringArrayEditor.tsx`. Enter/comma commits chip; optional per-string `validate`. |
+| **A-IF2-G4** | **`<ResourceSelect>`** — single-select dropdown populated from `useResourceList(kind, ns)`. Props: `kind`, `ns?`, `value`, `onChange`, `label`, `placeholder`, `allowEmpty?`. Shows live item count; supports type-to-filter; "(no items — create one first)" empty state with link to relevant Create form. | ✅ | New file: `src/impl-web/console/src/components/form/ResourceSelect.tsx`. Live count badge, empty-state affordance. |
+| **A-IF2-G5** | **`<ResourceMultiSelect>`** — multi-select with chip display. Used for `eni_names[]`, `placement_hint_dpu_ids[]`. Check-all / clear-all. Shows count "3 of 41 selected". | ✅ | New file: `src/impl-web/console/src/components/form/ResourceMultiSelect.tsx`. Search/filter, check-all/clear-all, chip display. |
+| **A-IF2-G6** | **`<PrefixListEditor>`** — array of CIDRs with `+` button; each row uses existing `CidrInput`. Used for `src_prefixes[]` and `dst_prefixes[]`. Optional `placeholder` like `0.0.0.0/0`. | ✅ | New file: `src/impl-web/console/src/components/form/PrefixListEditor.tsx`. Wraps `StringArrayEditor` with IPv4-CIDR validator. |
+| **A-IF2-G7** | **`<PortListEditor>`** — array of port-spec strings (`"443"`, `"7777-7800"`); validates each entry via regex `/^\d+(-\d+)?$/` with range 0-65535. Used for `src_ports[]` and `dst_ports[]`. | ✅ | New file: `src/impl-web/console/src/components/form/PortListEditor.tsx`. |
+| **A-IF2-G8** | **`<ProtocolEditor>`** — multi-select with quick chips (`tcp`, `udp`, `icmp`) + custom-numeric input for raw protocol numbers like `"6"`, `"17"`, `"47"`. Used for `protocols[]`. | ✅ | New file: `src/impl-web/console/src/components/form/ProtocolEditor.tsx`. Quick chips + custom numeric input. |
+
+**Gate verification:** Each primitive has a unit test (render, fill, validate, output shape). All compose into `FormDialog` without prop drilling.
+
+##### A-IF3 — Resource form components (7 gates · ~3 days)
+
+Every form renders inside `<FormDialog>`, validates via the corresponding A-IF1-G1 zod schema, denormalizes via A-IF1-G3 before submit, and fires the corresponding `usePut*` mutation.
+
+| Gate | Task | Status | AI Agent Instructions |
+|---|---|---|---|
+| **A-IF3-G1** | **`<VnetForm>`** — fields: `name` (text, required, dns-safe), `vni` (`VniInput`, required, 1–16,777,215), `gw_mac?` (`MacInput`, optional), `labels` (`LabelsEditor`). Simple. | ✅ | New file: `src/impl-web/console/src/views/resources/forms/VnetForm.tsx`. Schema: `vnetSchema` from A-IF1-G1. |
+| **A-IF3-G2** | **`<EniForm>`** — fields: `name`, `vnet_name` (`ResourceSelect kind="vnets"`), `mac_address` (`MacInput`), `underlay_ip` (`IpInput v=4`), `admin_state` (radio `up`/`down`, default `up`), `placement_hint_dpu_ids[]` (`ResourceMultiSelect kind="inventory"`), `labels`. Medium. | ✅ | New file: `src/impl-web/console/src/views/resources/forms/EniForm.tsx`. |
+| **A-IF3-G3** | **`<VnetMappingForm>`** — fields: `name`, `vnet_name` (`ResourceSelect kind="vnets"`), `ip_address` (`IpInput`, label "Overlay IP"), `underlay_ip` (`IpInput`), `mac_address` (`MacInput`), `action` (radio `vnet_encap`/`service_tunnel`), **conditional** `params.tunnel` (`ResourceSelect kind="service-tunnels"`, shown only when `action===service_tunnel`). Medium. | ✅ | New file: `src/impl-web/console/src/views/resources/forms/VnetMappingForm.tsx`. Conditional `params.tunnel` ResourceSelect renders only when `action===service_tunnel`. |
+| **A-IF3-G4** | **`<ServiceTunnelForm>`** — fields: `name`, `local_underlay_ip` (`IpInput`), `remote_underlay_ip` (`IpInput`), `vni` (`VniInput`), `params` (KeyValueEditor with suggested keys `action`, `mtu`, `nat_pool`). Medium. | ✅ | New file: `src/impl-web/console/src/views/resources/forms/ServiceTunnelForm.tsx`. Uses `LabelsEditor` for `params`. |
+| **A-IF3-G5** | **`<AclPolicyForm>`** — fields: `name`, `stage` (radio `inbound`/`outbound`), `eni_names[]` (`ResourceMultiSelect kind="enis"`), `rules[]` via **`<AclRuleEditor>`** sub-form: `priority` (number, required), `action` (enum `allow`/`deny`/`allow_and_continue`), `src_prefixes[]` (`PrefixListEditor`), `dst_prefixes[]` (`PrefixListEditor`), `src_ports[]` (`PortListEditor`), `dst_ports[]` (`PortListEditor`), `protocols[]` (`ProtocolEditor`), `description` (textarea). Rules sorted by priority on display. Drag-to-reorder optional (defer to A-IF5 polish). **Complex.** | ✅ | New file: `src/impl-web/console/src/views/resources/forms/AclPolicyForm.tsx` with `<AclRuleCard>` collapsible sub-component. Auto-priority on add. |
+| **A-IF3-G6** | **`<RoutePolicyForm>`** — fields: `name`, `eni_names[]` (`ResourceMultiSelect`), `routes[]` via **`<RouteEntryEditor>`** sub-form: `prefix` (`CidrInput`), `next_hop_type` (radio `vnet`/`service_tunnel`/`drop`), **conditional** `next_hop_target` (`ResourceSelect kind="vnets"` when type=`vnet`; `kind="service-tunnels"` when type=`service_tunnel`; hidden when type=`drop`), `metric?` (number), **toggle** "Use ECMP" → array of `<EcmpMemberEditor>` (`next_hop_type` + `next_hop_target` + `weight`). **Complex.** | ✅ | New file: `src/impl-web/console/src/views/resources/forms/RoutePolicyForm.tsx` with `<RouteEntryCard>` and ECMP toggle swapping in `<EcmpMemberEditor>`. |
+| **A-IF3-G7** | **`<HaSetForm>`** — fields: `name`, `scope` (text), `members[]` (array of `{dpu_id: ResourceSelect kind="inventory", role: enum}`, min 2), `virtual_ip?` (`IpInput`). Medium. | ✅ | New file: `src/impl-web/console/src/views/resources/forms/HaSetForm.tsx`. Min 2 members, unique dpu_id enforced. |
+
+**Gate verification:** Each form opens in `<FormDialog>`, fills cleanly, validates on submit, denormalizes correctly, fires mutation. Smoke-tested against the running 10-DPU fleet — Create produces a resource visible in the matching `/<list>` view within one poll cycle.
+
+##### A-IF4 — New `/resources` page (5 gates · ~2 days)
+
+| Gate | Task | Status | AI Agent Instructions |
+|---|---|---|---|
+| **A-IF4-G1** | New view **`ResourcesView.tsx`** — top-level page. Layout: `<PageHeader title="Resources" subtitle="…">` + `<Tabs>` with 7 tabs (Vnets, ENIs, Mappings, Tunnels, ACL Policies, Route Policies, HA Sets). URL state via `?kind=enis` (uses `useSearchParams`) so each tab is deep-linkable. Lazy-loaded route. | ✅ | New file: `src/impl-web/console/src/views/resources/ResourcesView.tsx`. URL state via `?kind=`. Each tab's content is inlined in `TabDef.content` so only the active tab renders. |
+| **A-IF4-G2** | **`<ResourceTab kind={…}>`** reusable sub-component. Header: live count + `<button>+ Create</button>` (opens the matching A-IF3 form in `<FormDialog>` with empty defaults). Body: `<DataTable>` showing all rows for that kind (same shape as the corresponding existing list view's columns, but **freshly defined here** — no imports from existing views), with an extra rightmost "Actions" column. | ✅ | Implemented inline as `ResourceTab` subcomponent inside `ResourcesView.tsx`. Header with count + Create button, `<DataTable>` body, action column. |
+| **A-IF4-G3** | **`<ResourceRowActions row={…} kind={…}>`** — three icon buttons: ✏️ Edit (opens `<FormDialog>` pre-filled with `row`), 📋 Clone (opens `<FormDialog>` pre-filled with `row` but `name` cleared), 🗑 Delete (opens `<ConfirmDialog>` with "Delete `<kind>/<name>`?" + reason input + `useDeleteResource` mutation on confirm). | ✅ | `ResourceRowActions` implemented inline in `ResourcesView.tsx` + new minimal `<ConfirmDialog>` at `src/impl-web/console/src/components/feedback/ConfirmDialog.tsx` (will be generalized later by A-PH2-G4). |
+| **A-IF4-G4** | Wire the 7 resource types into `ResourcesView`: a `RESOURCE_DEFS` array mapping `kind → { label, useList, formComponent, columns, schema }`. `ResourceTab` consumes this. Adding a new resource later becomes a one-line entry. | ✅ | `RESOURCE_DEFS: ResourceDef[]` table in `ResourcesView.tsx` is the source of truth. |
+| **A-IF4-G5** | **Sidebar update**: add ONE new nav entry "Resources" with `LayoutGrid` (or `Plus`/`Edit3`) lucide icon in the "Operate" group above "Admin Ops". Add lazy route `/resources` → `ResourcesView` in `router.tsx`. | ✅ | Files: `src/impl-web/console/src/components/layout/Sidebar.tsx` (added "Resources" with `LayoutGrid` icon above "Admin Ops") + `src/impl-web/console/src/router.tsx` (lazy route `/resources`). Existing 19 views untouched. |
+
+**Gate verification:** Navigate to `/resources` → see 7 tabs. Switch to ENIs tab → see 41 ENIs in DataTable + "+ Create ENI" button. Click +Create → form opens. Fill required fields → submit → resource visible within one poll. Click ✏️ on a row → form opens pre-filled. Click 🗑 → confirm dialog appears. Existing `/enis` (and all other list views) **unchanged** — verified by `git diff`.
+
+##### A-IF5 — UX polish & validation (5 gates · ~1.5 days)
+
+| Gate | Task | Status | AI Agent Instructions |
+|---|---|---|---|
+| **A-IF5-G1** | **Live duplicate-name check** — in every Create form, as user types the name, check against `useResourceList(kind, ns).data.items` and show inline warning "Name already exists — pick another or use Edit instead" with a link to open the existing resource in Edit mode. | ❌ | Implemented in `<FormDialog>` via `validateName?: (name) => string \| null` prop, or inside each form. |
+| **A-IF5-G2** | **Cross-reference validation** — when an `EniForm` references a non-existent `vnet_name` (typed but not selected from dropdown), show inline "Vnet `xyz` doesn't exist — [Create it]" link that opens `VnetForm` pre-filled with that name. After Create, auto-pop back to ENI form with vnet selected. | ❌ | Generic pattern: a form may push its current state to sessionStorage before opening a "side-quest" form, then restore on close. |
+| **A-IF5-G3** | **Form autosave to sessionStorage** — `<FormDialog>` writes its current values to `sessionStorage` under `dashw:form-draft:<kind>:<name?>` on every change. On re-open, if a draft exists for the same key, show "Restore draft from <timestamp>?" prompt. Clear draft on successful submit or explicit Discard. | ❌ | Implemented inside `<FormDialog>` so every form gets this for free. |
+| **A-IF5-G4** | **Field-level help text + examples** in every form — each `<FieldWrapper>` gets a `hint?` populated with real values from the test fleet. E.g., `placement_hint_dpu_ids[]` shows hint "e.g., `dpu-sim-01`, `dpu-sim-02` — pick from your inventory below". | ❌ | Most fields just need 1-line hints; pull examples from `deploy/test-setup/05-full-console/manifest/`. |
+| **A-IF5-G5** | **Success toast with deep-link** — after Create succeeds, toast `"ENI eni-foo created → [View detail]"` (using `sonner`'s action button); clicking the action navigates to the just-created resource's detail page (`/eni/<ns>/<name>` etc.). | ❌ | The matching detail-route map is already implicit in the existing list views; centralize in `lib/resource-paths.ts`. |
+
+**Gate verification:** Typing a duplicate name shows inline warning within 200ms. Form draft survives Esc-close + browser refresh. Create success toast offers "View" button that navigates to detail.
+
+##### A-IF6 — Tests (3 gates · ~1 day)
+
+| Gate | Task | Status | AI Agent Instructions |
+|---|---|---|---|
+| **A-IF6-G1** | **Form primitive unit tests** — for each of the 8 A-IF2 primitives: render empty, add a row, fill, remove, validates output shape. Total target: ~40 new tests. | ❌ | New files: `tests/form-primitives.test.tsx`. Reuse the `wrap()` helper from `eni-view.test.tsx`. |
+| **A-IF6-G2** | **Form integration tests** — for each of the 7 A-IF3 forms: render in `<FormDialog>`, fill required fields, click Submit, verify the matching mutation hook fired with the denormalized body. Total target: ~21 new tests. | ❌ | New files: `tests/forms/<kind>-form.test.tsx`. Mock `usePut*` hooks via `vi.mock`. |
+| **A-IF6-G3** | **Cross-form workflow test** — "Create Vnet `test-v1` → Create ENI `test-e1` in `test-v1` → Create AclPolicy `test-acl` bound to `test-e1`" inside the test runner with mutation-spy fixtures. Verifies cross-references resolve in the right order. | ❌ | New file: `tests/forms/workflow.test.tsx`. ~5 tests. |
+
+**Gate verification:** `npm test` passes with ~66 new tests; total test count rises from 246 → ~312.
+
+##### A-IF exit criteria
+
+- [ ] All 32 gates (A-IF1-G1 through A-IF6-G3) verified
+- [ ] `/resources` page renders with 7 working tabs
+- [ ] All 7 resource Create forms produce a valid resource that appears in the matching `/<list>` view within one poll cycle
+- [ ] Edit forms successfully PUT changes (denormalized correctly via A-IF1-G3)
+- [ ] Delete with confirmation works for all 7 kinds
+- [ ] Clone produces a new resource with cleared name + all other fields prefilled
+- [ ] Existing 19 views untouched (verified by `git diff --stat src/impl-web/console/src/views/` showing only `views/resources/*` as new)
+- [ ] `AdminOpsView` untouched
+- [ ] `npm test` passes (target ≥ 310 tests, from 246 baseline)
+- [ ] Bundle size unchanged in initial chunk (new code in lazy `resources` chunk, < 100 KB gzip)
+- [ ] Live walk-through: Create a Vnet → Create an ENI in it → Create an ACL bound to that ENI → all visible in their respective list views
+
+##### Sprint sequence (recommended)
+
+| Sprint | Sub-phase(s) | Effort | Why |
+|---|---|---|---|
+| **Sprint 1** | A-IF1 (Foundation) | 1 day | Plumbing fix is ship-blocking — without `denormalizeForPut`, every form will silently fail |
+| **Sprint 2** | A-IF2 (Primitives) | 2 days | Reusable kit unlocks all 7 forms |
+| **Sprint 3a** | A-IF3-G1 + G2 + G3 + G4 + G7 (5 simple/medium forms) | 1.5 days | Ship 5 forms quickly |
+| **Sprint 3b** | A-IF3-G5 + G6 (2 complex forms: ACL, Route) | 1.5 days | The hard ones with rule/route arrays |
+| **Sprint 4** | A-IF4 (`/resources` page + sidebar) | 2 days | Wire it all up |
+| **Sprint 5** | A-IF5 (UX polish) | 1.5 days | Delight layer |
+| **Sprint 6** | A-IF6 (Tests) | 1 day | Lock down confidence |
+
+**Total:** 10.5 days of focused work for full interactive CRUD across all 7 resources, with **zero** disruption to existing pages.
 
 ### Phase A exit criteria
 
