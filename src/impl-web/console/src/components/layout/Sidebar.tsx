@@ -9,6 +9,7 @@ import {
   Workflow,
   ScrollText,
   HeartPulse,
+  Activity,
   Settings,
   Terminal,
   Bug,
@@ -62,6 +63,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Diagnostics",
     items: [
       { path: "/flow-trace", label: "Flow Trace", icon: Workflow },
+      { path: "/eni-stats", label: "ENI Statistics", icon: Activity },
       { path: "/audit", label: "Audit Log", icon: ScrollText },
       { path: "/health", label: "Health", icon: HeartPulse },
     ],

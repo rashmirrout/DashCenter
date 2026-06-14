@@ -7,10 +7,10 @@
 > (`:9443`) speaking the same protobuf request/response messages; see
 > [proto/dashcenter/v1/](../../proto/dashcenter/v1) for the canonical
 > definitions.
-> **Status as of 2026-06-12**: Phase 2 (PD — security & audit ✅) and
-> Phase 2½ (PE-1 — diagnostics ✅) shipped. PE-2 / PE-3 / PE-4 / PD-G5
-> (counters polling) are still in flight; this doc only covers landed
-> RPCs.
+> **Status as of 2026-06-14**: Phase 2 (PD — security & audit ✅ 5/5
+> incl. PD-G5 counters ✅) and Phase 2½ (PE-1 — diagnostics ✅) shipped.
+> PE-3c / PD-G5 (counter streaming end-to-end) landed — see §10A.
+> PE-2 / PE-4 are in flight; this doc covers all landed RPCs.
 
 ---
 
@@ -26,6 +26,7 @@
 8. [Migrations](#8-migrations)
 9. [Diagnostics (PE-1)](#9-diagnostics-pe-1)
 10. [Cluster topology (PE-G6)](#10-cluster-topology-pe-g2)
+10A. [Observability — counter streaming (PE-3c / PD-G5)](#10a-observability--counter-streaming-pe-3c--pd-g5)
 11. [Admin port](#11-admin-port)
 12. [Quick reference index](#12-quick-reference-index)
 
@@ -824,6 +825,90 @@ the other services — PE-G6 inherits PD-G1/G2/G3/G4 unchanged.
 
 ---
 
+## 10A. Observability — counter streaming (PE-3c / PD-G5)
+
+Counter streaming surfaces the per-DPU counter rollup from the dashd
+poller cache. For full design, architecture diagram, and Future Scopes
+see [counter-streaming.md](counter-streaming.md).
+
+### 10A.1 `GET /v1/observability/counters`
+
+One-shot snapshot of every cached per-DPU CounterReport.
+
+- **Query params**: `?dpu=<id>` (repeatable) to filter.
+- **Response**: `{"reports":[<protojson CounterReport>, ...]}` (empty array when cache is cold).
+- **Status codes**: 200 on success; 503 when counter pipeline disabled (`observability.counters.enabled: false`).
+
+### 10A.2 `GET /v1/observability/counters/stream`
+
+SSE long-lived stream. Each frame uses named events:
+
+| `event:` | `Kind` | Meaning |
+|---|---|---|
+| `snapshot` | `KIND_SNAPSHOT` | Initial frame per DPU on subscribe |
+| `report` | `KIND_REPORT` | Live delta per DPU |
+| `keepalive` | `KIND_KEEPALIVE` | Silence filler (default every 30s) |
+| `dropped` | `KIND_DROPPED` | Buffer overflow (subscriber slow) |
+| `rate_limited` | `KIND_RATE_LIMITED` | Leaky-bucket suppressed frames |
+| `resync` | `KIND_RESYNC` | Resume cursor expired; refetch snapshot |
+
+- **Headers**: `Last-Event-ID: <N>` for cursor resume; also accepts `?last_event_id=<N>`.
+- **Query params**: `?dpu=<id>` (repeatable); same as snapshot.
+- **Error codes**: 429 + `Retry-After: 30` when per-subject cap exceeded; 503 when disabled.
+
+### 10A.3 `GET /v1/observability/counters/{dpu_id}/details`
+
+Per-DPU rollup **plus per-ENI and per-VNET sub-rollups**. Public v1
+exposure of the data that PE-3b's admin endpoint carried since landing.
+
+Response envelope:
+
+```json
+{
+  "dpu_id": "dpu-edge-01",
+  "update_at": "2026-06-14T07:25:00.123Z",
+  "report":   { "vxlan_decap": "51377", "vxlan_encap": "51626", ... },
+  "per_eni":  { "eni-001": { "vxlan_decap": "10", ... }, "eni-002": { ... } },
+  "per_vnet": { "vnet-prod": { "vxlan_decap": "30", ... } }
+}
+```
+
+- `per_eni` / `per_vnet` are **omitted entirely** when empty.
+- 404 when `dpu_id` is unknown (never polled, or just cleared).
+- 503 when the counter pipeline is not wired.
+
+### 10A.4 `DELETE /v1/observability/counters`
+
+Wipe every cached counter entry. Returns `{"cleared": <int>}`.
+
+- **Idempotent**: second call returns `{"cleared": 0}`.
+- The next poll round (≤ `poll_interval`, default 5s) refills entries for DPUs still in inventory.
+- Decommissioned DPUs stay cleared.
+
+### 10A.5 `DELETE /v1/observability/counters/{dpu_id}`
+
+Wipe one cached entry.
+
+- **200**: `{"cleared": true, "dpu_id": "..."}` when an entry was present.
+- **404**: `{"cleared": false, "dpu_id": "..."}` when the DPU is unknown (idempotent; not an error).
+- **503**: counter pipeline not wired.
+
+### gRPC equivalents
+
+- `rpc GetCounters(CounterRequest) returns (stream CounterEvent)` — same envelope; supports `resume_after_event_id`, `dpu_ids` filter, `follow` mode.
+
+Full wire contract (proto messages, sentinel kinds, gRPC error codes): [counter-streaming.md §4](counter-streaming.md#4-wire-contract).
+
+### Admin-port counterparts (PE-3b, `:7443`)
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /admin/counters[?dpu=ID]` | Dump cached reports + per-ENI/per-VNET sub-rollups (protojson envelope) |
+| `POST /admin/counters/poll-interval` | `{"interval":"3s"}` runtime knob |
+| `POST /admin/counters/enable` | `{"enabled":true\|false}` toggle polling |
+
+---
+
 ## 11. Admin port
 
 The admin surface (`:7443` by default) is **unauthenticated**, intended
@@ -838,6 +923,9 @@ to be exposed only on the management network or via a sidecar.
 | `GET /admin/metrics` | Prometheus exposition (Phase 2 PD-G2) |
 | `GET /admin/healthz` | Liveness probe (always 200 if process is up) |
 | `GET /admin/readyz` | Readiness probe (200 only when leader + store loaded) |
+| `GET /admin/counters[?dpu=ID]` | Full cached counter reports (per-ENI + per-VNET sub-rollups) — see [§10A](#10a-observability--counter-streaming-pe-3c--pd-g5) |
+| `POST /admin/counters/poll-interval` | `{"interval":"3s"}` — runtime poll cadence knob |
+| `POST /admin/counters/enable` | `{"enabled":true\|false}` — toggle polling on/off |
 
 ### Audit tail example
 
@@ -873,7 +961,13 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 | `/v1/diagnostics/trigger-resimulation` | POST | §9.5 |
 | `/v1/cluster/topology` | GET | §10.1 |
 | `/v1/cluster/topology/watch` | GET (SSE) | §10.2 |
+| `/v1/observability/counters` | GET / DELETE | §10A.1 / §10A.4 |
+| `/v1/observability/counters/stream` | GET (SSE) | §10A.2 |
+| `/v1/observability/counters/{dpu_id}/details` | GET | §10A.3 |
+| `/v1/observability/counters/{dpu_id}` | DELETE | §10A.5 |
 | `/admin/leader` `/admin/topology` `/admin/audit/{tail,stream}` `/admin/metrics` `/admin/healthz` `/admin/readyz` | GET | §11 |
+| `/admin/counters[?dpu=ID]` | GET | §10A (admin) |
+| `/admin/counters/poll-interval` `/admin/counters/enable` | POST | §10A (admin) |
 
 ---
 

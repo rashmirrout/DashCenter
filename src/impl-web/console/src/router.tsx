@@ -15,6 +15,7 @@ const HealthView = lazy(() => import('./views/health/HealthView'));
 const AuditView = lazy(() => import('./views/audit/AuditView'));
 const AdminOpsView = lazy(() => import('./views/admin-ops/AdminOpsView'));
 const FlowTraceView = lazy(() => import('./views/flow-trace/FlowTraceView'));
+const EniStatisticsView = lazy(() => import('./views/eni-stats/EniStatisticsView'));
 const CommandView = lazy(() => import('./views/command/CommandView'));
 const TopologyDashboardView = lazy(() => import('./views/topology/TopologyDashboardView'));
 const TopologyV2View = lazy(() => import('./views/topology-v2/TopologyV2View'));
@@ -80,6 +81,7 @@ export const router = createBrowserRouter([
       { path: 'tunnels', element: <ViewLoader name="Tunnels"><TunnelView /></ViewLoader> },
       { path: 'policies', element: <ViewLoader name="Policies"><PolicyView /></ViewLoader> },
       { path: 'flow-trace', element: <ViewLoader name="Flow Trace"><FlowTraceView /></ViewLoader> },
+      { path: 'eni-stats', element: <ViewLoader name="ENI Statistics"><EniStatisticsView /></ViewLoader> },
       { path: 'audit', element: <ViewLoader name="Audit"><AuditView /></ViewLoader> },
       { path: 'health', element: <ViewLoader name="Health"><HealthView /></ViewLoader> },
       { path: 'admin', element: <ViewLoader name="Admin Ops"><AdminOpsView /></ViewLoader> },

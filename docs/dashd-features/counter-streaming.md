@@ -538,7 +538,7 @@ Semantics:
 | [src/impl-go/console/internal/server/server.go](../../src/impl-go/console/internal/server/server.go) | edit | `counterHub` constructed + started alongside cluster Hub |
 | [src/impl-go/console/internal/config/config.go](../../src/impl-go/console/internal/config/config.go) | edit | Added `Counter*` fields + CLI flags |
 
-### 5.4 Tier 4 — SPA (311/311 tests green, build clean)
+### 5.4 Tier 4 — SPA (333/333 tests green, build clean)
 
 | File | New / Edited | Role |
 |---|---|---|
@@ -546,6 +546,9 @@ Semantics:
 | [src/impl-web/console/src/queries/useCounterStream.ts](../../src/impl-web/console/src/queries/useCounterStream.ts) | new | EventSource owner; 6 named listeners; tab-visibility pause; exp backoff (500ms→15s) |
 | [src/impl-web/console/src/views/topology-v2/CounterWidget.tsx](../../src/impl-web/console/src/views/topology-v2/CounterWidget.tsx) | new + edit | 2×2 sparkline grid; pure helpers `smooth(window=5)` + `sparklinePath()`; **header `Clear` button wires to `clearDpu(dpuId)` (PE-3c add-on)** |
 | [src/impl-web/console/src/views/topology-v2/TopologyV2View.tsx](../../src/impl-web/console/src/views/topology-v2/TopologyV2View.tsx) | edit | `useCounterStream({enabled: streaming})`; widget slot in `InspectorDrawer` for `selectedKind === 'dpu'` |
+| [src/impl-web/console/src/views/eni-stats/EniStatisticsView.tsx](../../src/impl-web/console/src/views/eni-stats/EniStatisticsView.tsx) | **new (PE-3c add-on)** | `/eni-stats` route under Diagnostics; DPU→ENI tree + Pull/Start streaming + per-ENI counter panel reading `GET /api/v1/observability/counters/{dpu_id}/details`. Independent per-page `eni-stats:streaming` localStorage pref. |
+| [src/impl-web/console/src/router.tsx](../../src/impl-web/console/src/router.tsx) | edit | `{ path: 'eni-stats', element: <EniStatisticsView /> }` |
+| [src/impl-web/console/src/components/layout/Sidebar.tsx](../../src/impl-web/console/src/components/layout/Sidebar.tsx) | edit | Diagnostics group: `"ENI Statistics"` between Flow Trace and Audit Log |
 
 ---
 
@@ -691,6 +694,50 @@ Navigate to **http://localhost:3000/topology-v2**, click **Start**, click a DPU 
 - Empty state: "No counter data yet for <dpu-id> — waiting for first poll round."
 - **Streaming is gated by the same Start/Stop button as topology** (`useCounterStream({ enabled: streaming })`). When the user pauses the topology stream, the counter SSE connection also closes; the local sparkline buffer is retained for inspection until the user clicks Clear or refreshes.
 
+### 7.3 SPA — `/eni-stats` (Diagnostics → ENI Statistics)
+
+Dedicated subpage for the **per-ENI sub-rollups**. The streaming surface is per-DPU; this page is the only place in the SPA where the per-ENI / per-VNET breakdown is rendered.
+
+Layout (two-pane):
+
+```
+┌──────────────────────────────┬──────────────────────────────┐
+│  DPU tree (left, 40%)        │  Counter panel (right, 60%)  │
+│   ▾ dpu-sim-01               │   ENI: eni-bank-web-01       │
+│       eni-bank-web-01  ◀──   │   namespace=default          │
+│       eni-bank-web-02        │   vnet=bank-prod-web         │
+│   ▸ dpu-sim-02  (1 ENI)      │   mac=aa:bb:…                │
+│   ▸ dpu-sim-03  (4 ENIs)     │   ────                       │
+│                              │   Per-ENI sub-rollup         │
+│                              │     vxlan_decap = 25,360     │
+│                              │     vxlan_encap =  4,755     │
+│                              │     drop_acl_in =      0     │
+│                              │   Parent DPU rollup          │
+│                              │     vxlan_decap = 981,115    │
+└──────────────────────────────┴──────────────────────────────┘
+```
+
+Affordances (top-right):
+
+| Control | Behaviour |
+|---|---|
+| **Pull** | One-shot `GET /api/v1/observability/counters/{dpu_id}/details` (proxied through dashw → dashd REST) for the selected ENI's parent DPU. Disabled until an ENI is selected. |
+| **Start streaming** / **Stop streaming** | Toggle; persisted to `localStorage` (`eni-stats:streaming`). When ON, react-query refetches `/details` every 5 s for the selected DPU, and `useCounterStream({ enabled, dpuIds })` opens an SSE subscription for the same DPU so any Hub-level events (reconnect, drop, resync) are reflected in the shared counters-store. |
+| **Live streaming** / **Off** badge | Visual mirror of the toggle; uses `Activity` icon when live, `Pause` when off. |
+
+Streaming-gate contract (per your specification):
+
+- **Default mode**: page opens with streaming OFF. Operator clicks Pull to see the snapshot — no background traffic, no SSE.
+- **Live mode**: explicit opt-in. Once enabled the panel auto-refreshes every 5 s and natively surfaces SSE-driven events (KIND_DROPPED, KIND_RATE_LIMITED, KIND_RESYNC) into the same store used by the topology-v2 widget.
+
+Endpoint mapping (browser path → dashd path):
+
+| Browser call | dashw proxy → dashd path |
+|---|---|
+| `GET /api/v1/observability/counters/{dpu_id}/details` | `GET /v1/observability/counters/{dpu_id}/details` (no transform; pure HTTP reverse-proxy via the existing `/api/v1/*` mount) |
+| `GET /api/console/topology-v2?include_enis=true` | dashw multiplexer over `ClusterService.GetTopology` (PE-G6) |
+| `GET /api/console/counters/stream?dpu={dpu_id}` (when streaming ON) | dashw counter Hub → `ObservabilityService.GetCounters` |
+
 ---
 
 ## 8. Test strategy — final counts
@@ -709,6 +756,7 @@ Navigate to **http://localhost:3000/topology-v2**, click **Start**, click a DPU 
 | SPA `counters-store` | `counters-store.test.ts` | 29 | reducer + selectors |
 | SPA `useCounterStream` | `useCounterStream.test.ts` | 17 | lifecycle/backoff/visibility |
 | SPA `CounterWidget` | `counter-widget.test.tsx` | 19 | smooth/path + RTL |
+| SPA `EniStatisticsView` | `eni-stats-view.test.tsx` | 15 | tree expand, ENI selection, Pull, streaming toggle, 404 fallback, error paths |
 | **Totals** | | **221 new** | dashd 28/28 pkg ✅, dashctl 9/9 ✅, dashw 9/9 ✅, SPA 311/311 ✅, build clean |
 
 Go `-race` not runnable locally on the Windows host (no cgo/gcc); enforced on CI matrix.
@@ -902,9 +950,10 @@ Per-ENI and per-VNET sub-rollups ARE captured (PE-3a sim emission → PE-3b mapp
 
 - `GET /v1/observability/counters/{dpu_id}/details` — public v1 REST (see §4.4)
 - `dashctl counters details --dpu=<id>` — operator CLI (see §7.1.1)
+- **SPA `/eni-stats` page** under Diagnostics → ENI Statistics (see §7.3): DPU→ENI tree + Pull/Start-streaming controls + per-ENI counter panel. The streaming toggle drives a 5 s poll of the same `/details` endpoint plus an SSE subscription to the per-DPU stream so Hub events (drop / rate-limited / resync) are reflected in the shared store.
 - `GET /admin/counters[?dpu=<id>]` — PE-3b admin endpoint (internal port; kept for back-compat)
 
-Live streaming of per-ENI / per-VNET deltas is filed as Future Scope 10.7 — it raises real cardinality and fan-out questions (a single DPU can host hundreds of ENIs) that we explicitly deferred from this slice.
+Live **per-ENI delta** streaming (i.e., a true `KIND_REPORT` carrying scope=ENI on every sample) is filed as Future Scope 10.7 — it raises real cardinality and fan-out questions (a single DPU can host hundreds of ENIs) that we explicitly deferred from this slice. The current `/eni-stats` page approximates "live ENI view" by polling `/details` every 5 s during streaming mode, which is sufficient for operator-paced inspection.
 
 ### 11.2 Does the SPA counter stream follow the topology Start/Stop button?
 

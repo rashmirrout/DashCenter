@@ -175,6 +175,7 @@ describe("Sidebar · NAV_GROUPS", () => {
       "/tunnels",
       "/policies",
       "/flow-trace",
+      "/eni-stats",
       "/audit",
       "/health",
       "/admin",

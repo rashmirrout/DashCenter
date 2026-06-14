@@ -9,11 +9,13 @@
 // Exported helpers `smooth` and `sparklinePath` are pure functions so
 // they are unit-testable in isolation.
 
+import { useState } from 'react';
 import {
   useCountersStore,
   selectSeries,
   type CounterSample,
 } from '@/stores/counters-store';
+import { clearCounterTarget } from '@/api/observability';
 
 /**
  * Apply a rolling-mean smoothing window. Returns [] for empty input;
@@ -72,11 +74,39 @@ export function sparklinePath(
 
 export function CounterWidget({ dpuId }: { dpuId: string }) {
   const series = useCountersStore(selectSeries(dpuId));
+  const [clearing, setClearing] = useState(false);
+  const [clearMsg, setClearMsg] = useState<string | null>(null);
+
+  async function handleClear() {
+    if (clearing) return;
+    setClearing(true);
+    setClearMsg(null);
+    // Always wipe the local ring immediately so the user sees the
+    // widget reset even if the server-side clear is slow.
+    useCountersStore.getState().clearDpu(dpuId);
+    try {
+      const r = await clearCounterTarget(dpuId);
+      setClearMsg(
+        r.cleared
+          ? 'cleared on dashd; widget will repopulate at next poll'
+          : 'no cached entry on dashd (already clear); widget will repopulate at next poll',
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setClearMsg(`local cleared; server error: ${msg}`);
+    } finally {
+      setClearing(false);
+      window.setTimeout(() => setClearMsg(null), 6_000);
+    }
+  }
 
   if (!series?.samples || series.samples.length === 0) {
     return (
       <div className="text-sm text-[color:var(--text-muted)] p-3 rounded-md bg-[color:var(--bg-primary)] border border-[color:var(--border-subtle)]">
         No counter data yet for {dpuId} — waiting for first poll round.
+        {clearMsg && (
+          <div className="mt-2 text-[10px]" data-testid="counter-widget-clear-msg">{clearMsg}</div>
+        )}
       </div>
     );
   }
@@ -86,6 +116,9 @@ export function CounterWidget({ dpuId }: { dpuId: string }) {
     return (
       <div className="text-sm text-[color:var(--text-muted)] p-3 rounded-md bg-[color:var(--bg-primary)] border border-[color:var(--border-subtle)]">
         No counter data yet for {dpuId} — waiting for first poll round.
+        {clearMsg && (
+          <div className="mt-2 text-[10px]" data-testid="counter-widget-clear-msg">{clearMsg}</div>
+        )}
       </div>
     );
   }
@@ -115,12 +148,13 @@ export function CounterWidget({ dpuId }: { dpuId: string }) {
         </h3>
         <button
           type="button"
-          onClick={() => useCountersStore.getState().clearDpu(dpuId)}
-          className="text-xs text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)] underline underline-offset-2"
-          title="Wipe the local sparkline history; the next inbound counter event re-bootstraps the widget. Does not touch dashd's cache."
+          onClick={handleClear}
+          disabled={clearing}
+          className="text-xs text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)] underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Wipe the local sparkline history AND the dashd cached entry for this DPU. The next poll round (≤ 5s) repopulates it."
           data-testid="counter-widget-clear"
         >
-          Clear
+          {clearing ? 'Clearing…' : 'Clear'}
         </button>
       </div>
       <div className="grid grid-cols-2 gap-4">
@@ -154,6 +188,14 @@ export function CounterWidget({ dpuId }: { dpuId: string }) {
           );
         })}
       </div>
+      {clearMsg && (
+        <div
+          className="mt-3 text-[10px] text-[color:var(--text-muted)]"
+          data-testid="counter-widget-clear-msg"
+        >
+          {clearMsg}
+        </div>
+      )}
     </div>
   );
 }

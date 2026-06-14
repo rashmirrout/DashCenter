@@ -4,8 +4,8 @@
 // setState (test-only state injection) so we don't need a real
 // EventSource.
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import {
   CounterWidget,
   smooth,
@@ -224,6 +224,17 @@ describe('CounterWidget · component', () => {
 describe('CounterWidget · Clear button', () => {
   beforeEach(() => {
     resetStore();
+    // Default stub: succeed with cleared=true.
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ cleared: true, dpu_id: 'x' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('does NOT render the Clear button in the empty-state placeholder', () => {
@@ -238,7 +249,7 @@ describe('CounterWidget · Clear button', () => {
     expect(screen.getByTestId('counter-widget-clear')).toBeInTheDocument();
   });
 
-  it('clicking Clear removes the local series for the named DPU', async () => {
+  it('clicking Clear wipes local ring AND calls DELETE on the target dashd endpoint', async () => {
     const { fireEvent } = await import('@testing-library/react');
     const s: CounterSample = { at: Date.now(), vxlan_decap: 1, vxlan_encap: 2, drop_acl_in: 0, flows_created_total: 0, flow_table_size: 5 };
     setupSeries('dpu-clk', [s]);
@@ -247,14 +258,89 @@ describe('CounterWidget · Clear button', () => {
     const { rerender } = render(<CounterWidget dpuId="dpu-clk" />);
     expect(screen.getByTestId('counter-widget-clear')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('counter-widget-clear'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('counter-widget-clear'));
+    });
 
-    // After clear: widget for dpu-clk should fall back to empty-state
+    // The DELETE was issued against the public REST surface.
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/v1/observability/counters/dpu-clk',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+
+    // Local ring is wiped (regardless of server response timing).
+    expect(useCountersStore.getState().byDpu['dpu-clk']).toBeUndefined();
+    // Other DPU is untouched.
+    expect(useCountersStore.getState().byDpu['dpu-other']).toBeDefined();
+
+    // Widget falls back to empty-state.
     rerender(<CounterWidget dpuId="dpu-clk" />);
     expect(screen.queryByTestId('counter-widget-clear')).toBeNull();
     expect(screen.getByText(/No counter data yet for dpu-clk/)).toBeInTheDocument();
+  });
 
-    // Other DPU untouched
-    expect(useCountersStore.getState().byDpu['dpu-other']).toBeDefined();
+  it('shows a success message after a successful server clear', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    const s: CounterSample = { at: Date.now(), vxlan_decap: 1, vxlan_encap: 2, drop_acl_in: 0, flows_created_total: 0, flow_table_size: 5 };
+    setupSeries('dpu-msg', [s]);
+    render(<CounterWidget dpuId="dpu-msg" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('counter-widget-clear'));
+    });
+
+    await waitFor(() => {
+      const msg = screen.queryByTestId('counter-widget-clear-msg');
+      expect(msg).not.toBeNull();
+      expect(msg!.textContent).toMatch(/cleared on dashd/i);
+    });
+  });
+
+  it('handles 404 (already-clear) as a benign info message', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ cleared: false, dpu_id: 'gone' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof globalThis.fetch;
+
+    const { fireEvent } = await import('@testing-library/react');
+    const s: CounterSample = { at: Date.now(), vxlan_decap: 1, vxlan_encap: 2, drop_acl_in: 0, flows_created_total: 0, flow_table_size: 5 };
+    setupSeries('gone', [s]);
+    render(<CounterWidget dpuId="gone" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('counter-widget-clear'));
+    });
+
+    await waitFor(() => {
+      const msg = screen.queryByTestId('counter-widget-clear-msg');
+      expect(msg).not.toBeNull();
+      expect(msg!.textContent).toMatch(/no cached entry on dashd/i);
+    });
+  });
+
+  it('surfaces a server error WITHOUT undoing the local clear', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response('boom', { status: 500 }),
+    ) as unknown as typeof globalThis.fetch;
+
+    const { fireEvent } = await import('@testing-library/react');
+    const s: CounterSample = { at: Date.now(), vxlan_decap: 1, vxlan_encap: 2, drop_acl_in: 0, flows_created_total: 0, flow_table_size: 5 };
+    setupSeries('boom', [s]);
+    render(<CounterWidget dpuId="boom" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('counter-widget-clear'));
+    });
+
+    // Local wipe survives.
+    expect(useCountersStore.getState().byDpu['boom']).toBeUndefined();
+
+    await waitFor(() => {
+      const msg = screen.queryByTestId('counter-widget-clear-msg');
+      expect(msg).not.toBeNull();
+      expect(msg!.textContent).toMatch(/server error/i);
+    });
   });
 });
