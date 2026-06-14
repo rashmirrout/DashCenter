@@ -328,6 +328,25 @@ type CountersSnapshot struct {
 	Reports []*CounterReport `json:"reports,omitempty"`
 }
 
+// CounterDetails is the response body of
+// GET /v1/observability/counters/{dpu_id}/details — the per-DPU
+// rollup plus per-ENI and per-VNET sub-rollups originally only
+// reachable via the admin endpoint.
+type CounterDetails struct {
+	DpuID    string                    `json:"dpu_id"`
+	UpdateAt string                    `json:"update_at,omitempty"`
+	Report   *CounterReport            `json:"report,omitempty"`
+	PerEni   map[string]*CounterReport `json:"per_eni,omitempty"`
+	PerVnet  map[string]*CounterReport `json:"per_vnet,omitempty"`
+}
+
+// ClearCountersResult is the response of the DELETE endpoints.
+type ClearCountersResult struct {
+	Cleared    bool   `json:"cleared,omitempty"`     // single-DPU form
+	ClearedNum int    `json:"cleared_num,omitempty"` // bulk form populated from server "cleared" int
+	DpuID      string `json:"dpu_id,omitempty"`
+}
+
 // SimulateResult is the dashd reply to POST /v1/simulate (PB-2).
 type SimulateResult struct {
 	WouldSucceed     bool                 `json:"would_succeed"`
@@ -386,6 +405,20 @@ type Client interface {
 	// OnEvent returns a non-nil sentinel.
 	GetCountersSnapshot(ctx context.Context, dpuIDs []string) (*CountersSnapshot, error)
 	StreamCounters(ctx context.Context, opts CountersWatchOptions) error
+
+	// GetCounterDetails fetches per-DPU rollup + per-ENI / per-VNET
+	// sub-rollups. PE-3c add-on (public v1 exposure of data that the
+	// admin endpoint has carried since PE-3b).
+	GetCounterDetails(ctx context.Context, dpuID string) (*CounterDetails, error)
+
+	// ClearCounters wipes every cached entry on dashd. Returns the
+	// number cleared. Next successful poll round refills entries for
+	// DPUs still in inventory; decommissioned DPUs stay cleared.
+	ClearCounters(ctx context.Context) (int, error)
+
+	// ClearCounter wipes a single cached entry. Returns true when an
+	// entry was present, false when the dpu_id was unknown.
+	ClearCounter(ctx context.Context, dpuID string) (bool, error)
 }
 
 // Factory builds a Client from a resolved config. Phase 1 only registers

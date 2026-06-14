@@ -255,6 +255,9 @@ mux.HandleFunc("GET /v1/cluster/topology/watch", h.watchClusterTopology)
 // Observability — PE-3c counter streaming. Snapshot + SSE follow.
 mux.HandleFunc("GET /v1/observability/counters", h.getCountersSnapshot)
 mux.HandleFunc("GET /v1/observability/counters/stream", h.streamCounters)
+mux.HandleFunc("GET /v1/observability/counters/{dpu_id}/details", h.getCounterDetails)
+mux.HandleFunc("DELETE /v1/observability/counters", h.clearCountersAll)
+mux.HandleFunc("DELETE /v1/observability/counters/{dpu_id}", h.clearCounter)
 
 return mux
 }

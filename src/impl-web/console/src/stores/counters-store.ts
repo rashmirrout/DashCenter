@@ -96,6 +96,14 @@ export interface CountersState {
   apply: (ev: CounterEvent) => void;
   /** Test-only: replace state with a fresh empty store. */
   reset: () => void;
+  /**
+   * Drop the local sample ring for one DPU. The browser-side
+   * "clear sparklines" affordance — wipes the 60-sample history so
+   * the widget re-bootstraps from the next inbound frame. Does NOT
+   * touch dashd's server-side cache; for that, operators use
+   * dashctl `counters clear` or DELETE /v1/observability/counters.
+   */
+  clearDpu: (dpuId: string) => void;
 }
 
 export const useCountersStore = create<CountersState>((set) => ({
@@ -167,6 +175,13 @@ export const useCountersStore = create<CountersState>((set) => ({
     lastSource: undefined,
     lastVia: undefined,
     byDpu: {},
+  }),
+
+  clearDpu: (dpuId) => set((st) => {
+    if (!dpuId || !st.byDpu[dpuId]) return {};
+    const next = { ...st.byDpu };
+    delete next[dpuId];
+    return { byDpu: next };
   }),
 }));
 

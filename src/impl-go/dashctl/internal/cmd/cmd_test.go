@@ -43,6 +43,10 @@ type fakeClient struct {
 	// PE-3c counter streaming injection points.
 	getCountersFn    func(ctx context.Context, dpuIDs []string) (*client.CountersSnapshot, error)
 	streamCountersFn func(ctx context.Context, opts client.CountersWatchOptions) error
+	// PE-3c add-on: details + clear ops.
+	getCounterDetailsFn func(ctx context.Context, dpuID string) (*client.CounterDetails, error)
+	clearCountersFn     func(ctx context.Context) (int, error)
+	clearCounterFn      func(ctx context.Context, dpuID string) (bool, error)
 }
 
 type putCall struct {
@@ -164,6 +168,24 @@ func (f *fakeClient) StreamCounters(ctx context.Context, opts client.CountersWat
 		return f.streamCountersFn(ctx, opts)
 	}
 	return nil
+}
+func (f *fakeClient) GetCounterDetails(ctx context.Context, dpuID string) (*client.CounterDetails, error) {
+	if f.getCounterDetailsFn != nil {
+		return f.getCounterDetailsFn(ctx, dpuID)
+	}
+	return &client.CounterDetails{DpuID: dpuID}, nil
+}
+func (f *fakeClient) ClearCounters(ctx context.Context) (int, error) {
+	if f.clearCountersFn != nil {
+		return f.clearCountersFn(ctx)
+	}
+	return 0, nil
+}
+func (f *fakeClient) ClearCounter(ctx context.Context, dpuID string) (bool, error) {
+	if f.clearCounterFn != nil {
+		return f.clearCounterFn(ctx, dpuID)
+	}
+	return false, nil
 }
 
 // testApp returns an Application with fake client, captured streams,

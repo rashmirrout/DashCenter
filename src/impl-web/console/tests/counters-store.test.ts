@@ -443,5 +443,47 @@ describe('counters store · sample `at` field precision', () => {
   });
 });
 
+describe('counters-store · clearDpu()', () => {
+  beforeEach(() => state().reset());
+
+  it('removes the series for the named DPU', () => {
+    state().apply(ev('KIND_REPORT', { report: report({ dpu_id: 'dpu-a' }) }));
+    state().apply(ev('KIND_REPORT', { report: report({ dpu_id: 'dpu-b' }) }));
+    expect(selectSeries('dpu-a')(state())).toBeDefined();
+    expect(selectSeries('dpu-b')(state())).toBeDefined();
+
+    state().clearDpu('dpu-a');
+
+    expect(selectSeries('dpu-a')(state())).toBeUndefined();
+    expect(selectSeries('dpu-b')(state())).toBeDefined();
+  });
+
+  it('is a no-op for an unknown DPU id', () => {
+    state().apply(ev('KIND_REPORT', { report: report({ dpu_id: 'dpu-a' }) }));
+    const before = state().byDpu;
+    state().clearDpu('ghost');
+    expect(state().byDpu).toBe(before); // same reference (no set was issued)
+  });
+
+  it('is a no-op for an empty DPU id', () => {
+    state().apply(ev('KIND_REPORT', { report: report({ dpu_id: 'dpu-a' }) }));
+    const before = state().byDpu;
+    state().clearDpu('');
+    expect(state().byDpu).toBe(before);
+  });
+
+  it('does not touch other store fields (lastEventId, droppedEvents, ...)', () => {
+    state().apply(ev('KIND_REPORT', { event_id: '42', report: report({ dpu_id: 'dpu-a' }) }));
+    state().apply(ev('KIND_DROPPED', { notice: { dropped_count: '7' } }));
+    expect(state().lastEventId).toBe(42);
+    expect(state().droppedEvents).toBe(7);
+
+    state().clearDpu('dpu-a');
+
+    expect(state().lastEventId).toBe(42);
+    expect(state().droppedEvents).toBe(7);
+  });
+});
+
 // Keep vitest import used.
 void vi;

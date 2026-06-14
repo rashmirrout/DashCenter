@@ -257,3 +257,138 @@ func TestGuessGrpcFromRest_Errors(t *testing.T) {
 		t.Errorf("expected error for malformed url")
 	}
 }
+// ── PE-3c add-on: clear + details subcommands ──────────────────────────
+
+func TestCountersClear_All_PrintsCount(t *testing.T) {
+	// (os.Stdout shared) t.Parallel() disabled
+	called := false
+	fc := &fakeClient{
+		clearCountersFn: func(ctx context.Context) (int, error) {
+			called = true
+			return 7, nil
+		},
+	}
+	stdout, _, err := runCounters(t, fc, "clear")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !called {
+		t.Errorf("ClearCounters was not called")
+	}
+	if !strings.Contains(stdout, "cleared 7") {
+		t.Errorf("missing 'cleared 7' in: %s", stdout)
+	}
+}
+
+func TestCountersClear_All_Zero_Singular(t *testing.T) {
+	fc := &fakeClient{
+		clearCountersFn: func(ctx context.Context) (int, error) { return 0, nil },
+	}
+	stdout, _, err := runCounters(t, fc, "clear")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(stdout, "cleared 0 cached counter entries") {
+		t.Errorf("missing zero-plural line in: %s", stdout)
+	}
+}
+
+func TestCountersClear_Single_Present(t *testing.T) {
+	got := ""
+	fc := &fakeClient{
+		clearCounterFn: func(ctx context.Context, id string) (bool, error) {
+			got = id
+			return true, nil
+		},
+	}
+	stdout, _, err := runCounters(t, fc, "clear", "--dpu=dpu-edge-01")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != "dpu-edge-01" {
+		t.Errorf("dpuID forwarded = %q, want dpu-edge-01", got)
+	}
+	if !strings.Contains(stdout, "cleared dpu-edge-01") {
+		t.Errorf("missing cleared line in: %s", stdout)
+	}
+}
+
+func TestCountersClear_Single_Absent(t *testing.T) {
+	fc := &fakeClient{
+		clearCounterFn: func(ctx context.Context, id string) (bool, error) { return false, nil },
+	}
+	stdout, _, err := runCounters(t, fc, "clear", "--dpu=ghost")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(stdout, "no cached entry") || !strings.Contains(stdout, "ghost") {
+		t.Errorf("missing already-clear line in: %s", stdout)
+	}
+}
+
+func TestCountersClear_Single_Error_PropagatesExit(t *testing.T) {
+	fc := &fakeClient{
+		clearCounterFn: func(ctx context.Context, id string) (bool, error) {
+			return false, errors.New("boom")
+		},
+	}
+	_, _, err := runCounters(t, fc, "clear", "--dpu=dpu-x")
+	if err == nil {
+		t.Errorf("expected error, got nil")
+	}
+}
+
+func TestCountersDetails_RequiresDpu(t *testing.T) {
+	fc := &fakeClient{}
+	_, _, err := runCounters(t, fc, "details")
+	if err == nil {
+		t.Errorf("expected error for missing --dpu, got nil")
+	}
+}
+
+func TestCountersDetails_PrintsHumanReadable(t *testing.T) {
+	fc := &fakeClient{
+		getCounterDetailsFn: func(ctx context.Context, id string) (*client.CounterDetails, error) {
+			return &client.CounterDetails{
+				DpuID:    "dpu-a",
+				UpdateAt: "2026-06-14T07:25:00Z",
+				Report:   &client.CounterReport{DpuId: "dpu-a", VxlanDecap: "100", VxlanEncap: "200", DropAclIn: "5", FlowTableSize: "7"},
+				PerEni: map[string]*client.CounterReport{
+					"eni-001": {VxlanDecap: "10"},
+					"eni-002": {VxlanDecap: "20"},
+				},
+				PerVnet: map[string]*client.CounterReport{
+					"vnet-prod": {VxlanDecap: "30"},
+				},
+			}, nil
+		},
+	}
+	stdout, _, err := runCounters(t, fc, "details", "--dpu=dpu-a")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	for _, want := range []string{"dpu-a", "2026-06-14T07:25:00Z", "Per-ENI", "eni-001", "eni-002", "Per-VNET", "vnet-prod", "Rollup", "100"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q in:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestCountersDetails_JSON(t *testing.T) {
+	fc := &fakeClient{
+		getCounterDetailsFn: func(ctx context.Context, id string) (*client.CounterDetails, error) {
+			return &client.CounterDetails{DpuID: "dpu-a", Report: &client.CounterReport{DpuId: "dpu-a", VxlanDecap: "42"}}, nil
+		},
+	}
+	stdout, _, err := runCounters(t, fc, "details", "--dpu=dpu-a", "--json")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	var parsed client.CounterDetails
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed); err != nil {
+		t.Fatalf("decode: %v / stdout=%s", err, stdout)
+	}
+	if parsed.DpuID != "dpu-a" {
+		t.Errorf("DpuID = %q", parsed.DpuID)
+	}
+}

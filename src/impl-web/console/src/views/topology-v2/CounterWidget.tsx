@@ -109,9 +109,20 @@ export function CounterWidget({ dpuId }: { dpuId: string }) {
 
   return (
     <div className="rounded-md bg-[color:var(--bg-primary)] border border-[color:var(--border-subtle)] p-3">
-      <h3 className="text-xs font-semibold text-[color:var(--text-primary)] mb-3 uppercase tracking-wide">
-        Counter Summary
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-[color:var(--text-primary)] uppercase tracking-wide">
+          Counter Summary
+        </h3>
+        <button
+          type="button"
+          onClick={() => useCountersStore.getState().clearDpu(dpuId)}
+          className="text-xs text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)] underline underline-offset-2"
+          title="Wipe the local sparkline history; the next inbound counter event re-bootstraps the widget. Does not touch dashd's cache."
+          data-testid="counter-widget-clear"
+        >
+          Clear
+        </button>
+      </div>
       <div className="grid grid-cols-2 gap-4">
         {counters.map((counter) => {
           const smoothed = smooth(counter.values, 5);

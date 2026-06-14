@@ -128,6 +128,19 @@ func (s *Store) Delete(dpuID string) bool {
 	return ok
 }
 
+// DeleteAll wipes every cached entry and returns the number removed.
+// Used by DELETE /v1/observability/counters. Subscribers are NOT
+// notified — the next poll round will refill entries for DPUs still
+// in inventory; subscribers will then receive ordinary KIND_REPORT
+// frames. Decommissioned DPUs simply stop generating events.
+func (s *Store) DeleteAll() int {
+	s.mu.Lock()
+	n := len(s.entries)
+	s.entries = make(map[string]*Entry)
+	s.mu.Unlock()
+	return n
+}
+
 // Subscribe registers ch to receive per-DPU change notifications. The
 // channel MUST be buffered (size 1 is enough — drop-on-slow); the
 // store never blocks on send. Returns an unsubscribe function.

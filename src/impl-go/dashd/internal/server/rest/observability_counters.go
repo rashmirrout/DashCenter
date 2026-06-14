@@ -39,6 +39,17 @@ import (
 type CounterReader interface {
 	ListReports() []DpuCounterEntry
 	GetReport(dpuID string) (*dashcenterv1.CounterReport, bool)
+	// GetDetails returns the full per-DPU entry including per-ENI and
+	// per-VNET sub-rollups. PE-3c add-on: exposes the data that
+	// /admin/counters has had since PE-3b under the public v1 API.
+	// Returns (nil, false) if dpuID is not cached.
+	GetDetails(dpuID string) (*DpuCounterDetails, bool)
+	// ClearAll wipes every cached entry and returns the number of
+	// entries removed. Used by DELETE /v1/observability/counters.
+	ClearAll() int
+	// Clear removes the cached entry for dpuID and returns true when
+	// an entry was present. Used by DELETE /v1/observability/counters/{dpu_id}.
+	Clear(dpuID string) bool
 }
 
 // DpuCounterEntry is the snapshot payload returned by
@@ -46,6 +57,19 @@ type CounterReader interface {
 type DpuCounterEntry struct {
 	DpuID  string
 	Report *dashcenterv1.CounterReport
+}
+
+// DpuCounterDetails is the per-DPU detailed view returned by
+// CounterReader.GetDetails. Mirrors counters.Entry but is local to
+// the rest package so the handler stays free of an /internal/counters
+// import (which would invert layering — the wiring adapter in main
+// owns the translation).
+type DpuCounterDetails struct {
+	DpuID    string
+	Report   *dashcenterv1.CounterReport
+	PerEni   map[string]*dashcenterv1.CounterReport
+	PerVnet  map[string]*dashcenterv1.CounterReport
+	UpdateAt time.Time
 }
 
 // requireCountersWired returns true and is safe to proceed; otherwise
@@ -244,4 +268,137 @@ func dpuFilterSet(ids []string) map[string]struct{} {
 		return nil
 	}
 	return out
+}
+
+// GET /v1/observability/counters/{dpu_id}/details — returns the per-
+// DPU rollup PLUS per-ENI and per-VNET sub-rollups. Public-API
+// exposure of the data that PE-3b's admin endpoint has carried since
+// landing; promoted under v1 here so SDKs and dashctl can rely on a
+// stable surface.
+//
+// 200 + JSON envelope:
+//
+//	{
+//	  "dpu_id": "dpu-1",
+//	  "update_at": "2026-06-14T07:25:00Z",
+//	  "report": {<CounterReport>},
+//	  "per_eni":  {"eni-001": <CounterReport>, ...},
+//	  "per_vnet": {"vnet-prod": <CounterReport>, ...}
+//	}
+//
+// 404 when dpu_id is unknown (never polled, or just cleared).
+// 503 when the counter pipeline is not wired.
+func (h *handler) getCounterDetails(w http.ResponseWriter, r *http.Request) {
+	if !h.requireCountersWired(w) {
+		return
+	}
+	id := r.PathValue("dpu_id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("dpu_id path segment required"))
+		return
+	}
+	det, ok := h.cntReader.GetDetails(id)
+	if !ok || det == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("no counter entry cached for dpu_id=%q", id))
+		return
+	}
+
+	marshal := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: false}
+	encodeMap := func(m map[string]*dashcenterv1.CounterReport) (map[string]json.RawMessage, error) {
+		if len(m) == 0 {
+			return nil, nil
+		}
+		out := make(map[string]json.RawMessage, len(m))
+		for k, v := range m {
+			if v == nil {
+				continue
+			}
+			js, err := marshal.Marshal(v)
+			if err != nil {
+				return nil, fmt.Errorf("encode %s: %w", k, err)
+			}
+			out[k] = js
+		}
+		return out, nil
+	}
+
+	envelope := map[string]any{"dpu_id": det.DpuID}
+	if !det.UpdateAt.IsZero() {
+		envelope["update_at"] = det.UpdateAt.UTC().Format(time.RFC3339Nano)
+	}
+	if det.Report != nil {
+		js, err := marshal.Marshal(det.Report)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		envelope["report"] = json.RawMessage(js)
+	}
+	if per, err := encodeMap(det.PerEni); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	} else if per != nil {
+		envelope["per_eni"] = per
+	}
+	if per, err := encodeMap(det.PerVnet); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	} else if per != nil {
+		envelope["per_vnet"] = per
+	}
+
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out)
+}
+
+// DELETE /v1/observability/counters — clears every cached entry.
+// Returns 200 + `{"cleared": <count>}`. The next successful poll
+// round (within poll_interval, default 5s) repopulates entries for
+// every DPU still in inventory; subscribers continue to receive
+// KIND_REPORT events for refilled DPUs without any explicit resync —
+// cleared-then-refilled is indistinguishable from a normal update on
+// the wire.
+//
+// Operators decommissioning DPUs should use the per-DPU variant
+// (DELETE /v1/observability/counters/{dpu_id}) which targets only
+// the entry being retired.
+func (h *handler) clearCountersAll(w http.ResponseWriter, r *http.Request) {
+	if !h.requireCountersWired(w) {
+		return
+	}
+	n := h.cntReader.ClearAll()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `{"cleared":%d}`, n)
+}
+
+// DELETE /v1/observability/counters/{dpu_id} — clears one entry.
+// Returns 200 + `{"cleared": true}` when an entry was present,
+// 404 + `{"cleared": false}` when the dpu_id is unknown. Idempotent
+// from the client's perspective (calling twice is safe; the second
+// call returns 404).
+func (h *handler) clearCounter(w http.ResponseWriter, r *http.Request) {
+	if !h.requireCountersWired(w) {
+		return
+	}
+	id := r.PathValue("dpu_id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("dpu_id path segment required"))
+		return
+	}
+	ok := h.cntReader.Clear(id)
+	w.Header().Set("Content-Type", "application/json")
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprintf(w, `{"cleared":false,"dpu_id":%q}`, id)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `{"cleared":true,"dpu_id":%q}`, id)
 }

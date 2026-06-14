@@ -220,3 +220,41 @@ describe('CounterWidget · component', () => {
     expect(screen.getByText('777')).toBeInTheDocument();
   });
 });
+
+describe('CounterWidget · Clear button', () => {
+  beforeEach(() => {
+    resetStore();
+  });
+
+  it('does NOT render the Clear button in the empty-state placeholder', () => {
+    render(<CounterWidget dpuId="empty" />);
+    expect(screen.queryByTestId('counter-widget-clear')).toBeNull();
+  });
+
+  it('renders the Clear button once a series exists', () => {
+    const s: CounterSample = { at: Date.now(), vxlan_decap: 1, vxlan_encap: 2, drop_acl_in: 0, flows_created_total: 0, flow_table_size: 5 };
+    setupSeries('dpu-clk', [s]);
+    render(<CounterWidget dpuId="dpu-clk" />);
+    expect(screen.getByTestId('counter-widget-clear')).toBeInTheDocument();
+  });
+
+  it('clicking Clear removes the local series for the named DPU', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    const s: CounterSample = { at: Date.now(), vxlan_decap: 1, vxlan_encap: 2, drop_acl_in: 0, flows_created_total: 0, flow_table_size: 5 };
+    setupSeries('dpu-clk', [s]);
+    setupSeries('dpu-other', [s]);
+
+    const { rerender } = render(<CounterWidget dpuId="dpu-clk" />);
+    expect(screen.getByTestId('counter-widget-clear')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('counter-widget-clear'));
+
+    // After clear: widget for dpu-clk should fall back to empty-state
+    rerender(<CounterWidget dpuId="dpu-clk" />);
+    expect(screen.queryByTestId('counter-widget-clear')).toBeNull();
+    expect(screen.getByText(/No counter data yet for dpu-clk/)).toBeInTheDocument();
+
+    // Other DPU untouched
+    expect(useCountersStore.getState().byDpu['dpu-other']).toBeDefined();
+  });
+});

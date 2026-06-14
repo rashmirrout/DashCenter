@@ -44,6 +44,28 @@ func (r *restCounterReader) GetReport(id string) (*dashcenterv1.CounterReport, b
 	return r.store.GetReport(id)
 }
 
+func (r *restCounterReader) GetDetails(id string) (*restserver.DpuCounterDetails, bool) {
+	e, ok := r.store.Get(id)
+	if !ok || e == nil {
+		return nil, false
+	}
+	return &restserver.DpuCounterDetails{
+		DpuID:    e.DpuID,
+		Report:   e.Report,
+		PerEni:   e.PerEni,
+		PerVnet:  e.PerVnet,
+		UpdateAt: e.UpdateAt,
+	}, true
+}
+
+func (r *restCounterReader) ClearAll() int {
+	return r.store.DeleteAll()
+}
+
+func (r *restCounterReader) Clear(id string) bool {
+	return r.store.Delete(id)
+}
+
 // grpcCounterReader implements grpcserver.CounterReader.
 type grpcCounterReader struct {
 	store *counters.Store

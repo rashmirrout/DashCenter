@@ -103,7 +103,163 @@ Examples:
 	c.Flags().BoolVar(&csvOut, "csv", false, "emit CSV (snapshot only)")
 	c.Flags().StringVar(&backend, "backend", "rest", "transport backend: rest (SSE, default) | grpc")
 	c.Flags().StringVar(&grpcEP, "grpc-endpoint", "", "host:port for --backend=grpc (default: REST endpoint host with port 9443)")
+
+	c.AddCommand(a.newCountersClearCmd())
+	c.AddCommand(a.newCountersDetailsCmd())
 	return c
+}
+
+// ── counters clear ──────────────────────────────────────────────────────
+
+func (a *Application) newCountersClearCmd() *cobra.Command {
+	var dpuID string
+	c := &cobra.Command{
+		Use:   "clear",
+		Short: "Clear cached counter entries on dashd (one DPU or all)",
+		Long: `Wipe cached CounterReport entries from dashd's in-memory store.
+
+Without --dpu, every cached entry is removed and the count is printed.
+With --dpu, only the named entry is removed.
+
+The next successful poll round (within poll_interval, default 5s)
+refills entries for DPUs still in inventory; subscribers continue to
+receive ordinary KIND_REPORT events for refilled DPUs. Decommissioned
+DPUs stay cleared.
+
+Examples:
+  dashctl counters clear                           # wipe all cached entries
+  dashctl counters clear --dpu=dpu-edge-01         # wipe one entry
+`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			cl, rc, err := a.dial(ctx)
+			if err != nil {
+				return err
+			}
+			defer cl.Close()
+			tctx, cancel := withTimeout(ctx, rc)
+			defer cancel()
+			if dpuID != "" {
+				ok, err := cl.ClearCounter(tctx, dpuID)
+				if err != nil {
+					return err
+				}
+				if ok {
+					fmt.Fprintf(os.Stdout, "cleared %s\n", dpuID)
+				} else {
+					fmt.Fprintf(os.Stdout, "no cached entry for %s (already clear)\n", dpuID)
+				}
+				return nil
+			}
+			n, err := cl.ClearCounters(tctx)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "cleared %d cached counter entr%s\n", n, plural(n, "y", "ies"))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&dpuID, "dpu", "", "clear one DPU id (default: clear all)")
+	return c
+}
+
+// ── counters details ────────────────────────────────────────────────────
+
+func (a *Application) newCountersDetailsCmd() *cobra.Command {
+	var dpuID string
+	var jsonOut bool
+	c := &cobra.Command{
+		Use:   "details",
+		Short: "Show per-DPU rollup + per-ENI / per-VNET sub-rollups for one DPU",
+		Long: `Fetch the full per-DPU counter entry, including per-ENI and per-VNET
+sub-rollups. The bare 'dashctl counters' snapshot/stream surfaces only
+the DPU-wide rollup; this subcommand surfaces the breakdown.
+
+Examples:
+  dashctl counters details --dpu=dpu-edge-01
+  dashctl counters details --dpu=dpu-edge-01 --json
+`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if dpuID == "" {
+				return fmt.Errorf("counters details: --dpu is required")
+			}
+			ctx := cmd.Context()
+			cl, rc, err := a.dial(ctx)
+			if err != nil {
+				return err
+			}
+			defer cl.Close()
+			tctx, cancel := withTimeout(ctx, rc)
+			defer cancel()
+			det, err := cl.GetCounterDetails(tctx, dpuID)
+			if err != nil {
+				return err
+			}
+			return renderCounterDetails(det, jsonOut)
+		},
+	}
+	c.Flags().StringVar(&dpuID, "dpu", "", "DPU id (required)")
+	c.Flags().BoolVar(&jsonOut, "json", false, "emit raw JSON")
+	return c
+}
+
+func plural(n int, singular, pluralForm string) string {
+	if n == 1 {
+		return singular
+	}
+	return pluralForm
+}
+
+// renderCounterDetails prints a human-readable summary or raw JSON.
+func renderCounterDetails(det *client.CounterDetails, jsonOut bool) error {
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(det)
+	}
+	fmt.Fprintf(os.Stdout, "DPU:       %s\n", det.DpuID)
+	if det.UpdateAt != "" {
+		fmt.Fprintf(os.Stdout, "Updated:   %s\n", det.UpdateAt)
+	}
+	if det.Report != nil {
+		fmt.Fprintln(os.Stdout, "Rollup:")
+		fmt.Fprintf(os.Stdout, "  vxlan_decap=%s vxlan_encap=%s drop_acl_in=%s flow_table_size=%s\n",
+			orDashStr(det.Report.VxlanDecap), orDashStr(det.Report.VxlanEncap),
+			orDashStr(det.Report.DropAclIn), orDashStr(det.Report.FlowTableSize))
+	}
+	if len(det.PerEni) > 0 {
+		fmt.Fprintln(os.Stdout, "Per-ENI:")
+		keys := sortedKeys(det.PerEni)
+		for _, k := range keys {
+			r := det.PerEni[k]
+			fmt.Fprintf(os.Stdout, "  %-32s vxlan_decap=%s vxlan_encap=%s drop_acl_in=%s\n",
+				k, orDashStr(r.VxlanDecap), orDashStr(r.VxlanEncap), orDashStr(r.DropAclIn))
+		}
+	}
+	if len(det.PerVnet) > 0 {
+		fmt.Fprintln(os.Stdout, "Per-VNET:")
+		keys := sortedKeys(det.PerVnet)
+		for _, k := range keys {
+			r := det.PerVnet[k]
+			fmt.Fprintf(os.Stdout, "  %-32s vxlan_decap=%s vxlan_encap=%s drop_acl_in=%s\n",
+				k, orDashStr(r.VxlanDecap), orDashStr(r.VxlanEncap), orDashStr(r.DropAclIn))
+		}
+	}
+	return nil
+}
+
+func sortedKeys(m map[string]*client.CounterReport) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func orDashStr(v string) string {
+	if v == "" {
+		return "-"
+	}
+	return v
 }
 
 // ── snapshot (REST) ─────────────────────────────────────────────────────

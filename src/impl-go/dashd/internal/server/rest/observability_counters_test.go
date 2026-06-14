@@ -26,14 +26,34 @@ import (
 type fakeCounterReader struct {
 	mu      sync.Mutex
 	reports map[string]*dashcenterv1.CounterReport
+	// PE-3c add-on test plumbing for GetDetails: optional per-DPU
+	// sub-rollups injected by setDetails().
+	perEni   map[string]map[string]*dashcenterv1.CounterReport
+	perVnet  map[string]map[string]*dashcenterv1.CounterReport
+	updateAt map[string]time.Time
 }
 
 func newFakeReader(reps ...*dashcenterv1.CounterReport) *fakeCounterReader {
-	r := &fakeCounterReader{reports: map[string]*dashcenterv1.CounterReport{}}
+	r := &fakeCounterReader{
+		reports:  map[string]*dashcenterv1.CounterReport{},
+		perEni:   map[string]map[string]*dashcenterv1.CounterReport{},
+		perVnet:  map[string]map[string]*dashcenterv1.CounterReport{},
+		updateAt: map[string]time.Time{},
+	}
 	for _, rep := range reps {
 		r.reports[rep.GetDpuId()] = rep
 	}
 	return r
+}
+
+// setDetails injects per-ENI / per-VNET sub-rollups for the named DPU.
+// Optional; tests that don't care about details don't have to call this.
+func (r *fakeCounterReader) setDetails(dpu string, perEni, perVnet map[string]*dashcenterv1.CounterReport, updateAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.perEni[dpu] = perEni
+	r.perVnet[dpu] = perVnet
+	r.updateAt[dpu] = updateAt
 }
 
 func (r *fakeCounterReader) ListReports() []DpuCounterEntry {
@@ -62,6 +82,44 @@ func (r *fakeCounterReader) GetReport(id string) (*dashcenterv1.CounterReport, b
 	rep, ok := r.reports[id]
 	r.mu.Unlock()
 	return rep, ok
+}
+
+func (r *fakeCounterReader) GetDetails(id string) (*DpuCounterDetails, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rep, ok := r.reports[id]
+	if !ok {
+		return nil, false
+	}
+	return &DpuCounterDetails{
+		DpuID:    id,
+		Report:   rep,
+		PerEni:   r.perEni[id],
+		PerVnet:  r.perVnet[id],
+		UpdateAt: r.updateAt[id],
+	}, true
+}
+
+func (r *fakeCounterReader) ClearAll() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := len(r.reports)
+	r.reports = map[string]*dashcenterv1.CounterReport{}
+	r.perEni = map[string]map[string]*dashcenterv1.CounterReport{}
+	r.perVnet = map[string]map[string]*dashcenterv1.CounterReport{}
+	r.updateAt = map[string]time.Time{}
+	return n
+}
+
+func (r *fakeCounterReader) Clear(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.reports[id]
+	delete(r.reports, id)
+	delete(r.perEni, id)
+	delete(r.perVnet, id)
+	delete(r.updateAt, id)
+	return ok
 }
 
 func newCounterTestServer(t *testing.T, withWiring bool, reps ...*dashcenterv1.CounterReport) (*httptest.Server, *broadcaster.Broadcaster, *fakeCounterReader) {
@@ -544,3 +602,198 @@ func TestWriteSSECounterFrame_NilNoop(t *testing.T) {
 }
 
 var _ = errors.Is // keep import used in case of further branches
+
+// ── PE-3c add-on: GET /details + DELETE all/single ──────────────────────
+
+func TestGetCounterDetails_NoWiring_503(t *testing.T) {
+t.Parallel()
+ts, _, _ := newCounterTestServer(t, false)
+resp, err := http.Get(ts.URL + "/v1/observability/counters/dpu-a/details")
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusServiceUnavailable {
+t.Errorf("status = %d, want 503", resp.StatusCode)
+}
+}
+
+func TestGetCounterDetails_NotFound_404(t *testing.T) {
+t.Parallel()
+ts, _, _ := newCounterTestServer(t, true)
+resp, err := http.Get(ts.URL + "/v1/observability/counters/missing/details")
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusNotFound {
+t.Errorf("status = %d, want 404", resp.StatusCode)
+}
+}
+
+func TestGetCounterDetails_OK_WithSubRollups(t *testing.T) {
+t.Parallel()
+ts, _, reader := newCounterTestServer(t, true, sampleRep("dpu-a", 100))
+reader.setDetails("dpu-a",
+map[string]*dashcenterv1.CounterReport{"eni-001": sampleRep("eni-001", 10), "eni-002": sampleRep("eni-002", 20)},
+map[string]*dashcenterv1.CounterReport{"vnet-prod": sampleRep("vnet-prod", 5)},
+time.Date(2026, 6, 14, 7, 25, 0, 0, time.UTC),
+)
+resp, err := http.Get(ts.URL + "/v1/observability/counters/dpu-a/details")
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusOK {
+body, _ := io.ReadAll(resp.Body)
+t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+}
+body, _ := io.ReadAll(resp.Body)
+var env struct {
+	DpuID    string                            `json:"dpu_id"`
+	UpdateAt string                            `json:"update_at"`
+	Report   map[string]any                    `json:"report"`
+	PerEni   map[string]map[string]any         `json:"per_eni"`
+	PerVnet  map[string]map[string]any         `json:"per_vnet"`
+}
+if err := json.Unmarshal(body, &env); err != nil {
+t.Fatalf("decode: %v / body=%s", err, body)
+}
+if env.DpuID != "dpu-a" {
+t.Errorf("dpu_id = %q, want dpu-a", env.DpuID)
+}
+if env.UpdateAt == "" {
+t.Errorf("update_at empty")
+}
+if len(env.PerEni) != 2 {
+t.Errorf("per_eni len = %d, want 2 (body=%s)", len(env.PerEni), body)
+}
+if len(env.PerVnet) != 1 {
+t.Errorf("per_vnet len = %d, want 1 (body=%s)", len(env.PerVnet), body)
+}
+if _, ok := env.PerEni["eni-001"]; !ok {
+t.Errorf("per_eni missing eni-001")
+}
+}
+
+func TestGetCounterDetails_OK_NoSubRollups(t *testing.T) {
+t.Parallel()
+ts, _, _ := newCounterTestServer(t, true, sampleRep("dpu-bare", 42))
+resp, err := http.Get(ts.URL + "/v1/observability/counters/dpu-bare/details")
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusOK {
+t.Fatalf("status = %d", resp.StatusCode)
+}
+body, _ := io.ReadAll(resp.Body)
+if strings.Contains(string(body), "per_eni") {
+t.Errorf("per_eni should be omitted when empty; body=%s", body)
+}
+if strings.Contains(string(body), "per_vnet") {
+t.Errorf("per_vnet should be omitted when empty; body=%s", body)
+}
+}
+
+func TestClearCountersAll_NoWiring_503(t *testing.T) {
+t.Parallel()
+ts, _, _ := newCounterTestServer(t, false)
+req, _ := http.NewRequest("DELETE", ts.URL+"/v1/observability/counters", nil)
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusServiceUnavailable {
+t.Errorf("status = %d, want 503", resp.StatusCode)
+}
+}
+
+func TestClearCountersAll_OK(t *testing.T) {
+t.Parallel()
+ts, _, reader := newCounterTestServer(t, true,
+sampleRep("dpu-a", 1), sampleRep("dpu-b", 2), sampleRep("dpu-c", 3))
+req, _ := http.NewRequest("DELETE", ts.URL+"/v1/observability/counters", nil)
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusOK {
+t.Fatalf("status = %d", resp.StatusCode)
+}
+body, _ := io.ReadAll(resp.Body)
+if string(body) != `{"cleared":3}` {
+t.Errorf("body = %s, want {\"cleared\":3}", body)
+}
+// Verify reader actually cleared.
+if got := len(reader.ListReports()); got != 0 {
+t.Errorf("ListReports len = %d, want 0", got)
+}
+// Idempotent: second call clears 0.
+req2, _ := http.NewRequest("DELETE", ts.URL+"/v1/observability/counters", nil)
+resp2, _ := http.DefaultClient.Do(req2)
+defer resp2.Body.Close()
+body2, _ := io.ReadAll(resp2.Body)
+if string(body2) != `{"cleared":0}` {
+t.Errorf("idempotent body = %s, want {\"cleared\":0}", body2)
+}
+}
+
+func TestClearCounter_Single_OK(t *testing.T) {
+t.Parallel()
+ts, _, reader := newCounterTestServer(t, true, sampleRep("dpu-a", 1), sampleRep("dpu-b", 2))
+req, _ := http.NewRequest("DELETE", ts.URL+"/v1/observability/counters/dpu-a", nil)
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusOK {
+t.Fatalf("status = %d", resp.StatusCode)
+}
+body, _ := io.ReadAll(resp.Body)
+if !strings.Contains(string(body), `"cleared":true`) {
+t.Errorf("body = %s, want cleared:true", body)
+}
+// dpu-a gone; dpu-b still present.
+if _, ok := reader.GetReport("dpu-a"); ok {
+t.Errorf("dpu-a still present after clear")
+}
+if _, ok := reader.GetReport("dpu-b"); !ok {
+t.Errorf("dpu-b unexpectedly removed")
+}
+}
+
+func TestClearCounter_Single_NotFound(t *testing.T) {
+t.Parallel()
+ts, _, _ := newCounterTestServer(t, true)
+req, _ := http.NewRequest("DELETE", ts.URL+"/v1/observability/counters/ghost", nil)
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusNotFound {
+t.Errorf("status = %d, want 404", resp.StatusCode)
+}
+body, _ := io.ReadAll(resp.Body)
+if !strings.Contains(string(body), `"cleared":false`) {
+t.Errorf("body = %s, want cleared:false", body)
+}
+}
+
+func TestClearCounter_NoWiring_503(t *testing.T) {
+t.Parallel()
+ts, _, _ := newCounterTestServer(t, false)
+req, _ := http.NewRequest("DELETE", ts.URL+"/v1/observability/counters/dpu-a", nil)
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+t.Fatal(err)
+}
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusServiceUnavailable {
+t.Errorf("status = %d, want 503", resp.StatusCode)
+}
+}

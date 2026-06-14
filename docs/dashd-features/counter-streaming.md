@@ -27,13 +27,14 @@
 1. [Problem statement](#1-problem-statement)
 2. [Goals & non-goals](#2-goals--non-goals)
 3. [Architecture](#3-architecture)
-4. [Wire contract](#4-wire-contract) — *TBD when Tier 1.3/1.4 lands*
-5. [Implementation](#5-implementation) — *TBD per-tier as each lands*
-6. [Configuration](#6-configuration) — *TBD when config block lands*
-7. [Operator UX](#7-operator-ux) — *TBD when SPA + dashctl land*
-8. [Test strategy](#8-test-strategy) — *TBD as tests accumulate*
-9. [Live e2e](#9-live-e2e) — *TBD at Tier 5*
-10. [Future Scopes](#10-future-scopes) — *seeded; ≥3 required at close*
+4. [Wire contract](#4-wire-contract)
+5. [Implementation](#5-implementation)
+6. [Configuration](#6-configuration)
+7. [Operator UX](#7-operator-ux)
+8. [Test strategy](#8-test-strategy)
+9. [Live e2e](#9-live-e2e)
+10. [Future Scopes](#10-future-scopes)
+11. [FAQ](#11-faq)
 
 ---
 
@@ -449,7 +450,47 @@ data: {"kind":"KIND_DROPPED","ts":"…","notice":{"dropped_count":"3"}}
 - Resume parity: both `Last-Event-ID: 42` HTTP header and `?last_event_id=42` query are honoured; if both present the header wins (matches PE-G7).
 - HTTP error responses: 429 + `Retry-After: 30` on per-IP cap; 503 on counters disabled.
 
-### 4.4 dashw browser surface
+### 4.4 REST per-DPU details — `GET /v1/observability/counters/{dpu_id}/details`
+
+Returns the per-DPU rollup **plus per-ENI and per-VNET sub-rollups**.
+PE-3a + PE-3b collected the sub-rollups but exposed them only via the
+admin endpoint (`/admin/counters`); this v1 endpoint promotes them to
+the public API so the SDK + dashctl + third-party tools can rely on a
+stable surface.
+
+Response envelope:
+
+```json
+{
+  "dpu_id": "dpu-edge-01",
+  "update_at": "2026-06-14T07:25:00.123Z",
+  "report":   { /* per-DPU CounterReport */ },
+  "per_eni":  { "eni-001": { /* CounterReport */ }, "eni-002": { /* … */ } },
+  "per_vnet": { "vnet-prod": { /* CounterReport */ } }
+}
+```
+
+- `update_at` is the wall-clock at which the entry was last `Put` into the dashd store (RFC3339Nano UTC).
+- `per_eni` / `per_vnet` keys are omitted entirely when empty (the entry was polled before any ENI/VNET landed on the DPU).
+- 404 when `dpu_id` is unknown (never polled, or just cleared).
+- 503 when the counter pipeline is not wired (config-disabled).
+
+### 4.5 REST clear — `DELETE /v1/observability/counters[/{dpu_id}]`
+
+| Variant | Effect | Response |
+|---|---|---|
+| `DELETE /v1/observability/counters` | Wipe every cached entry | 200 + `{"cleared": <int>}` |
+| `DELETE /v1/observability/counters/{dpu_id}` | Wipe one entry | 200 + `{"cleared":true,"dpu_id":"…"}` if present; 404 + `{"cleared":false,…}` if unknown |
+| Either, no counter wiring | 503 |
+
+Semantics:
+
+- **Idempotent**: a second bulk delete returns `{"cleared":0}`; a second single-DPU delete returns 404.
+- **No KIND_RESYNC fan-out**: subscribers are not explicitly notified. The next successful poll round (within `poll_interval`, default 5 s) repopulates entries for every DPU still in inventory; subscribers continue to receive ordinary `KIND_REPORT` events for refilled DPUs.
+- **Decommissioned DPUs stay cleared**: if a DPU has been removed from inventory, no further events arrive for it. This is the use case the per-DPU delete is for.
+- **Browser-side "Clear sparklines"** (the button on the `CounterWidget`) is **local-only** — it drops the 60-sample ring for one DPU from the SPA store. It does NOT call this endpoint. Server-side cache clear is an operator action via dashctl or curl.
+
+### 4.6 dashw browser surface
 
 - `GET /api/console/counters` → snapshot, same JSON shape as dashd, plus PE-G7.1 `source` + `via` keys on each report when proxied through the Hub cache.
 - `GET /api/console/counters/stream` → SSE, identical envelope; each frame's `data:` JSON gets `"source":"dashd-N:9443","via":"<dashw-instance-id>"` byte-spliced in.
@@ -470,7 +511,7 @@ data: {"kind":"KIND_DROPPED","ts":"…","notice":{"dropped_count":"3"}}
 | [src/impl-go/dashd/internal/observability/broadcaster/metrics.go](../../src/impl-go/dashd/internal/observability/broadcaster/metrics.go) | new | `dashd_observability_broadcaster_*` Prom namespace |
 | [src/impl-go/dashd/internal/counters/store.go](../../src/impl-go/dashd/internal/counters/store.go) | edit | Added `GetReport(dpuID)` accessor |
 | [src/impl-go/dashd/internal/server/grpc/observability_counters.go](../../src/impl-go/dashd/internal/server/grpc/observability_counters.go) | new | `GetCounters` handler: snapshot + follow + filter + `KIND_DROPPED` synth |
-| [src/impl-go/dashd/internal/server/rest/observability_counters.go](../../src/impl-go/dashd/internal/server/rest/observability_counters.go) | new | REST snapshot + SSE handlers |
+| [src/impl-go/dashd/internal/server/rest/observability_counters.go](../../src/impl-go/dashd/internal/server/rest/observability_counters.go) | new + edit | REST snapshot + SSE handlers + (PE-3c add-on) `GET …/{dpu_id}/details` + `DELETE …` + `DELETE …/{dpu_id}` |
 | [src/impl-go/dashd/cmd/dashd/counters_wiring.go](../../src/impl-go/dashd/cmd/dashd/counters_wiring.go) | new | `restCounterReader`, `grpcCounterReader`, `counterStoreAdapter`, `counterStreamConfigFrom` |
 | [src/impl-go/dashd/cmd/dashd/main.go](../../src/impl-go/dashd/cmd/dashd/main.go) | edit | Counters block moved before server construction; `Broadcaster.Run`/`Stop` lifecycle; Bridge goroutine |
 | [src/impl-go/dashd/internal/config/config.go](../../src/impl-go/dashd/internal/config/config.go) | edit | `CountersConfig.{PerDpuOverrides,Stream}`; cross-field validation |
@@ -481,9 +522,9 @@ data: {"kind":"KIND_DROPPED","ts":"…","notice":{"dropped_count":"3"}}
 | File | New / Edited | Role |
 |---|---|---|
 | [src/impl-go/dashctl/pkg/client/client.go](../../src/impl-go/dashctl/pkg/client/client.go) | edit | Types `CounterReport`, `CounterEvent`, `EventID`, `TopologyNotice` (reused); `Client` interface extended |
-| [src/impl-go/dashctl/pkg/client/rest/observability.go](../../src/impl-go/dashctl/pkg/client/rest/observability.go) | new | REST snapshot + SSE parsing (`Last-Event-ID` header + query) |
+| [src/impl-go/dashctl/pkg/client/rest/observability.go](../../src/impl-go/dashctl/pkg/client/rest/observability.go) | new + edit | REST snapshot + SSE parsing (`Last-Event-ID` header + query); **`GetCounterDetails`, `ClearCounters`, `ClearCounter` methods (PE-3c add-on)** |
 | [src/impl-go/dashctl/pkg/client/grpc/counters.go](../../src/impl-go/dashctl/pkg/client/grpc/counters.go) | new | `CountersClient`, `StreamCounters`, `GetCountersSnapshot` |
-| [src/impl-go/dashctl/internal/cmd/counters.go](../../src/impl-go/dashctl/internal/cmd/counters.go) | new | `counters` subcommand: `--follow`, `--dpu`, `--since-id`, `--json`, `--csv`, `--backend rest\|grpc`, `--grpc-endpoint` |
+| [src/impl-go/dashctl/internal/cmd/counters.go](../../src/impl-go/dashctl/internal/cmd/counters.go) | new + edit | `counters` subcommand: `--follow`, `--dpu`, `--since-id`, `--json`, `--csv`, `--backend rest\|grpc`, `--grpc-endpoint`; **plus `counters clear [--dpu]` and `counters details --dpu` subcommands (PE-3c add-on)** |
 
 ### 5.3 Tier 3 — dashw (9/9 packages green)
 
@@ -501,9 +542,9 @@ data: {"kind":"KIND_DROPPED","ts":"…","notice":{"dropped_count":"3"}}
 
 | File | New / Edited | Role |
 |---|---|---|
-| [src/impl-web/console/src/stores/counters-store.ts](../../src/impl-web/console/src/stores/counters-store.ts) | new | Zustand store; ring buffer (cap 120); 6-kind reducer; `selectSeries`, `selectSummary` |
+| [src/impl-web/console/src/stores/counters-store.ts](../../src/impl-web/console/src/stores/counters-store.ts) | new + edit | Zustand store; ring buffer (cap 120); 6-kind reducer; `selectSeries`, `selectSummary`; **`clearDpu(dpuId)` action (PE-3c add-on)** |
 | [src/impl-web/console/src/queries/useCounterStream.ts](../../src/impl-web/console/src/queries/useCounterStream.ts) | new | EventSource owner; 6 named listeners; tab-visibility pause; exp backoff (500ms→15s) |
-| [src/impl-web/console/src/views/topology-v2/CounterWidget.tsx](../../src/impl-web/console/src/views/topology-v2/CounterWidget.tsx) | new | 2×2 sparkline grid; pure helpers `smooth(window=5)` + `sparklinePath()` |
+| [src/impl-web/console/src/views/topology-v2/CounterWidget.tsx](../../src/impl-web/console/src/views/topology-v2/CounterWidget.tsx) | new + edit | 2×2 sparkline grid; pure helpers `smooth(window=5)` + `sparklinePath()`; **header `Clear` button wires to `clearDpu(dpuId)` (PE-3c add-on)** |
 | [src/impl-web/console/src/views/topology-v2/TopologyV2View.tsx](../../src/impl-web/console/src/views/topology-v2/TopologyV2View.tsx) | edit | `useCounterStream({enabled: streaming})`; widget slot in `InspectorDrawer` for `selectedKind === 'dpu'` |
 
 ---
@@ -604,6 +645,41 @@ Follow mode renders one event per line, prefixed with `[KIND_* id=N]`:
 [KIND_KEEPALIVE id=0]
 ```
 
+#### 7.1.1 `dashctl counters details` — per-ENI / per-VNET breakdown
+
+```
+$ dashctl counters details --dpu=dpu-edge-01
+DPU:       dpu-edge-01
+Updated:   2026-06-14T07:25:00.123Z
+Rollup:
+  vxlan_decap=51377 vxlan_encap=51626 drop_acl_in=415 flow_table_size=7
+Per-ENI:
+  eni-001                          vxlan_decap=10 vxlan_encap=11 drop_acl_in=0
+  eni-002                          vxlan_decap=20 vxlan_encap=21 drop_acl_in=0
+Per-VNET:
+  vnet-prod                        vxlan_decap=30 vxlan_encap=31 drop_acl_in=0
+```
+
+`--json` emits the raw `CounterDetails` envelope (same shape as `GET /v1/observability/counters/{dpu_id}/details`).
+
+#### 7.1.2 `dashctl counters clear` — wipe cached entries
+
+```
+# Wipe every cached entry on dashd (idempotent):
+$ dashctl counters clear
+cleared 10 cached counter entries
+
+# Wipe one entry (operator decommissioning a DPU):
+$ dashctl counters clear --dpu=dpu-edge-99
+cleared dpu-edge-99
+
+# Idempotent — second call is benign:
+$ dashctl counters clear --dpu=dpu-edge-99
+no cached entry for dpu-edge-99 (already clear)
+```
+
+Backed by `DELETE /v1/observability/counters[/{dpu_id}]` — see §4.5.
+
 ### 7.2 SPA — `/topology-v2` inspector drawer
 
 Navigate to **http://localhost:3000/topology-v2**, click **Start**, click a DPU node. The `InspectorDrawer` shows the existing identity / actions panels followed by a new **Counter Summary** card:
@@ -611,7 +687,9 @@ Navigate to **http://localhost:3000/topology-v2**, click **Start**, click a DPU 
 - 2×2 grid: VXLAN Decap, VXLAN Encap, Drop ACL In, Flow Table Size
 - Top-line: latest value formatted with thousands separators (`toLocaleString()`)
 - Sparkline: last 60 samples, 5-sample smoothing, auto-scaled per counter (no external chart lib)
+- **Clear** affordance in the card header: drops the local 60-sample ring for the selected DPU (`useCountersStore.clearDpu(dpuId)`); the widget re-bootstraps on the next inbound frame. **Local-only** — does NOT call the dashd DELETE endpoint. For server-side cache clear, use `dashctl counters clear`.
 - Empty state: "No counter data yet for <dpu-id> — waiting for first poll round."
+- **Streaming is gated by the same Start/Stop button as topology** (`useCounterStream({ enabled: streaming })`). When the user pauses the topology stream, the counter SSE connection also closes; the local sparkline buffer is retained for inspection until the user clicks Clear or refreshes.
 
 ---
 
@@ -797,6 +875,81 @@ docker start dc-console-sim-05
 - **Proposal**: move `Notice` to `types.proto`; both services import from there; delete the cross-package import. Pure refactor — wire bytes unchanged because `dashcenter.v1.Notice` is the same fully-qualified name regardless of source file.
 - **Open Qs**: any third-party consumers pinning to the file path (unlikely; protoc-gen-go emits by package not file).
 - **Backward-compat**: zero wire impact. Captured as T2 cleanup row T1.4 in [recommended-postGA-cleanup.md](../recommended-postGA-cleanup.md).
+
+### 10.7 Per-ENI / per-VNET streaming surface
+
+- **Trigger**: an operator wants the SPA / dashctl to show per-ENI sparklines, not just per-DPU.
+- **Proposal**: extend `CounterEvent.report` to carry an optional `scope` field (`{kind: ENI|VNET, key: "eni-001"}`); broadcaster gains a per-scope coalesce key; subscribers gain `CounterRequest.scope_filter` for "only ENI updates". Today the per-ENI/per-VNET data is reachable via `GET /v1/observability/counters/{dpu_id}/details` snapshot only.
+- **Open Qs**: cardinality (a single DPU can host hundreds of ENIs — fan-out cost); whether to ship per-scope sub-streams or interleaved one stream with scope filter.
+- **Backward-compat**: additive — `scope` defaults to DPU; existing subscribers ignore it.
+
+### 10.8 Server-pushed `KIND_RESYNC` on clear
+
+- **Trigger**: an operator runs `dashctl counters clear` while a live dashboard is up; the dashboard's last cached values linger until the next poll.
+- **Proposal**: the DELETE handler calls `Broadcaster.PublishSentinel(KIND_RESYNC)` (currently refused — sentinel is per-subscriber). Lift the restriction or add a `BroadcastResyncAll(reason)` method that enqueues the sentinel to every active subscriber.
+- **Open Qs**: should the resync be per-DPU on single-DPU clears, or always global? Per-DPU requires extending the per-subscriber resync enqueue with a DPU filter.
+- **Backward-compat**: additive — existing subscribers already handle KIND_RESYNC (they re-snapshot).
+
+---
+
+## 11. FAQ
+
+### 11.1 Are streamed counters DPU-scoped only, or also ENI-scoped?
+
+**The streaming surface (gRPC `GetCounters`, REST `/v1/observability/counters[/stream]`, dashw `/api/console/counters[/stream]`) is per-DPU only.**
+
+Per-ENI and per-VNET sub-rollups ARE captured (PE-3a sim emission → PE-3b mapper populates `Entry.PerEni` / `Entry.PerVnet`), and you can fetch them via:
+
+- `GET /v1/observability/counters/{dpu_id}/details` — public v1 REST (see §4.4)
+- `dashctl counters details --dpu=<id>` — operator CLI (see §7.1.1)
+- `GET /admin/counters[?dpu=<id>]` — PE-3b admin endpoint (internal port; kept for back-compat)
+
+Live streaming of per-ENI / per-VNET deltas is filed as Future Scope 10.7 — it raises real cardinality and fan-out questions (a single DPU can host hundreds of ENIs) that we explicitly deferred from this slice.
+
+### 11.2 Does the SPA counter stream follow the topology Start/Stop button?
+
+**Yes.** [`TopologyV2View.tsx`](../../src/impl-web/console/src/views/topology-v2/TopologyV2View.tsx) wires both streams to the same gate:
+
+```tsx
+useTopologyStream({ includeEnis, enabled: streaming });
+useCounterStream({ enabled: streaming });
+```
+
+When the user clicks Stop, both `EventSource` connections close. When the user clicks Start, both re-open with their respective `Last-Event-ID` cursors (so no event-id gaps are introduced). The local sparkline ring (`useCountersStore.byDpu`) is retained across Stop/Start so the operator can pause + inspect a historical window without losing data; click **Clear** on the widget to wipe it.
+
+### 11.3 How do I clear counters?
+
+Three independent layers, three different operations:
+
+| Layer | What it clears | How |
+|---|---|---|
+| **SPA local ring** (60 samples/DPU) | The sparklines you're looking at | Click **Clear** in the `CounterWidget` header. Calls `useCountersStore.clearDpu(dpuId)`. Local-only; no network. |
+| **dashd cache** (in-memory snapshot per DPU) | The reports served by `GET /v1/observability/counters` and the cold-start snapshots of new SSE/gRPC subscribers | `dashctl counters clear [--dpu=<id>]` **or** `curl -X DELETE http://dashd:8443/v1/observability/counters[/<dpu_id>]`. See §4.5 + §7.1.2. The next successful poll round (≤ `poll_interval`, default 5 s) refills entries for DPUs still in inventory; decommissioned DPUs stay cleared. |
+| **Sim-side counter accumulators** (monotonic in dispatch.Manager) | The actual values dash-sim returns from `GetDpuCounters` | Not exposed today; restart the sim container (`docker restart dc-console-sim-NN`). A sim-side reset RPC is a Future Scope candidate. |
+
+Common operator playbook:
+
+```powershell
+# "My dashboard is showing stale spikes — let me get a fresh window."
+# → Click Clear on the widget (local-only; no server impact).
+
+# "I just retired dpu-edge-99 from inventory; stop showing its row."
+dashctl counters clear --dpu=dpu-edge-99
+
+# "I want to see what dashd's poller looks like on a fully cold cache."
+dashctl counters clear
+# then watch for ~5s while the poller refills.
+
+# "I want dash-sim itself back to zero" (load test reset, etc.):
+docker restart dc-console-sim-01
+```
+
+Why the DELETE endpoint does NOT auto-emit a `KIND_RESYNC` sentinel:
+clearing the dashd cache is almost always followed by a normal poll
+round that emits ordinary `KIND_REPORT` events; subscribers see their
+sparklines tick forward without needing to re-bootstrap. Adding a
+forced global resync is filed as Future Scope 10.8 if real
+operational signal demands it.
 
 ---
 

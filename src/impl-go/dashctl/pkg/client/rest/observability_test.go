@@ -242,3 +242,125 @@ func TestStreamCounters_CtxCancel(t *testing.T) {
 type errStopSentinel struct{}
 
 func (errStopSentinel) Error() string { return "stop" }
+
+// ── PE-3c add-on: details + clear REST methods ──────────────────────────
+
+func TestGetCounterDetails_DecodesEnvelope(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Path != "/v1/observability/counters/dpu-a/details" {
+			http.Error(w, "bad path", 400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"dpu_id":"dpu-a",
+			"update_at":"2026-06-14T07:25:00Z",
+			"report":{"dpu_id":"dpu-a","vxlan_decap":"100"},
+			"per_eni":{"eni-001":{"vxlan_decap":"10"},"eni-002":{"vxlan_decap":"20"}},
+			"per_vnet":{"vnet-prod":{"vxlan_decap":"30"}}
+		}`))
+	}))
+	defer ts.Close()
+	c := newRESTClientFor(t, ts)
+	det, err := c.GetCounterDetails(context.Background(), "dpu-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if det.DpuID != "dpu-a" {
+		t.Errorf("DpuID = %q", det.DpuID)
+	}
+	if det.UpdateAt == "" {
+		t.Errorf("UpdateAt empty")
+	}
+	if len(det.PerEni) != 2 {
+		t.Errorf("PerEni len = %d", len(det.PerEni))
+	}
+	if det.PerEni["eni-001"].VxlanDecap != "10" {
+		t.Errorf("eni-001 vxlan_decap = %q", det.PerEni["eni-001"].VxlanDecap)
+	}
+	if len(det.PerVnet) != 1 {
+		t.Errorf("PerVnet len = %d", len(det.PerVnet))
+	}
+}
+
+func TestGetCounterDetails_EmptyDpuID(t *testing.T) {
+	t.Parallel()
+	c := &Client{baseURL: "http://x"}
+	if _, err := c.GetCounterDetails(context.Background(), ""); err == nil {
+		t.Errorf("expected error for empty dpuID")
+	}
+}
+
+func TestClearCounters_All(t *testing.T) {
+	t.Parallel()
+	hits := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" || r.URL.Path != "/v1/observability/counters" {
+			http.Error(w, "bad path", 400)
+			return
+		}
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cleared":5}`))
+	}))
+	defer ts.Close()
+	c := newRESTClientFor(t, ts)
+	n, err := c.ClearCounters(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("cleared = %d, want 5", n)
+	}
+	if hits != 1 {
+		t.Errorf("server hit %d times, want 1", hits)
+	}
+}
+
+func TestClearCounter_Single_Present(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" || r.URL.Path != "/v1/observability/counters/dpu-a" {
+			http.Error(w, "bad path", 400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cleared":true,"dpu_id":"dpu-a"}`))
+	}))
+	defer ts.Close()
+	c := newRESTClientFor(t, ts)
+	ok, err := c.ClearCounter(context.Background(), "dpu-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Errorf("Cleared = false, want true")
+	}
+}
+
+func TestClearCounter_Single_NotFound_NoError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"no counter entry cached for dpu_id=\"ghost\"","cleared":false}`))
+	}))
+	defer ts.Close()
+	c := newRESTClientFor(t, ts)
+	ok, err := c.ClearCounter(context.Background(), "ghost")
+	if err != nil {
+		t.Errorf("want nil err on 404 (graceful), got: %v", err)
+	}
+	if ok {
+		t.Errorf("ok = true, want false (not found)")
+	}
+}
+
+func TestClearCounter_Single_EmptyDpuID(t *testing.T) {
+	t.Parallel()
+	c := &Client{baseURL: "http://x"}
+	if _, err := c.ClearCounter(context.Background(), ""); err == nil {
+		t.Errorf("expected error for empty dpuID")
+	}
+}

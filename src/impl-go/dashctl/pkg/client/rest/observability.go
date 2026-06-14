@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -146,4 +147,54 @@ func (c *Client) StreamCounters(ctx context.Context, opts client.CountersWatchOp
 		// id:, event:, retry: are SSE metadata; the JSON body carries
 		// equivalents in the wrapper envelope, so we drop them.
 	}
+}
+
+// GetCounterDetails fetches per-DPU rollup plus per-ENI / per-VNET
+// sub-rollups for dpuID. Returns ErrNotFound when the dpu_id is not
+// in the cache (never polled, or just cleared).
+func (c *Client) GetCounterDetails(ctx context.Context, dpuID string) (*client.CounterDetails, error) {
+	if dpuID == "" {
+		return nil, pkgerrors.New(pkgerrors.CodeInvalidArgument, "rest: GetCounterDetails requires dpuID")
+	}
+	out := &client.CounterDetails{}
+	path := fmt.Sprintf("/v1/observability/counters/%s/details", url.PathEscape(dpuID))
+	if err := c.do(ctx, http.MethodGet, c.api(path), nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ClearCounters wipes every cached entry on dashd. Returns the count
+// of entries removed. Idempotent: a second call returns 0.
+func (c *Client) ClearCounters(ctx context.Context) (int, error) {
+	var reply struct {
+		Cleared int `json:"cleared"`
+	}
+	if err := c.do(ctx, http.MethodDelete, c.api("/v1/observability/counters"), nil, &reply); err != nil {
+		return 0, err
+	}
+	return reply.Cleared, nil
+}
+
+// ClearCounter wipes the cached entry for dpuID. Returns true when an
+// entry was present (200), false on 404 — the latter is returned
+// without a wrapped error so callers can render "nothing to clear"
+// cleanly without losing exit-code distinctions on real failures.
+func (c *Client) ClearCounter(ctx context.Context, dpuID string) (bool, error) {
+	if dpuID == "" {
+		return false, pkgerrors.New(pkgerrors.CodeInvalidArgument, "rest: ClearCounter requires dpuID")
+	}
+	path := fmt.Sprintf("/v1/observability/counters/%s", url.PathEscape(dpuID))
+	var reply struct {
+		Cleared bool `json:"cleared"`
+	}
+	err := c.do(ctx, http.MethodDelete, c.api(path), nil, &reply)
+	if err != nil {
+		var ce *pkgerrors.Error
+		if errors.As(err, &ce) && ce.Code == pkgerrors.CodeNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return reply.Cleared, nil
 }
