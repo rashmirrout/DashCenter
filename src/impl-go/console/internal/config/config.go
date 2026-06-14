@@ -84,7 +84,14 @@ type Config struct {
 	// hub's single gRPC stream to dashd.
 	TopoUpstreamReconnectMin time.Duration
 	TopoUpstreamReconnectMax time.Duration
-
+	// ── Counter streaming hub (PE-3c) ─────────────────────────
+	CounterMaxWatchers          int
+	CounterMaxWatchersPerIP     int
+	CounterWatcherBufferSize    int
+	CounterRingSize             int
+	CounterUpstreamReconnectMin time.Duration
+	CounterUpstreamReconnectMax time.Duration
+	CounterUpstreamIdleGC       time.Duration
 	// ── Auth (env-only, not flags) ──────────────────────────────
 	DashdAuthToken string
 	DashdTLSCert   string
@@ -133,6 +140,14 @@ func DefaultConfig() *Config {
 		TopoIdleTimeout:          5 * time.Minute,
 		TopoUpstreamReconnectMin: 500 * time.Millisecond,
 		TopoUpstreamReconnectMax: 15 * time.Second,
+
+		CounterMaxWatchers:          512,
+		CounterMaxWatchersPerIP:     8,
+		CounterWatcherBufferSize:    128,
+		CounterRingSize:             1024,
+		CounterUpstreamReconnectMin: 500 * time.Millisecond,
+		CounterUpstreamReconnectMax: 15 * time.Second,
+		CounterUpstreamIdleGC:       30 * time.Second,
 	}
 }
 
@@ -192,6 +207,15 @@ func Parse(args []string) *Config {
 	fs.DurationVar(&cfg.TopoSnapshotCacheTTL, "topo-snapshot-ttl", cfg.TopoSnapshotCacheTTL, "snapshot dedup cache TTL")
 	fs.IntVar(&cfg.TopoRingSize, "topo-ring-size", cfg.TopoRingSize, "hub ring buffer event count")
 	fs.DurationVar(&cfg.TopoIdleTimeout, "topo-idle-timeout", cfg.TopoIdleTimeout, "idle-stream close timeout")
+
+	// Counter streaming hub (PE-3c / PD-G5)
+	fs.IntVar(&cfg.CounterMaxWatchers, "counter-max-watchers", cfg.CounterMaxWatchers, "max concurrent counter stream watchers (per replica)")
+	fs.IntVar(&cfg.CounterMaxWatchersPerIP, "counter-max-watchers-per-ip", cfg.CounterMaxWatchersPerIP, "max concurrent counter stream watchers per source IP")
+	fs.IntVar(&cfg.CounterWatcherBufferSize, "counter-watcher-buf", cfg.CounterWatcherBufferSize, "per-watcher channel depth")
+	fs.IntVar(&cfg.CounterRingSize, "counter-ring-size", cfg.CounterRingSize, "counter hub ring buffer event count")
+	fs.DurationVar(&cfg.CounterUpstreamReconnectMin, "counter-reconnect-min", cfg.CounterUpstreamReconnectMin, "counter upstream reconnect floor")
+	fs.DurationVar(&cfg.CounterUpstreamReconnectMax, "counter-reconnect-max", cfg.CounterUpstreamReconnectMax, "counter upstream reconnect ceiling")
+	fs.DurationVar(&cfg.CounterUpstreamIdleGC, "counter-upstream-idle-gc", cfg.CounterUpstreamIdleGC, "close upstream after last watcher leaves + this idle window")
 
 	// Identity (stamped on every SSE frame as `via`)
 	fs.StringVar(&cfg.NodeID, "node-id", env("DASHW_NODE_ID", cfg.NodeID), "this dashw replica's identifier (also used in SSE `via` annotation)")

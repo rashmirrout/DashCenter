@@ -20,6 +20,7 @@ import (
 "time"
 
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/observability/broadcaster"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "google.golang.org/grpc"
 "google.golang.org/protobuf/types/known/timestamppb"
@@ -31,13 +32,23 @@ dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1
 type observabilityHandler struct {
 dashcenterv1.UnimplementedObservabilityServiceServer
 obs service.ObservabilityService
+
+// PE-3c / PD-G5 counter streaming. Late-injected via SetCounterWiring
+// (see observability_counters.go). nil values cause GetCounters to
+// return codes.FailedPrecondition.
+cntBcast  *broadcaster.Broadcaster
+cntReader CounterReader
 }
 
 // registerObservability wires the handler into the gRPC server using the
 // generated RegisterObservabilityServiceServer — this gives us the correct
-// proto-v2 codec and the validated ObservabilityService_ServiceDesc.
-func registerObservability(gs *grpc.Server, obs service.ObservabilityService) {
-dashcenterv1.RegisterObservabilityServiceServer(gs, &observabilityHandler{obs: obs})
+// proto-v2 codec and the validated ObservabilityService_ServiceDesc. Returns
+// the handler pointer so the parent Server can late-inject PE-3c counter
+// wiring (SetCounterWiring) after registration.
+func registerObservability(gs *grpc.Server, obs service.ObservabilityService) *observabilityHandler {
+h := &observabilityHandler{obs: obs}
+dashcenterv1.RegisterObservabilityServiceServer(gs, h)
+return h
 }
 
 // GetDpuStatus is a server-streaming RPC. Per the proto, it emits one

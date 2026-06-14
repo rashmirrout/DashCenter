@@ -172,6 +172,7 @@ func (a *Application) newRootCmd() *cobra.Command {
 		a.newConfigCmd(),
 		a.newCompletionCmd(),
 		a.newTopologyCmd(),
+		a.newCountersCmd(),
 	)
 	c.AddCommand(a.newTypedKindGroups()...)
 	c.AddCommand(a.newPhase2Stubs()...)

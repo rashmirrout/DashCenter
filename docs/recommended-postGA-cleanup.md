@@ -68,18 +68,34 @@ config flag names — all stable. Internal-only changes welcome.
 | **Effort** | ~1 day (audit + scope adjustment) + however much residual work remains. |
 | **Cross-links** | [next-actions.md row #5](next-actions.md). |
 
+### T1.3 — Extract shared `broadcaster` package (PROMOTED from T2.1)
+
+| Field | Detail |
+|---|---|
+| **What** | Two near-identical broadcaster implementations now ship: `dashd/internal/cluster/broadcaster.go` (~620 LOC, PE-G7) and `dashd/internal/observability/broadcaster/broadcaster.go` (~800 LOC, PE-3c / PD-G5). Both: marshal-once Frame, ring buffer + `ResumeAfterEventID`, drop-on-slow + sentinel synth, leaky-bucket rate limit, per-subject + global caps, single global keepalive. Differences: payload type (`TopologyEvent` vs. `CounterEvent`), per-dpu coalesce key (counters only), sentinel constructors. Extract a generic `internal/broadcaster/Broadcaster[T proto.Message]` (Go 1.22 generics) with hooks for `coalesceKey(T)`, `newKeepalive()`, etc. |
+| **Why now** | PROMOTED to T1 because the second instance shipped in PD-G5 (2026-06-14) — the abstraction is now justified by lived experience, not speculation. Future streaming endpoints (e.g., the alerter from Future Scope 10.3) would be a third copy. |
+| **Effort** | ~2 days + a UT migration. Existing 60+14 = 74 tests must keep passing. |
+| **Risk** | Refactoring well-tested production code. Mitigation: extract gradually, keep both surfaces' existing tests pointing at the same surface via type-parameter shim. |
+| **Order** | Do this BEFORE the next streaming endpoint (Future Scopes 10.1 / 10.3 / 10.4). |
+| **Cross-links** | [counter-streaming.md §3.2](dashd-features/counter-streaming.md#32-why-a-separate-broadcaster-not-just-storesubscribe), [topology-streaming-design.md](dashd-features/topology-streaming-design.md). |
+
+### T1.4 — Consolidate `Notice` into `dashcenter.v1.types.proto`
+
+| Field | Detail |
+|---|---|
+| **What** | `Notice` (sentinel-body message with `dropped_count`, `suppressed_count`, `current_event_id`, etc.) lives in `cluster.proto` and is cross-package-imported by `observability.proto` (PE-3c). Move to `proto/dashcenter/v1/types.proto`; both services import from there; delete the cross-package import. |
+| **Wire impact** | **Zero.** `dashcenter.v1.Notice` is the same fully-qualified protobuf name regardless of which `.proto` file declares it; protoc-gen-go emits by package, not by file. Existing Go imports update to the new file; no client-side regen required for downstream consumers pinning to the package alias. |
+| **Effort** | ~30 min: move the `message Notice {...}` block, fix one import line in each `.proto`, regen. |
+| **Order** | Any time post-GA. Trivially low-risk — do alongside T1.3 if convenient. |
+| **Cross-links** | [counter-streaming.md Future Scope 10.6](dashd-features/counter-streaming.md#106-consolidate-notice-into-dashcenterv1typesproto), [proto/dashcenter/v1/cluster.proto](../proto/dashcenter/v1/cluster.proto), [proto/dashcenter/v1/observability.proto](../proto/dashcenter/v1/observability.proto). |
+
 ---
 
 ## T2 — Medium value
 
-### T2.1 — Extract shared `broadcaster` package
+### T2.1 — ~~Extract shared `broadcaster` package~~ (PROMOTED to T1.3)
 
-| Field | Detail |
-|---|---|
-| **What** | Today `dashd/internal/cluster/broadcaster.go` (~620 LOC, PE-G7) implements ring buffer + coalesce + rate limit + per-subject cap + keepalive ticker for topology events. PD-G5 (planned) will need an *identical* pattern for the per-ENI counter stream. Extract the shared bits into `dashd/internal/observability/broadcaster/` BEFORE PD-G5 lands, so it doesn't ship as a second copy. |
-| **Effort** | ~1 day + a UT migration. |
-| **Risk** | Refactoring well-tested PE-G7 code. Mitigation: extract gradually, keep PE-G7's existing 14 tests pointing at the same surface. |
-| **Order** | Do this BEFORE PD-G5 starts (tracker #8), so the new feature lands on the shared package directly. |
+Moved to **T1.3** above on 2026-06-14 after PD-G5 shipped the second instance and justified the abstraction by lived experience. See T1.3 for current status.
 
 ### T2.2 — Hand-rolled wire types vs. proto codegen
 

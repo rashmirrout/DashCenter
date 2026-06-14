@@ -33,6 +33,7 @@ import (
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/migration"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/observability/broadcaster"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/schema"
@@ -285,12 +286,36 @@ authz, auditWriter, grpcCreds, restListener := buildPDWiring(cfg)
 if auditWriter != nil {
 	defer auditWriter.Close()
 }
+
+// 9d. Counters pipeline (PE-3b / PE-G9). Store caches the most-recent
+// CounterReport per DPU; Poller pulls every cfg.Observability.Counters.PollInterval.
+// Both are always-on subsystems (counter visibility is wanted on leader
+// AND follower).
+// MUST be constructed BEFORE the REST/gRPC servers since their Options
+// take the broadcaster + reader.
+cntStore := counters.NewStore()
+var cntPoller *counters.Poller
+if cfg.Observability.Counters.Enabled {
+	cntPoller = counters.NewPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
+} else {
+	cntPoller = counters.NewDisabledPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
+}
+
+// 9e. PE-3c / PD-G5 counter streaming: Broadcaster + Bridge over the
+// counters.Store change channel. Every knob driven from
+// cfg.Observability.Counters.Stream (defaults already applied).
+cntBcastCfg := counterStreamConfigFrom(cfg.Observability.Counters.Stream)
+cntBcast := broadcaster.NewBroadcaster(cntBcastCfg, slog.Default())
+cntBridge := broadcaster.NewBridge(&counterStoreAdapter{store: cntStore}, cntBcast, slog.Default())
+
 restSrv := restserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, restserver.Options{
-	Listener:    restListener,
-	Authorizer:  authz,
-	AuditWriter: auditWriter,
-	Diagnostics: diagService,
-	Cluster:     clusterService,
+	Listener:      restListener,
+	Authorizer:    authz,
+	AuditWriter:   auditWriter,
+	Diagnostics:   diagService,
+	Cluster:       clusterService,
+	CounterBcast:  cntBcast,
+	CounterReader: &restCounterReader{store: cntStore},
 })
 grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, grpcserver.Options{
 	TLSConfig:   grpcCreds,
@@ -299,6 +324,7 @@ grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch
 	Diagnostics: diagService,
 	Cluster:     clusterService,
 })
+grpcSrv.SetCounterWiring(cntBcast, &grpcCounterReader{store: cntStore})
 
 // 9b. (rootCtx + elector already built above for cluster wiring.)
 
@@ -310,18 +336,6 @@ grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch
 
 adminSrv := adminserver.NewWithElector(inv, st, obs, rec, elector)
 adminSrv.SetClusterService(clusterService)
-
-// 9d. Counters pipeline (PE-3b / PE-G9). Store caches the most-recent
-// CounterReport per DPU; Poller pulls every cfg.Observability.Counters.PollInterval.
-// Both are always-on subsystems (counter visibility is wanted on leader
-// AND follower; PD-G5 will stream the store events to operators).
-cntStore := counters.NewStore()
-var cntPoller *counters.Poller
-if cfg.Observability.Counters.Enabled {
-	cntPoller = counters.NewPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
-} else {
-	cntPoller = counters.NewDisabledPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
-}
 adminSrv.SetCountersWiring(cntStore, cntPoller)
 
 // 10. Create subscribe PumpSet — wired with the production DpuClient
@@ -381,6 +395,18 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 	// pollers no-op until /admin/counters/enable flips them on.
 	cntPoller.Start(rootCtx)
 
+	// Counter broadcaster keepalive + bridge goroutine. Both are
+	// always-on; the bridge translates store change notifications into
+	// Broadcaster.Publish calls so SSE / gRPC subscribers see live
+	// updates. Bridge exits on ctx cancel; broadcaster.Stop is in
+	// the shutdown block.
+	cntBcast.Run(rootCtx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cntBridge.Run(rootCtx)
+	}()
+
 	// 13. Leader-only subsystems — reconciler + per-DPU dispatch workers +
 	// per-DPU subscribe pumps. Backend is selected by
 	// cfg.HA.Controller.Elector.Backend ("none" for single-node dev /
@@ -408,6 +434,7 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 	grpcSrv.Stop()
 	adminSrv.Stop()
 	cntPoller.Stop()
+	cntBcast.Stop()
 	pumpSet.StopAll()
 	mgr.Stop()
 	_ = elector.Close()

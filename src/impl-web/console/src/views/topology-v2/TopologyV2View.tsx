@@ -31,6 +31,8 @@ import {
 import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Drawer } from '@/components/feedback/Drawer';
+import { CounterWidget } from './CounterWidget';
+import { useCounterStream } from '@/queries/useCounterStream';
 import { useTopologyStream } from '@/queries/useTopologyStream';
 import {
   useTopologyV2Store, selectCluster, selectAppliances, selectSummary,
@@ -355,6 +357,9 @@ function InspectorDrawer() {
           {selectedKind === 'dpu' && selectedId && (
             <DpuActions dpuId={selectedId} cordoned={!!(entity as { cordoned?: boolean }).cordoned} />
           )}
+          {selectedKind === 'dpu' && selectedId && (
+            <CounterWidget dpuId={selectedId} />
+          )}
           <pre className="text-xs font-mono overflow-auto text-[color:var(--text-primary)] p-3 rounded-md bg-[color:var(--bg-primary)] border border-[color:var(--border-subtle)]">
 {JSON.stringify(entity, null, 2)}
           </pre>
@@ -526,6 +531,12 @@ export default function TopologyV2View() {
   // false the hook closes its EventSource; the cached snapshot stays
   // in the store for inspection (see useTopologyStream cleanup note).
   useTopologyStream({ includeEnis, enabled: streaming });
+
+  // PE-3c: subscribe to the counter SSE stream alongside the topology
+  // stream. The widget under InspectorDrawer reads from this same
+  // store. Gated on `streaming` so the user's Start/Stop button
+  // controls both streams together.
+  useCounterStream({ enabled: streaming });
 
   const hasData = !!useTopologyV2Store((s) => s.topology);
 

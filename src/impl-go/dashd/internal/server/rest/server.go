@@ -16,6 +16,7 @@ import (
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/observability/broadcaster"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
@@ -58,11 +59,17 @@ type Options struct {
 	// Cluster enables the PE-G2 /v1/cluster/* endpoints when non-nil.
 	// nil leaves them unregistered (404).
 	Cluster service.ClusterService
+
+	// CounterBcast enables the PE-3c /v1/observability/counters[/stream]
+	// endpoints when non-nil (paired with CounterReader). nil leaves
+	// the endpoints returning 503 "counter pipeline not wired".
+	CounterBcast *broadcaster.Broadcaster
+	CounterReader CounterReader
 }
 
 // NewWithOptions is the production constructor.
 func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService, opts Options) *Server {
-h := &handler{cp: cp, obs: obs, ha: ha, mig: mig, diag: opts.Diagnostics, cluster: opts.Cluster}
+h := &handler{cp: cp, obs: obs, ha: ha, mig: mig, diag: opts.Diagnostics, cluster: opts.Cluster, cntBcast: opts.CounterBcast, cntReader: opts.CounterReader}
 var handlerChain http.Handler = h.router()
 // Compose OUTSIDE -> IN so auth runs first and audit reads Subject
 // from ctx.
@@ -128,6 +135,12 @@ ha   service.HaService // may be nil; /v1/ha/* returns 503 when so
 mig  service.MigrationService // may be nil; /v1/migrations/* returns 503 when so
 diag service.DiagnosticsService // may be nil; /v1/diagnostics/* returns 503 when so
 cluster service.ClusterService // may be nil; /v1/cluster/* returns 503 when so
+
+// PE-3c counter streaming. Both nil => /v1/observability/counters
+// endpoints return 503 ("counter pipeline not wired"). Late-injected
+// from the parent Options in NewWithOptions.
+cntBcast  *broadcaster.Broadcaster
+cntReader CounterReader
 }
 
 // urlKindToStoreKind maps plural URL path segments to singular store kind names.
@@ -238,6 +251,10 @@ mux.HandleFunc("POST /v1/diagnostics/trigger-resimulation", h.diagTriggerResim)
 // Cluster (PE-G2). Read-only fleet topology.
 mux.HandleFunc("GET /v1/cluster/topology", h.getClusterTopology)
 mux.HandleFunc("GET /v1/cluster/topology/watch", h.watchClusterTopology)
+
+// Observability — PE-3c counter streaming. Snapshot + SSE follow.
+mux.HandleFunc("GET /v1/observability/counters", h.getCountersSnapshot)
+mux.HandleFunc("GET /v1/observability/counters/stream", h.streamCounters)
 
 return mux
 }

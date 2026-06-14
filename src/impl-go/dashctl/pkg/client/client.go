@@ -233,6 +233,101 @@ type TopologyWatchOptions struct {
 	OnEvent         func(TopologyEvent) error // return non-nil to stop
 }
 
+// ── PE-3c counter streaming ─────────────────────────────────────────────
+
+// CounterReport mirrors dashcenter.v1.CounterReport (snapshot wire shape
+// from GET /v1/observability/counters and the body of KIND_SNAPSHOT /
+// KIND_REPORT events). All numeric counters land here as STRINGS because
+// protojson encodes int64 as a quoted string per the proto3 JSON spec
+// (preserves precision in JS clients). Renderers parse on display.
+type CounterReport struct {
+	DpuId             string `json:"dpu_id,omitempty"`
+	SampledAt         string `json:"sampled_at,omitempty"`
+	VxlanDecap        string `json:"vxlan_decap,omitempty"`
+	VxlanEncap        string `json:"vxlan_encap,omitempty"`
+	DropAclIn         string `json:"drop_acl_in,omitempty"`
+	DropAclOut        string `json:"drop_acl_out,omitempty"`
+	DropOther         string `json:"drop_other,omitempty"`
+	FlowsCreatedTotal string `json:"flows_created_total,omitempty"`
+	FlowTableSize     string `json:"flow_table_size,omitempty"`
+}
+
+// EventID is a JSON-permissive uint64 that accepts both quoted strings
+// (protojson convention for uint64 / int64) and bare JSON numbers (used
+// by older protojson encoders OR hand-rolled clients). Marshals as a
+// quoted string for round-trip consistency.
+type EventID uint64
+
+// UnmarshalJSON accepts either "42" or 42.
+func (e *EventID) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		*e = 0
+		return nil
+	}
+	// Strip quotes if present.
+	if b[0] == '"' && b[len(b)-1] == '"' {
+		b = b[1 : len(b)-1]
+	}
+	if len(b) == 0 {
+		*e = 0
+		return nil
+	}
+	var v uint64
+	for _, c := range b {
+		if c < '0' || c > '9' {
+			return errInvalidArgument("EventID: non-numeric character in " + string(b))
+		}
+		v = v*10 + uint64(c-'0')
+	}
+	*e = EventID(v)
+	return nil
+}
+
+// MarshalJSON emits a quoted string to round-trip cleanly with protojson.
+func (e EventID) MarshalJSON() ([]byte, error) {
+	s := []byte{'"'}
+	if e == 0 {
+		return []byte(`"0"`), nil
+	}
+	digits := []byte{}
+	v := uint64(e)
+	for v > 0 {
+		digits = append([]byte{byte('0' + v%10)}, digits...)
+		v /= 10
+	}
+	s = append(s, digits...)
+	s = append(s, '"')
+	return s, nil
+}
+
+// Uint64 returns the underlying value (for callers that want a plain
+// uint64; CLI flags like --since-id expect this).
+func (e EventID) Uint64() uint64 { return uint64(e) }
+
+// CounterEvent mirrors dashcenter.v1.CounterEvent. One frame per SSE
+// event or gRPC stream send. Kind values are the proto enum names
+// (KIND_SNAPSHOT / KIND_REPORT / KIND_KEEPALIVE / KIND_DROPPED /
+// KIND_RATE_LIMITED / KIND_RESYNC).
+type CounterEvent struct {
+	Kind    string          `json:"kind"`
+	Ts      string          `json:"ts,omitempty"`
+	EventID EventID         `json:"event_id,omitempty"`
+	Report  *CounterReport  `json:"report,omitempty"`
+	Notice  *TopologyNotice `json:"notice,omitempty"` // reuse Notice type
+}
+
+// CountersWatchOptions narrows a StreamCounters call.
+type CountersWatchOptions struct {
+	DpuIDs      []string                     // filter; empty = all
+	LastEventID uint64                       // resume cursor
+	OnEvent     func(CounterEvent) error     // return non-nil to stop
+}
+
+// CountersSnapshot wraps the GET /v1/observability/counters envelope.
+type CountersSnapshot struct {
+	Reports []*CounterReport `json:"reports,omitempty"`
+}
+
 // SimulateResult is the dashd reply to POST /v1/simulate (PB-2).
 type SimulateResult struct {
 	WouldSucceed     bool                 `json:"would_succeed"`
@@ -279,6 +374,18 @@ type Client interface {
 	// every received frame until the context is cancelled, the server
 	// closes the stream, or OnEvent returns a non-nil sentinel error.
 	StreamTopology(ctx context.Context, opts TopologyWatchOptions) error
+
+	// Counter streaming (PE-3c / PD-G5).
+	//
+	// GetCountersSnapshot fetches the current per-DPU CounterReport
+	// list (optionally filtered by dpuIDs). One-shot.
+	//
+	// StreamCounters opens a long-lived stream and invokes opts.OnEvent
+	// for every CounterEvent frame (snapshot, report, keepalive,
+	// dropped, rate_limited, resync) until ctx cancel / server EOF /
+	// OnEvent returns a non-nil sentinel.
+	GetCountersSnapshot(ctx context.Context, dpuIDs []string) (*CountersSnapshot, error)
+	StreamCounters(ctx context.Context, opts CountersWatchOptions) error
 }
 
 // Factory builds a Client from a resolved config. Phase 1 only registers

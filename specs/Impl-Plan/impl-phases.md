@@ -27,7 +27,7 @@
 | **Phase 2 · PB** — Admission Gates | Capacity admission, schema/capability gating | ✅ Complete — ready to tag `dashd-2.0.0-beta` | 4 / 4 |
 | **Phase 2 · PC** — Operations | HA orchestration, ENI live migration, cordon/drain | ✅ Complete — ready to tag `dashd-2.0.0-rc1` | 8 / 8 |
 | **Phase 2 · PE** — Diagnostics & gNMI | TraceFlow, ExplainMatch, saga coordinator, gNMI bridge, cluster topology | ⏳ In progress (PE-1 Diagnostics ✅ PE-G1+G2 · PE-G6 ClusterService ✅ · PE-G7 Topology streaming hardening + dashw multiplexer + /topology-v2 SPA ✅ · PE-G7.1 dashctl topology + leader observer + cordon button ✅ · PE-G8 sim+sim-client counter rollups ✅ · PE-G9 dashd counter ingest + mapper + store + poller + admin ✅; saga, gNMI, streaming pending) | 7 / 10 |
-| **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ⏳ In progress (TLS ✅ · RBAC ✅ PD-G1/G3 · mTLS ✅ PD-G2 · audit ✅ PD-G4 incl. denial-audit · counters deferred) | 4 / 5 |
+| **Phase 2 · PD** — Security & Observability | TLS/mTLS/RBAC, audit log, counter streaming | ✅ Complete (TLS ✅ · RBAC ✅ PD-G1/G3 · mTLS ✅ PD-G2 · audit ✅ PD-G4 incl. denial-audit · counters ✅ PD-G5 via PE-3c 2026-06-14) | 5 / 5 |
 
 ---
 
@@ -793,7 +793,7 @@ Secure dashd for production with **TLS/mTLS on all listener ports**, **token-bas
 | PD-G2 | mTLS valid client cert → accepted | ✅ |
 | PD-G3 | RBAC: viewer/operator/admin role boundaries enforced | ✅ |
 | PD-G4 | Audit: every mutating RPC produces an entry; tail-follow works | ✅ |
-| PD-G5 | GetCounters follow mode delivers updates in real time | ⏳ deferred to follow-up |
+| PD-G5 | GetCounters follow mode delivers updates in real time | ✅ — closed 2026-06-14 via PE-3c: `ObservabilityService.GetCounters` server-streaming impl + `CounterEvent` wrapper proto + dashd `observability/broadcaster` (60 UTs @ 98.7%) + REST/SSE + dashctl `counters [--follow]` (REST + gRPC backends, 10 cmd UTs) + dashw Hub multiplexer with lazy per-DPU upstreams + SPA `CounterWidget` sparklines in `/topology-v2`. Live e2e validated in 05-full-console (10 DPUs streaming, PE-G7.1 provenance, kill-a-sim graceful degradation). See [docs/dashd-features/counter-streaming.md](../../docs/dashd-features/counter-streaming.md). |
 
 ---
 

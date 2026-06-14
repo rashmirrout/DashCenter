@@ -884,6 +884,7 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 - [sse-event-provenance.md](sse-event-provenance.md) — PE-G7.1 SSE `source` + `via` stamping (operator-visible source identification)
 - [topology-operator-polish.md](topology-operator-polish.md) — PE-G7.1 operator polish (`dashctl topology --follow` + leader observer + `/topology-v2` cordon button)
 - [dash-sim-counter-rollups.md](dash-sim-counter-rollups.md) — PE-3a / PE-G8 sim `GetDpuCounters` RPC + `dash-sim-client dpu-counters` subcommand (standalone, no dashd)
+- [counter-streaming.md](counter-streaming.md) — PE-3c / PD-G5 counter streaming end-to-end (`ObservabilityService.GetCounters` + dashw Hub + `/topology-v2` `CounterWidget`)
 - [proto/dashcenter/v1/](../../proto/dashcenter/v1) — proto sources of truth
 - [docs/CLI_GUIDE.md](../CLI_GUIDE.md) — `dashctl` equivalents
 - [deploy/test-setup/05-full-console/manual-handson.md](../../deploy/test-setup/05-full-console/manual-handson.md) — Lab 12.6 live captures of every diagnostic

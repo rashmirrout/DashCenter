@@ -29,7 +29,38 @@ log:
 # /admin/counters[?dpu=ID] endpoint dumps the cache and
 # /admin/counters/poll-interval + /admin/counters/enable flip the knobs
 # at runtime without restarting dashd.
+#
+# PE-3c / PD-G5 (additive): per-DPU poll overrides + the streaming
+# tuning sub-block consumed by ObservabilityService.GetCounters,
+# the REST/SSE /v1/observability/counters/stream endpoint, and dashw's
+# counter Hub multiplexer. Every knob has a production-sane default;
+# every default is validated. Operators may override one knob without
+# re-specifying the rest of the block.
 observability:
   counters:
     enabled: true       # set false to stop polling without unwiring
     poll_interval: 5s   # minimum 100ms when enabled
+
+    # Optional per-DPU poll overrides. Each entry MUST honour the same
+    # 100ms floor. Useful for noisy edge DPUs that need 1s sampling
+    # while the rest of the fleet polls at 5s. Empty = no overrides.
+    # per_dpu_overrides:
+    #   dpu-edge-01: 1s
+    #   dpu-fastpath-02: 500ms
+
+    # PE-3c streaming tuning. All zero-values inherit the defaults
+    # below. Sized for a typical 3-replica dashw fleet + 16 dashctl
+    # streams + headroom. See docs/dashd-features/counter-streaming.md
+    # §6 for the per-knob rationale.
+    stream:
+      min_interval_grpc:           100ms   # cadence floor for gRPC clients (dashctl/automation)
+      min_interval_sse:            1s      # cadence floor for REST/SSE clients (browsers)
+      default_interval:            5s      # when client sends interval_seconds=0
+      max_subscribers:             256     # global cap (gRPC + SSE combined)
+      max_subscribers_per_subject: 8       # per-auth-subject cap; 0 disables
+      subscriber_buffer_size:      64      # per-subscriber channel depth
+      ring_size:                   512     # events retained for Last-Event-ID resume
+      coalesce_window:             250ms   # merge KIND_REPORT bursts; 0 disables
+      keepalive_interval:          30s     # global KEEPALIVE ticker; 0 disables
+      rate_limit_per_second:       200     # leaky-bucket sustained rate per subscriber
+      rate_limit_burst:            400     # leaky-bucket capacity (must be ≥ sustained)

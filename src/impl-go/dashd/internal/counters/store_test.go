@@ -38,6 +38,29 @@ func TestStore_PutGet(t *testing.T) {
 	}
 }
 
+// TestStore_GetReport covers the PE-3c streaming-surface accessor: it
+// returns just the typed *CounterReport without the surrounding Entry
+// (no PerEni/PerVnet sub-rollups) and gracefully handles missing keys.
+func TestStore_GetReport_Found(t *testing.T) {
+	s := NewStore()
+	s.Put(sampleEntry("dpu-a", 42))
+	rep, ok := s.GetReport("dpu-a")
+	if !ok {
+		t.Fatalf("GetReport(dpu-a) not found")
+	}
+	if rep == nil || rep.GetDpuId() != "dpu-a" || rep.GetVxlanDecap() != 42 {
+		t.Errorf("report = %+v, want dpu-a/decap=42", rep)
+	}
+}
+
+func TestStore_GetReport_Missing(t *testing.T) {
+	s := NewStore()
+	rep, ok := s.GetReport("nope")
+	if ok || rep != nil {
+		t.Errorf("GetReport(missing) = (%v,%v); want (nil,false)", rep, ok)
+	}
+}
+
 func TestStore_Put_RejectsEmptyOrNil(t *testing.T) {
 	s := NewStore()
 	s.Put(Entry{DpuID: "", Report: &dashcenterv1.CounterReport{}})

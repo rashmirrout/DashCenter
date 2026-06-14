@@ -80,6 +80,22 @@ func (s *Store) Get(dpuID string) (*Entry, bool) {
 	return e, ok
 }
 
+// GetReport is the PE-3c streaming-surface accessor: returns just the
+// DPU-wide CounterReport for dpuID, or (nil,false) if absent. The
+// per-ENI and per-VNET sub-rollups (Entry.PerEni / Entry.PerVnet) are
+// intentionally not surfaced here — the GetCounters stream emits the
+// DPU-level rollup only, matching the operator-facing widget design.
+// Admin endpoints (PE-3b) continue to expose the full Entry via Get.
+func (s *Store) GetReport(dpuID string) (*dashcenterv1.CounterReport, bool) {
+	s.mu.RLock()
+	e, ok := s.entries[dpuID]
+	s.mu.RUnlock()
+	if !ok || e == nil {
+		return nil, false
+	}
+	return e.Report, true
+}
+
 // List returns every entry, sorted ascending by DpuID. The returned
 // slice references the same underlying *Entry pointers — callers MUST
 // treat the values as read-only (Put replaces, never mutates in

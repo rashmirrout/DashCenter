@@ -13,6 +13,7 @@ import (
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
 "github.com/rashmirrout/DashCenter/src/impl-go/console/internal/cluster"
 "github.com/rashmirrout/DashCenter/src/impl-go/console/internal/config"
+"github.com/rashmirrout/DashCenter/src/impl-go/console/internal/observability"
 )
 
 // Server is the dashw BFF HTTP server. It is stateless — no database,
@@ -26,6 +27,9 @@ httpSrv *http.Server
 // PE-G7: upstream gRPC conn + multiplexing hub. Closed in shutdown.
 grpcConn *grpc.ClientConn
 hub      *cluster.Hub
+
+// PE-3c: counter hub backed by the same gRPC conn.
+counterHub *observability.Hub
 }
 
 // New creates a Server wired to the given config. It builds the
@@ -66,10 +70,24 @@ UpstreamReconnectMax: cfg.TopoUpstreamReconnectMax,
 UpstreamLabel:        cfg.DashdGrpcAddr, // best-effort dashd identity (addr); browser shows as `source`
 SelfLabel:            cfg.NodeID,        // this dashw replica id; browser shows as `via`
 }, logger)
+
+// PE-3c counter hub backed by the same gRPC conn.
+counterCli := &observabilityClientAdapter{cli: dashcenterv1.NewObservabilityServiceClient(conn)}
+s.counterHub = observability.NewHub(counterCli, observability.HubConfig{
+MaxWatchers:          cfg.CounterMaxWatchers,
+MaxWatchersPerIP:     cfg.CounterMaxWatchersPerIP,
+WatcherBufferSize:    cfg.CounterWatcherBufferSize,
+RingSize:             cfg.CounterRingSize,
+UpstreamReconnectMin: cfg.CounterUpstreamReconnectMin,
+UpstreamReconnectMax: cfg.CounterUpstreamReconnectMax,
+UpstreamIdleGC:       cfg.CounterUpstreamIdleGC,
+UpstreamLabel:        cfg.DashdGrpcAddr,
+SelfLabel:            cfg.NodeID,
+}, logger)
 }
 }
 
-handler := buildRouter(cfg, logger, s.hub)
+handler := buildRouter(cfg, logger, s.hub, s.counterHub)
 
 s.httpSrv = &http.Server{
 Addr:         cfg.Listen,
@@ -94,6 +112,12 @@ errCh := make(chan error, 1)
 // hot stream.
 if s.hub != nil {
 s.hub.Start(ctx)
+}
+
+// PE-3c: same for the counter hub. The hub's GC goroutine runs
+// continuously; upstreams open lazily on first Subscribe.
+if s.counterHub != nil {
+s.counterHub.Start(ctx)
 }
 
 go func() {

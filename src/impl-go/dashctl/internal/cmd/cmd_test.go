@@ -39,6 +39,10 @@ type fakeClient struct {
 	simulateFn       func(ctx context.Context, opsJSON []byte) (*client.SimulateResult, error)
 	getTopologyFn    func(ctx context.Context, includeEnis bool) (*client.TopologySnapshot, error)
 	streamTopologyFn func(ctx context.Context, opts client.TopologyWatchOptions) error
+
+	// PE-3c counter streaming injection points.
+	getCountersFn    func(ctx context.Context, dpuIDs []string) (*client.CountersSnapshot, error)
+	streamCountersFn func(ctx context.Context, opts client.CountersWatchOptions) error
 }
 
 type putCall struct {
@@ -144,6 +148,20 @@ func (f *fakeClient) GetTopology(ctx context.Context, includeEnis bool) (*client
 func (f *fakeClient) StreamTopology(ctx context.Context, opts client.TopologyWatchOptions) error {
 	if f.streamTopologyFn != nil {
 		return f.streamTopologyFn(ctx, opts)
+	}
+	return nil
+}
+
+// PE-3c counter streaming.
+func (f *fakeClient) GetCountersSnapshot(ctx context.Context, dpuIDs []string) (*client.CountersSnapshot, error) {
+	if f.getCountersFn != nil {
+		return f.getCountersFn(ctx, dpuIDs)
+	}
+	return &client.CountersSnapshot{}, nil
+}
+func (f *fakeClient) StreamCounters(ctx context.Context, opts client.CountersWatchOptions) error {
+	if f.streamCountersFn != nil {
+		return f.streamCountersFn(ctx, opts)
 	}
 	return nil
 }

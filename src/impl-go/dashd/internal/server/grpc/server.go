@@ -11,6 +11,7 @@ import (
 
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/observability/broadcaster"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 "google.golang.org/grpc"
@@ -27,6 +28,10 @@ cp   service.ControlPlaneService
 obs  service.ObservabilityService
 ha   service.HaService
 mig  service.MigrationService
+
+// obsHandler is retained so callers can late-inject PE-3c counter
+// wiring (SetCounterWiring); nil before registration.
+obsHandler *observabilityHandler
 }
 
 // Options bundles the PD-G1..G4 wiring the gRPC server cares about:
@@ -104,7 +109,7 @@ func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilitySer
 	registerControlPlane(gs, cp)
 
 	// Register ObservabilityService.
-	registerObservability(gs, obs)
+	s.obsHandler = registerObservability(gs, obs)
 
 	// Register HaService (PC-G1..G3).
 	registerHa(gs, ha)
@@ -135,6 +140,18 @@ return s.gs.Serve(lis)
 // Stop gracefully stops the gRPC server.
 func (s *Server) Stop() {
 s.gs.GracefulStop()
+}
+
+// SetCounterWiring late-injects the PE-3c counter broadcaster +
+// reader into the ObservabilityService handler. Both nil = handler
+// returns codes.FailedPrecondition. Safe to call any time before
+// Serve; main.go calls it during bootstrap after constructing the
+// broadcaster + counters.Store.
+func (s *Server) SetCounterWiring(bcast *broadcaster.Broadcaster, reader CounterReader) {
+if s.obsHandler == nil {
+return
+}
+s.obsHandler.SetCounterWiring(bcast, reader)
 }
 
 // --- Interceptors ---
