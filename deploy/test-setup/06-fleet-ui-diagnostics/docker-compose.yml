@@ -1,0 +1,235 @@
+# DashCenter — Full Stack: 10 DPU sims + 3 HA dashd + etcd + Web Console
+#
+# ONE COMMAND:
+#   docker compose up -d --build
+#
+# THEN OPEN:
+#   http://localhost:3001
+#
+# TEAR DOWN:
+#   docker compose down -v
+
+name: dashcenter-diag
+
+networks:
+  dc-diag-net:
+    driver: bridge
+
+volumes:
+  etcd-data:
+
+services:
+
+  # ── etcd (shared state for 3-node dashd HA) ─────────────────────
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: dc-diag-etcd
+    command:
+      - etcd
+      - --name=etcd-1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=etcd-1=http://etcd:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd-data:/etcd-data
+    networks: [dc-diag-net]
+    ports: ["13379:2379"]
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── 10 DPU Simulators ───────────────────────────────────────────
+  dash-sim-01:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-01
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-01"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-02:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-02
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-02"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-03:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-03
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-03"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-04:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-04
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-04"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-05:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-05
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-05"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-06:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-06
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-06"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-07:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-07
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-07"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-08:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-08
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-08"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-09:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-09
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-09"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  dash-sim-10:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-diag-sim-10
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-10"]
+    networks: [dc-diag-net]
+    restart: unless-stopped
+
+  # ── 3 dashd Controllers (HA, etcd-elected) ─────────────────────
+  dashd-1:
+    build: { context: ../../.., dockerfile: src/impl-go/dashd/Dockerfile }
+    image: dashcenter/dashd:dev
+    container_name: dc-diag-dashd-1
+    depends_on:
+      etcd: { condition: service_healthy }
+      dash-sim-01: { condition: service_started }
+      dash-sim-02: { condition: service_started }
+      dash-sim-03: { condition: service_started }
+      dash-sim-04: { condition: service_started }
+      dash-sim-05: { condition: service_started }
+      dash-sim-06: { condition: service_started }
+      dash-sim-07: { condition: service_started }
+      dash-sim-08: { condition: service_started }
+      dash-sim-09: { condition: service_started }
+      dash-sim-10: { condition: service_started }
+    volumes:
+      - ./configs/dashd-1.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+    networks: [dc-diag-net]
+    ports:
+      - "38443:8443"
+      - "39443:9443"
+      - "37443:7443"
+    restart: unless-stopped
+
+  dashd-2:
+    build: { context: ../../.., dockerfile: src/impl-go/dashd/Dockerfile }
+    image: dashcenter/dashd:dev
+    container_name: dc-diag-dashd-2
+    depends_on:
+      etcd: { condition: service_healthy }
+      dash-sim-01: { condition: service_started }
+      dash-sim-10: { condition: service_started }
+    volumes:
+      - ./configs/dashd-2.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+    networks: [dc-diag-net]
+    ports:
+      - "38453:8443"
+      - "39453:9443"
+      - "37453:7443"
+    restart: unless-stopped
+
+  dashd-3:
+    build: { context: ../../.., dockerfile: src/impl-go/dashd/Dockerfile }
+    image: dashcenter/dashd:dev
+    container_name: dc-diag-dashd-3
+    depends_on:
+      etcd: { condition: service_healthy }
+      dash-sim-01: { condition: service_started }
+      dash-sim-10: { condition: service_started }
+    volumes:
+      - ./configs/dashd-3.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+    networks: [dc-diag-net]
+    ports:
+      - "38463:8443"
+      - "39463:9443"
+      - "37463:7443"
+    restart: unless-stopped
+
+  # ── Web Console (BFF + SPA) ─────────────────────────────────────
+  # dashw connects to dashd-1 as its primary backend. The BFF proxies
+  # REST, Admin, and bridges gRPC streams. The SPA is served via
+  # go:embed at the same port.
+  #
+  # NOTE: This service requires the dashw image to be built first.
+  # Until Phase A is implemented, this service definition serves as
+  # the target spec. Build with:
+  #   cd src/impl-go/console && make docker-console
+  dashw:
+    build: { context: ../../.., dockerfile: src/impl-go/console/Dockerfile }
+    image: dashcenter/dashw:dev
+    container_name: dc-diag-dashw
+    depends_on:
+      dashd-1: { condition: service_started }
+      dashd-2: { condition: service_started }
+      dashd-3: { condition: service_started }
+    environment:
+      DASHD_REST_ADDR: http://dashd-1:8443
+      DASHD_GRPC_ADDR: dashd-1:9443
+      DASHD_ADMIN_ADDR: http://dashd-1:7443
+      DASHW_LISTEN: ":3000"
+      DASHW_CORS: "true"
+      DASHW_LOG_LEVEL: info
+    networks: [dc-diag-net]
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+
+  # ── One-shot CLI (optional) ─────────────────────────────────────
+  dashctl:
+    build: { context: ../../.., dockerfile: src/impl-go/dashctl/Dockerfile }
+    image: dashcenter/dashctl:dev
+    profiles: [cli]
+    networks: [dc-diag-net]
+    volumes:
+      - ./manifest:/etc/dashd/manifest:ro
+    entrypoint:
+      - /usr/local/bin/dashctl
+      - --endpoint
+      - http://dashd-1:8443
+      - --admin-endpoint
+      - http://dashd-1:7443
+      - --insecure

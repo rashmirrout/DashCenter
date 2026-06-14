@@ -99,6 +99,254 @@ type SimulateDpuImpact struct {
 	Reason            string `json:"reason,omitempty"`
 }
 
+// ── Cluster topology (PE-G6 / PE-G7) ─────────────────────────────────────
+//
+// The shapes below mirror the protojson wire format of
+// dashcenter.v1.{TopologyResponse,TopologyEvent,...} as served by dashd
+// REST `/v1/cluster/topology` + `/v1/cluster/topology/watch`. They are
+// kept hand-rolled here (rather than pulled from gen/go) to avoid
+// dragging the proto runtime into the dashctl binary — matches the same
+// pattern as PutResult / StoredItem above.
+
+// TopologyClusterNode is one dashd controller in the cluster.
+type TopologyClusterNode struct {
+	NodeID     string            `json:"node_id"`
+	RestAddr   string            `json:"rest_addr,omitempty"`
+	GrpcAddr   string            `json:"grpc_addr,omitempty"`
+	AdminAddr  string            `json:"admin_addr,omitempty"`
+	Version    string            `json:"version,omitempty"`
+	BuildSha   string            `json:"build_sha,omitempty"`
+	StartedAt  string            `json:"started_at,omitempty"`
+	IsLeader   bool              `json:"is_leader,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+}
+
+// TopologyClusterInfo mirrors dashcenter.v1.ClusterInfo.
+type TopologyClusterInfo struct {
+	Healthy   bool                  `json:"healthy"`
+	LeaderID  string                `json:"leader_id,omitempty"`
+	NodeCount int                   `json:"node_count"`
+	Nodes     []TopologyClusterNode `json:"nodes"`
+}
+
+// TopologyEni mirrors dashcenter.v1.EniTopInfo.
+type TopologyEni struct {
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace,omitempty"`
+	VnetName   string `json:"vnet_name,omitempty"`
+	MacAddress string `json:"mac_address,omitempty"`
+	AdminState string `json:"admin_state,omitempty"`
+}
+
+// TopologyDpu mirrors dashcenter.v1.DpuTopInfo.
+type TopologyDpu struct {
+	ID       string        `json:"id"`
+	Slot     int32         `json:"slot,omitempty"`
+	State    string        `json:"state"`
+	LastSeen string        `json:"last_seen,omitempty"`
+	EniCount int           `json:"eni_count"`
+	Cordoned bool          `json:"cordoned,omitempty"`
+	Enis     []TopologyEni `json:"enis,omitempty"`
+}
+
+// TopologyAppliance mirrors dashcenter.v1.ApplianceInfo.
+type TopologyAppliance struct {
+	ID   string        `json:"id"`
+	Zone string        `json:"zone,omitempty"`
+	Tier string        `json:"tier,omitempty"`
+	Dpus []TopologyDpu `json:"dpus"`
+}
+
+// TopologyZone mirrors dashcenter.v1.ZoneInfo.
+type TopologyZone struct {
+	Zone           string `json:"zone"`
+	ApplianceCount int    `json:"appliance_count"`
+	DpuCount       int    `json:"dpu_count"`
+	EniCount       int    `json:"eni_count"`
+}
+
+// TopologySummary mirrors dashcenter.v1.TopologySummary.
+type TopologySummary struct {
+	TotalNodes      int `json:"total_nodes"`
+	TotalAppliances int `json:"total_appliances"`
+	TotalDpus       int `json:"total_dpus"`
+	TotalEnis       int `json:"total_enis"`
+	HealthyDpus     int `json:"healthy_dpus"`
+	DegradedDpus    int `json:"degraded_dpus"`
+	OfflineDpus     int `json:"offline_dpus"`
+	CordonedDpus    int `json:"cordoned_dpus"`
+}
+
+// TopologyNamespaceObjectCounts mirrors dashcenter.v1.NamespaceObjectCounts.
+type TopologyNamespaceObjectCounts struct {
+	Vnets          int `json:"vnets,omitempty"`
+	Enis           int `json:"enis,omitempty"`
+	VnetMappings   int `json:"vnet_mappings,omitempty"`
+	AclPolicies    int `json:"acl_policies,omitempty"`
+	RoutePolicies  int `json:"route_policies,omitempty"`
+	HaSets         int `json:"ha_sets,omitempty"`
+	ServiceTunnels int `json:"service_tunnels,omitempty"`
+}
+
+// TopologySnapshot is the unary GetTopology reply (also the body of the
+// first SSE event with kind=KIND_SNAPSHOT).
+type TopologySnapshot struct {
+	ComputedAt  string                                   `json:"computed_at,omitempty"`
+	Cluster     *TopologyClusterInfo                     `json:"cluster,omitempty"`
+	Appliances  []TopologyAppliance                      `json:"appliances,omitempty"`
+	Zones       []TopologyZone                           `json:"zones,omitempty"`
+	Summary     *TopologySummary                         `json:"summary,omitempty"`
+	Objects     map[string]TopologyNamespaceObjectCounts `json:"objects,omitempty"`
+}
+
+// TopologyNotice mirrors dashcenter.v1.Notice (payload for KIND_KEEPALIVE
+// / KIND_DROPPED / KIND_RATE_LIMITED / KIND_RESYNC events).
+type TopologyNotice struct {
+	DroppedCount    uint64 `json:"dropped_count,omitempty"`
+	SuppressedCount uint64 `json:"suppressed_count,omitempty"`
+	Message         string `json:"message,omitempty"`
+	CurrentEventID  uint64 `json:"current_event_id,omitempty"`
+}
+
+// TopologyEvent mirrors dashcenter.v1.TopologyEvent. One frame per SSE
+// event. Kind values are the proto enum names with the KIND_ prefix:
+//
+//	KIND_SNAPSHOT      KIND_PEER_ADDED   KIND_PEER_REMOVED   KIND_PEER_UPDATED
+//	KIND_LEADER_CHANGED KIND_DPU_ADDED   KIND_DPU_REMOVED    KIND_DPU_STATE
+//	KIND_KEEPALIVE     KIND_DROPPED      KIND_RATE_LIMITED   KIND_RESYNC
+type TopologyEvent struct {
+	Kind        string               `json:"kind"`
+	Ts          string               `json:"ts,omitempty"`
+	EventID     uint64               `json:"event_id,omitempty"`
+	Snapshot    *TopologySnapshot    `json:"snapshot,omitempty"`
+	Peer        *TopologyClusterNode `json:"peer,omitempty"`
+	Dpu         *TopologyDpu         `json:"dpu,omitempty"`
+	Notice      *TopologyNotice      `json:"notice,omitempty"`
+	OldLeaderID string               `json:"old_leader_id,omitempty"`
+	NewLeaderID string               `json:"new_leader_id,omitempty"`
+}
+
+// TopologyWatchOptions narrows a StreamTopology call.
+type TopologyWatchOptions struct {
+	IncludeEnis     bool
+	LastEventID     uint64 // resume cursor
+	OnEvent         func(TopologyEvent) error // return non-nil to stop
+}
+
+// ── PE-3c counter streaming ─────────────────────────────────────────────
+
+// CounterReport mirrors dashcenter.v1.CounterReport (snapshot wire shape
+// from GET /v1/observability/counters and the body of KIND_SNAPSHOT /
+// KIND_REPORT events). All numeric counters land here as STRINGS because
+// protojson encodes int64 as a quoted string per the proto3 JSON spec
+// (preserves precision in JS clients). Renderers parse on display.
+type CounterReport struct {
+	DpuId             string `json:"dpu_id,omitempty"`
+	SampledAt         string `json:"sampled_at,omitempty"`
+	VxlanDecap        string `json:"vxlan_decap,omitempty"`
+	VxlanEncap        string `json:"vxlan_encap,omitempty"`
+	DropAclIn         string `json:"drop_acl_in,omitempty"`
+	DropAclOut        string `json:"drop_acl_out,omitempty"`
+	DropOther         string `json:"drop_other,omitempty"`
+	FlowsCreatedTotal string `json:"flows_created_total,omitempty"`
+	FlowTableSize     string `json:"flow_table_size,omitempty"`
+}
+
+// EventID is a JSON-permissive uint64 that accepts both quoted strings
+// (protojson convention for uint64 / int64) and bare JSON numbers (used
+// by older protojson encoders OR hand-rolled clients). Marshals as a
+// quoted string for round-trip consistency.
+type EventID uint64
+
+// UnmarshalJSON accepts either "42" or 42.
+func (e *EventID) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		*e = 0
+		return nil
+	}
+	// Strip quotes if present.
+	if b[0] == '"' && b[len(b)-1] == '"' {
+		b = b[1 : len(b)-1]
+	}
+	if len(b) == 0 {
+		*e = 0
+		return nil
+	}
+	var v uint64
+	for _, c := range b {
+		if c < '0' || c > '9' {
+			return errInvalidArgument("EventID: non-numeric character in " + string(b))
+		}
+		v = v*10 + uint64(c-'0')
+	}
+	*e = EventID(v)
+	return nil
+}
+
+// MarshalJSON emits a quoted string to round-trip cleanly with protojson.
+func (e EventID) MarshalJSON() ([]byte, error) {
+	s := []byte{'"'}
+	if e == 0 {
+		return []byte(`"0"`), nil
+	}
+	digits := []byte{}
+	v := uint64(e)
+	for v > 0 {
+		digits = append([]byte{byte('0' + v%10)}, digits...)
+		v /= 10
+	}
+	s = append(s, digits...)
+	s = append(s, '"')
+	return s, nil
+}
+
+// Uint64 returns the underlying value (for callers that want a plain
+// uint64; CLI flags like --since-id expect this).
+func (e EventID) Uint64() uint64 { return uint64(e) }
+
+// CounterEvent mirrors dashcenter.v1.CounterEvent. One frame per SSE
+// event or gRPC stream send. Kind values are the proto enum names
+// (KIND_SNAPSHOT / KIND_REPORT / KIND_KEEPALIVE / KIND_DROPPED /
+// KIND_RATE_LIMITED / KIND_RESYNC).
+type CounterEvent struct {
+	Kind    string          `json:"kind"`
+	Ts      string          `json:"ts,omitempty"`
+	EventID EventID         `json:"event_id,omitempty"`
+	Report  *CounterReport  `json:"report,omitempty"`
+	Notice  *TopologyNotice `json:"notice,omitempty"` // reuse Notice type
+}
+
+// CountersWatchOptions narrows a StreamCounters call.
+type CountersWatchOptions struct {
+	DpuIDs      []string                     // filter; empty = all
+	LastEventID uint64                       // resume cursor
+	OnEvent     func(CounterEvent) error     // return non-nil to stop
+}
+
+// CountersSnapshot wraps the GET /v1/observability/counters envelope.
+type CountersSnapshot struct {
+	Reports []*CounterReport `json:"reports,omitempty"`
+}
+
+// CounterDetails is the response body of
+// GET /v1/observability/counters/{dpu_id}/details — the per-DPU
+// rollup plus per-ENI and per-VNET sub-rollups originally only
+// reachable via the admin endpoint.
+type CounterDetails struct {
+	DpuID    string                    `json:"dpu_id"`
+	UpdateAt string                    `json:"update_at,omitempty"`
+	Report   *CounterReport            `json:"report,omitempty"`
+	PerEni   map[string]*CounterReport `json:"per_eni,omitempty"`
+	PerVnet  map[string]*CounterReport `json:"per_vnet,omitempty"`
+}
+
+// ClearCountersResult is the response of the DELETE endpoints.
+type ClearCountersResult struct {
+	Cleared    bool   `json:"cleared,omitempty"`     // single-DPU form
+	ClearedNum int    `json:"cleared_num,omitempty"` // bulk form populated from server "cleared" int
+	DpuID      string `json:"dpu_id,omitempty"`
+}
+
 // SimulateResult is the dashd reply to POST /v1/simulate (PB-2).
 type SimulateResult struct {
 	WouldSucceed     bool                 `json:"would_succeed"`
@@ -138,6 +386,48 @@ type Client interface {
 	// Admin views.
 	AdminDrift(ctx context.Context, dpuID string) ([]DriftItem, error)
 	AdminEniPlacement(ctx context.Context) ([]EniPlacementRow, error)
+
+	// Cluster topology (PE-G6 / PE-G7).
+	GetTopology(ctx context.Context, includeEnis bool) (*TopologySnapshot, error)
+	// StreamTopology opens an SSE stream and invokes opts.OnEvent for
+	// every received frame until the context is cancelled, the server
+	// closes the stream, or OnEvent returns a non-nil sentinel error.
+	StreamTopology(ctx context.Context, opts TopologyWatchOptions) error
+
+	// Counter streaming (PE-3c / PD-G5).
+	//
+	// GetCountersSnapshot fetches the current per-DPU CounterReport
+	// list (optionally filtered by dpuIDs). One-shot.
+	//
+	// StreamCounters opens a long-lived stream and invokes opts.OnEvent
+	// for every CounterEvent frame (snapshot, report, keepalive,
+	// dropped, rate_limited, resync) until ctx cancel / server EOF /
+	// OnEvent returns a non-nil sentinel.
+	GetCountersSnapshot(ctx context.Context, dpuIDs []string) (*CountersSnapshot, error)
+	StreamCounters(ctx context.Context, opts CountersWatchOptions) error
+
+	// GetCounterDetails fetches per-DPU rollup + per-ENI / per-VNET
+	// sub-rollups. PE-3c add-on (public v1 exposure of data that the
+	// admin endpoint has carried since PE-3b).
+	GetCounterDetails(ctx context.Context, dpuID string) (*CounterDetails, error)
+
+	// ClearCounters wipes every cached entry on dashd. Returns the
+	// number cleared. Next successful poll round refills entries for
+	// DPUs still in inventory; decommissioned DPUs stay cleared.
+	ClearCounters(ctx context.Context) (int, error)
+
+	// ClearCounter wipes a single cached entry. Returns true when an
+	// entry was present, false when the dpu_id was unknown.
+	ClearCounter(ctx context.Context, dpuID string) (bool, error)
+
+	// ClearCountersWithReset is like ClearCounters but additionally
+	// calls ResetDpuCounters on every sim, zeroing accumulators.
+	// Returns (cacheCleared, simKeysReset, error).
+	ClearCountersWithReset(ctx context.Context) (int, int, error)
+
+	// ClearCounterWithReset is like ClearCounter but additionally
+	// calls ResetDpuCounters on the target DPU's sim.
+	ClearCounterWithReset(ctx context.Context, dpuID string) (bool, int, error)
 }
 
 // Factory builds a Client from a resolved config. Phase 1 only registers

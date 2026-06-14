@@ -80,6 +80,19 @@ func (r *Registry) Forget(key string) {
 	r.mu.Unlock()
 }
 
+// ResetAll zeroes every counter accumulator without removing the keys.
+// After ResetAll, Snapshot(k) returns all-zero for every previously-
+// tracked key — the next Tick will start from zero. Objects (ENIs,
+// VNETs, etc.) are NOT touched; this is a counter-only operation.
+// Returns the number of keys reset.
+func (r *Registry) ResetAll() int {
+	r.mu.Lock()
+	n := len(r.counters)
+	r.counters = make(map[string]*objectCounters, n)
+	r.mu.Unlock()
+	return n
+}
+
 func (r *Registry) get(key string) *objectCounters {
 	r.mu.RLock()
 	c, ok := r.counters[key]

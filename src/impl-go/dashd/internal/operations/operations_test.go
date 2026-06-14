@@ -3,6 +3,7 @@ package operations
 
 import (
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
@@ -96,9 +97,14 @@ func TestListCordoned(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("ListCordoned=%v; want 2 entries", got)
 	}
-	// inventory.List returns entries sorted by ID, so we can assert order.
-	if got[0] != "dpu-1" || got[1] != "dpu-3" {
-		t.Errorf("ListCordoned=%v; want [dpu-1 dpu-3]", got)
+	// ListCordoned iterates the cordon map (Go map iteration is
+	// non-deterministic), so sort before asserting set membership.
+	// Pre-existing flake captured for post-GA cleanup: sort inside the
+	// production ListCordoned itself for caller-friendly ordering.
+	sorted := append([]string(nil), got...)
+	sort.Strings(sorted)
+	if sorted[0] != "dpu-1" || sorted[1] != "dpu-3" {
+		t.Errorf("ListCordoned=%v; want set {dpu-1, dpu-3}", got)
 	}
 }
 

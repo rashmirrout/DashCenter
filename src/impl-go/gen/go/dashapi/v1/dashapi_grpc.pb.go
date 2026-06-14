@@ -58,13 +58,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DashApi_Apply_FullMethodName          = "/dashapi.v1.DashApi/Apply"
-	DashApi_Delete_FullMethodName         = "/dashapi.v1.DashApi/Delete"
-	DashApi_Get_FullMethodName            = "/dashapi.v1.DashApi/Get"
-	DashApi_List_FullMethodName           = "/dashapi.v1.DashApi/List"
-	DashApi_Subscribe_FullMethodName      = "/dashapi.v1.DashApi/Subscribe"
-	DashApi_GetCounters_FullMethodName    = "/dashapi.v1.DashApi/GetCounters"
-	DashApi_SimulatePacket_FullMethodName = "/dashapi.v1.DashApi/SimulatePacket"
+	DashApi_Apply_FullMethodName            = "/dashapi.v1.DashApi/Apply"
+	DashApi_Delete_FullMethodName           = "/dashapi.v1.DashApi/Delete"
+	DashApi_Get_FullMethodName              = "/dashapi.v1.DashApi/Get"
+	DashApi_List_FullMethodName             = "/dashapi.v1.DashApi/List"
+	DashApi_Subscribe_FullMethodName        = "/dashapi.v1.DashApi/Subscribe"
+	DashApi_GetCounters_FullMethodName      = "/dashapi.v1.DashApi/GetCounters"
+	DashApi_GetDpuCounters_FullMethodName   = "/dashapi.v1.DashApi/GetDpuCounters"
+	DashApi_ResetDpuCounters_FullMethodName = "/dashapi.v1.DashApi/ResetDpuCounters"
+	DashApi_SimulatePacket_FullMethodName   = "/dashapi.v1.DashApi/SimulatePacket"
 )
 
 // DashApiClient is the client API for DashApi service.
@@ -89,6 +91,17 @@ type DashApiClient interface {
 	// GetCounters returns synthetic per-object counters (sim) or hardware
 	// counters (real DPU). Ack uses an empty key for unknown objects.
 	GetCounters(ctx context.Context, in *CountersRequest, opts ...grpc.CallOption) (*CountersResponse, error)
+	// GetDpuCounters returns a typed rollup of all device counters at three
+	// nested scopes (DPU-wide, per-ENI, per-VNET) in one round-trip. See the
+	// DpuCountersRequest / DpuCountersResponse comments above for scope
+	// semantics. Added in PE-3a (PE-G8). The legacy per-object GetCounters
+	// RPC remains for back-compat with existing tooling.
+	GetDpuCounters(ctx context.Context, in *DpuCountersRequest, opts ...grpc.CallOption) (*DpuCountersResponse, error)
+	// ResetDpuCounters zeroes every per-object counter accumulator on the
+	// device without disturbing object state. Added in PE-3c so dashd's
+	// DELETE counter-clear can cascade to the sim. A real DPU would map
+	// this to its hardware counter-reset mechanism.
+	ResetDpuCounters(ctx context.Context, in *ResetDpuCountersRequest, opts ...grpc.CallOption) (*ResetDpuCountersResponse, error)
 	// SimulatePacket runs one synthetic packet through the behavioural DASH
 	// pipeline (direction lookup -> ACL 1..5 -> route lookup -> vnet_mapping
 	// encap) and returns the resulting Decision. Pipeline state mutations
@@ -183,6 +196,26 @@ func (c *dashApiClient) GetCounters(ctx context.Context, in *CountersRequest, op
 	return out, nil
 }
 
+func (c *dashApiClient) GetDpuCounters(ctx context.Context, in *DpuCountersRequest, opts ...grpc.CallOption) (*DpuCountersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DpuCountersResponse)
+	err := c.cc.Invoke(ctx, DashApi_GetDpuCounters_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dashApiClient) ResetDpuCounters(ctx context.Context, in *ResetDpuCountersRequest, opts ...grpc.CallOption) (*ResetDpuCountersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetDpuCountersResponse)
+	err := c.cc.Invoke(ctx, DashApi_ResetDpuCounters_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dashApiClient) SimulatePacket(ctx context.Context, in *SimulatePacketRequest, opts ...grpc.CallOption) (*SimulatePacketResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SimulatePacketResponse)
@@ -215,6 +248,17 @@ type DashApiServer interface {
 	// GetCounters returns synthetic per-object counters (sim) or hardware
 	// counters (real DPU). Ack uses an empty key for unknown objects.
 	GetCounters(context.Context, *CountersRequest) (*CountersResponse, error)
+	// GetDpuCounters returns a typed rollup of all device counters at three
+	// nested scopes (DPU-wide, per-ENI, per-VNET) in one round-trip. See the
+	// DpuCountersRequest / DpuCountersResponse comments above for scope
+	// semantics. Added in PE-3a (PE-G8). The legacy per-object GetCounters
+	// RPC remains for back-compat with existing tooling.
+	GetDpuCounters(context.Context, *DpuCountersRequest) (*DpuCountersResponse, error)
+	// ResetDpuCounters zeroes every per-object counter accumulator on the
+	// device without disturbing object state. Added in PE-3c so dashd's
+	// DELETE counter-clear can cascade to the sim. A real DPU would map
+	// this to its hardware counter-reset mechanism.
+	ResetDpuCounters(context.Context, *ResetDpuCountersRequest) (*ResetDpuCountersResponse, error)
 	// SimulatePacket runs one synthetic packet through the behavioural DASH
 	// pipeline (direction lookup -> ACL 1..5 -> route lookup -> vnet_mapping
 	// encap) and returns the resulting Decision. Pipeline state mutations
@@ -247,6 +291,12 @@ func (UnimplementedDashApiServer) Subscribe(*SubscribeRequest, grpc.ServerStream
 }
 func (UnimplementedDashApiServer) GetCounters(context.Context, *CountersRequest) (*CountersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCounters not implemented")
+}
+func (UnimplementedDashApiServer) GetDpuCounters(context.Context, *DpuCountersRequest) (*DpuCountersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDpuCounters not implemented")
+}
+func (UnimplementedDashApiServer) ResetDpuCounters(context.Context, *ResetDpuCountersRequest) (*ResetDpuCountersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResetDpuCounters not implemented")
 }
 func (UnimplementedDashApiServer) SimulatePacket(context.Context, *SimulatePacketRequest) (*SimulatePacketResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SimulatePacket not implemented")
@@ -365,6 +415,42 @@ func _DashApi_GetCounters_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DashApi_GetDpuCounters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DpuCountersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DashApiServer).GetDpuCounters(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DashApi_GetDpuCounters_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DashApiServer).GetDpuCounters(ctx, req.(*DpuCountersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DashApi_ResetDpuCounters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetDpuCountersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DashApiServer).ResetDpuCounters(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DashApi_ResetDpuCounters_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DashApiServer).ResetDpuCounters(ctx, req.(*ResetDpuCountersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DashApi_SimulatePacket_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SimulatePacketRequest)
 	if err := dec(in); err != nil {
@@ -405,6 +491,14 @@ var DashApi_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCounters",
 			Handler:    _DashApi_GetCounters_Handler,
+		},
+		{
+			MethodName: "GetDpuCounters",
+			Handler:    _DashApi_GetDpuCounters_Handler,
+		},
+		{
+			MethodName: "ResetDpuCounters",
+			Handler:    _DashApi_ResetDpuCounters_Handler,
 		},
 		{
 			MethodName: "SimulatePacket",

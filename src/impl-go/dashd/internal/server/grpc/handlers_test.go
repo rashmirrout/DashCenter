@@ -533,10 +533,11 @@ t.Errorf("service GetDrift dpuID=%q want empty", b.obs.lastDriftDpuID)
 }
 }
 
-// 15. GetCounters is unimplemented (inherited from base) and must surface as
-// codes.Unimplemented on the wire. Confirms the embed pattern works for the
-// streaming RPCs we intentionally did not override.
-func TestHandler_GetCounters_Unimplemented(t *testing.T) {
+// 15. GetCounters returns FailedPrecondition when counter wiring is
+// absent (PE-3c). The full bufconn server in this file does NOT call
+// SetCounterWiring; observability_counters_test.go covers the wired
+// happy path with its own harness.
+func TestHandler_GetCounters_NoCounterWiring(t *testing.T) {
 b := newBufServer(t)
 
 client := dashcenterv1.NewObservabilityServiceClient(b.conn)
@@ -548,8 +549,8 @@ if err != nil {
 t.Fatalf("GetCounters open: %v", err)
 }
 _, err = stream.Recv()
-if status.Code(err) != codes.Unimplemented {
-t.Errorf("Recv code=%v want Unimplemented", status.Code(err))
+if status.Code(err) != codes.FailedPrecondition {
+t.Errorf("Recv code=%v want FailedPrecondition", status.Code(err))
 }
 }
 

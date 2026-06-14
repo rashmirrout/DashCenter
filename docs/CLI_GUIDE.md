@@ -470,6 +470,256 @@ packets_out  1008
 
 ---
 
+## 12a. dpu-counters (PE-3a / PE-G8) — typed per-DPU rollup
+
+`counters` (above) returns the bag of synthetic values scoped to one
+(kind, key). **`dpu-counters`** returns a typed rollup at three nested
+scopes — DPU-wide, per-ENI, per-VNET — in a single round-trip. The
+per-ENI / per-VNET sections are opt-in so the response stays small when
+the operator only needs the top-line.
+
+> **Why a new RPC?** Sum-over-keys is computed server-side using a
+> first-component scope rule (key `K` claims scope `S` iff `K == S` OR
+> `K` starts with `S + ":"`). Cheaper than N+M client-side
+> `GetCounters` calls; no payload introspection required.
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--include-enis` | `false` | Populate the per-ENI rollup table. |
+| `--include-vnets` | `false` | Populate the per-VNET rollup table. |
+| `--eni-names` | (empty) | Comma-separated ENI scope keys. Implies `--include-enis`. Unknown scopes return as zero buckets (explicit signal). |
+| `--vnet-keys` | (empty) | Comma-separated VNET scope keys. Implies `--include-vnets`. |
+| `--watch` | `false` | Stream periodic snapshots until Ctrl-C. |
+| `--interval` | `1s` | Watch-mode sample interval. Must be > 0. |
+| `-o` / `--output` | `json` | One of: `table` (default for interactive reads), `json`, `yaml`, **`csv`** (PE-3a-new). |
+
+### 12a.1 One-shot snapshot
+
+```powershell
+& $c dpu-counters -o table
+```
+
+Output (DPU-wide bucket only; per-ENI/per-VNET are opt-in):
+
+```
+DEVICE  dpu-sim-01
+TIME    2026-06-14T20:14:33Z (ns=1718388873000000000)
+
+DPU TOTALS
+SCOPE  PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+dpu    1247        2486         87104     174208     12
+```
+
+### 12a.2 Include per-ENI + per-VNET rollups
+
+```powershell
+& $c dpu-counters --include-enis --include-vnets -o table
+```
+
+Sample (against the `small` scenario, sorted alphabetically; `vnet-prod`
+strictly exceeds `vnet-stage` because its child `vnet_mapping
+["vnet-prod","10.0.0.20"]` contributes upward via the first-component
+rule):
+
+```
+PER-ENI
+SCOPE    PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+eni-001  412         824          28832     57664      4
+eni-002  421         842          29462     58924      4
+
+PER-VNET
+SCOPE       PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+vnet-prod   168         337          11808     23560      4
+vnet-stage  84          168          5896      11792      2
+```
+
+### 12a.3 Watch mode (live tail)
+
+```powershell
+& $c dpu-counters --watch --interval 2s --include-enis
+```
+
+A `----` separator delimits each successive snapshot. Transient RPC
+errors are logged to stderr but **do not** kill the loop — Ctrl-C
+exits cleanly.
+
+### 12a.4 Filter to specific scopes (with deliberately missing one)
+
+```powershell
+& $c dpu-counters --eni-names eni-001,eni-missing -o table
+```
+
+`eni-missing` appears with a zero bucket on purpose:
+
+```
+PER-ENI
+SCOPE        PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+eni-001      412         824          28832     57664      4
+eni-missing  0           0            0         0          0
+```
+
+### 12a.5 CSV for spreadsheets
+
+```powershell
+& $c dpu-counters --include-enis --include-vnets -o csv `
+  | Out-File -Encoding utf8 snapshot.csv
+Get-Content snapshot.csv -TotalCount 4
+```
+
+Output (stable header across releases):
+
+```csv
+device_id,sampled_at_ns,scope_kind,scope_key,packets_in,packets_out,bytes_in,bytes_out,drops
+dpu-sim-01,1718388873000000000,dpu,,1247,2486,87104,174208,12
+dpu-sim-01,1718388873000000000,eni,eni-001,412,824,28832,57664,4
+dpu-sim-01,1718388873000000000,eni,eni-002,421,842,29462,58924,4
+```
+
+### 12a.6 JSON envelope
+
+```powershell
+& $c dpu-counters --include-enis -o json
+```
+
+Output:
+
+```json
+{
+  "device_id": "dpu-sim-01",
+  "sampled_at": "2026-06-14T20:14:33Z",
+  "sampled_at_ns": 1718388873000000000,
+  "dpu": { "packets_in": 1247, "packets_out": 2486, "bytes_in": 87104, "bytes_out": 174208, "drops": 12 },
+  "enis": [
+    { "scope_key": "eni-001", "bucket": { "packets_in": 412, ... } },
+    { "scope_key": "eni-002", "bucket": { "packets_in": 421, ... } }
+  ]
+}
+```
+
+Pipeable through `jq`:
+
+```powershell
+& $c dpu-counters --include-enis -o json `
+  | jq '.enis[] | select(.bucket.drops > 0) | .scope_key'
+```
+
+### 12a.7 Fault injection on the new RPC
+
+The new RPC name (`"GetDpuCounters"`) participates in the same admin
+fault injector as every other RPC. Inject a one-shot failure:
+
+```powershell
+Invoke-RestMethod -Method POST `
+  http://localhost:8080/admin/faults `
+  -ContentType application/json `
+  -Body '{"op":"GetDpuCounters","mode":"error","count":1,"message":"demo"}'
+
+# First call -> "rpc error: code = Unavailable desc = demo" (exit 1)
+& $c dpu-counters
+
+# Second call succeeds (fault was a one-shot)
+& $c dpu-counters
+```
+
+Full design, scope-membership rules, and Future Scopes:
+[`docs/dashd-features/dash-sim-counter-rollups.md`](dashd-features/dash-sim-counter-rollups.md).
+
+---
+
+## 12b. reset-counters (PE-3c add-on) — zero accumulators without deleting objects
+
+`counters` (§12) and `dpu-counters` (§12a) read counter values. Those
+values are **cumulative** — they grow monotonically since the sim/DPU
+process started. `reset-counters` zeroes every per-object counter
+accumulator **without** disturbing any programmed objects (ENIs, VNETs,
+policies, etc.).
+
+### Direct sim call (dash-sim-client)
+
+```powershell
+# Zero all accumulators on the target sim:
+& $c reset-counters --target localhost:50051
+# reset 69 counter accumulator key(s)
+
+# JSON output:
+& $c reset-counters --target localhost:50051 -o json
+# {
+#   "keys_reset": 69
+# }
+
+# YAML output:
+& $c reset-counters --target localhost:50051 -o yaml
+# keys_reset: 69
+```
+
+**Proto RPC**: `dashapi.v1.DashApi.ResetDpuCounters`.
+
+### Via dashd (dashctl counters clear --reset-sim)
+
+`dashctl counters clear` wipes dashd's **cache** only. Adding
+`--reset-sim` tells dashd to also call `ResetDpuCounters` on each
+target sim/DPU via the southbound gRPC proto before clearing the cache.
+
+```powershell
+# Bulk: cache + all sim accumulators:
+dashctl counters clear --reset-sim --endpoint http://localhost:28443 --insecure
+# cleared 10 cached counter entries + reset 729 sim accumulator key(s)
+
+# Single DPU: cache + that sim's accumulators:
+dashctl counters clear --dpu=dpu-sim-03 --reset-sim --endpoint http://localhost:28443 --insecure
+# cleared dpu-sim-03 + reset 90 sim accumulator key(s)
+
+# Cache-only (no sim reset — backwards compatible):
+dashctl counters clear --endpoint http://localhost:28443 --insecure
+# cleared 10 cached counter entries
+```
+
+### Via REST API (DELETE ?reset_sim=true)
+
+```powershell
+# Bulk clear + sim reset:
+curl.exe -X DELETE "http://localhost:28443/v1/observability/counters?reset_sim=true"
+# {"cleared":10,"sim_keys_reset":729}
+
+# Single DPU clear + sim reset:
+curl.exe -X DELETE "http://localhost:28443/v1/observability/counters/dpu-sim-01?reset_sim=true"
+# {"cleared":true,"dpu_id":"dpu-sim-01","sim_keys_reset":69}
+
+# Via dashw proxy (same — browser SPA uses this path):
+curl.exe -X DELETE "http://localhost:3000/api/v1/observability/counters?reset_sim=true"
+# {"cleared":10,"sim_keys_reset":729}
+```
+
+### Verify (after 5–6s poll refill)
+
+```powershell
+Start-Sleep -Seconds 6
+dashctl counters --endpoint http://localhost:28443 --insecure
+# Values near zero (fresh accumulation from the ~6s since reset)
+```
+
+### Fault injection
+
+```powershell
+# Inject a one-shot error:
+Invoke-RestMethod -Method POST `
+  http://localhost:8080/admin/faults `
+  -ContentType application/json `
+  -Body '{"op":"ResetDpuCounters","mode":"error","count":1,"message":"injected"}'
+
+# First call fails:
+& $c reset-counters
+# rpc error: code = Unavailable desc = injected
+
+# Second call succeeds (fault exhausted):
+& $c reset-counters
+# reset 69 counter accumulator key(s)
+```
+
+---
+
 ## 13. SimulatePacket (dash-sim only)
 
 Walks the full DASH pipeline:
@@ -614,8 +864,21 @@ $c = ".\bin\dash-sim-client.exe"
 & $c delete --kind <k> --key <a:b:...>
 & $c subscribe [--snapshot] [--kinds <k1,k2>]
 & $c counters --kind <k> --key <a:b:...>          [-o json|yaml|table]
+& $c dpu-counters [--include-enis] [--include-vnets] [--watch] [-o table|json|yaml|csv]
+& $c reset-counters                                [-o table|json|yaml]
 & $c simulate --direction outbound|inbound --eni <e> \
               [--vni <n>] [--src-mac ...] [--dst-mac ...] \
               [--src-ip ...] [--dst-ip ...] [--protocol ...] \
               [--src-port ...] [--dst-port ...] [--trace]
+```
+
+### dashctl counter commands (via dashd)
+
+```powershell
+dashctl counters                                       # per-DPU snapshot table
+dashctl counters --follow                              # SSE live stream
+dashctl counters details --dpu=<id>                    # per-ENI/per-VNET breakdown
+dashctl counters clear                                 # wipe dashd cache (auto-refills in 5s)
+dashctl counters clear --reset-sim                     # wipe cache + zero sim accumulators
+dashctl counters clear --dpu=<id> --reset-sim          # single DPU: cache + sim reset
 ```

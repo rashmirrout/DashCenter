@@ -51,6 +51,20 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Go test coverage artifacts (anywhere in the tree).
+# Drop-in pattern matches files produced by:
+#   go test -coverprofile=cov.out
+#   go tool cover -html=cov.out -o cov.html
+# AND defends against shell-substitution typos like `coverprofile=$(...)\cov.out`
+# that have historically left a literal `$` file behind in package dirs.
+cov.out
+cov.html
+cov
+coverage.out
+coverage.html
+*.coverprofile
+$
+
 # Translations
 *.mo
 *.pot
@@ -238,3 +252,10 @@ Cargo.lock                       # libraries: ignore; binaries: commit. Re-evalu
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---- Scratch / experiments ----
+# scratch/ is for local experimentation (e.g., docs/concepts/* evidence
+# scripts). Scripts + READMEs are committed; large generated transcripts
+# (already matched by *.log above) and ephemeral payloads are not.
+scratch/**/*.log
+scratch/**/*.tmp

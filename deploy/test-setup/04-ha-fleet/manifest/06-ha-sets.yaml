@@ -1,0 +1,40 @@
+# 06-ha-sets.yaml — 3 HA sets demonstrating both active/standby and
+# active/active modes across distinct DPU pairs.
+#
+# The orchestrator (PC-G1..G3) auto-promotes the first member to ACTIVE on
+# PutHaSet. Use `POST /v1/ha/{ns}/{name}/switchover` to roll roles between
+# members in a controlled way, or `.../failover` to simulate the loss of the
+# active member.
+
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-bank-prod, labels: { tenant: bank, env: prod } }
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-sim-01, dpu-sim-02]
+  virtual_ip: 10.0.0.100
+  flow_sync_endpoints:
+    - udp://dpu-sim-01:4789
+    - udp://dpu-sim-02:4789
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-retail-prod, labels: { tenant: retail, env: prod } }
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-sim-03, dpu-sim-04]
+  virtual_ip: 10.1.0.100
+  flow_sync_endpoints:
+    - udp://dpu-sim-03:4789
+    - udp://dpu-sim-04:4789
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-shared-services, labels: { tenant: shared, env: prod } }
+spec:
+  mode: active_active
+  member_dpu_ids: [dpu-sim-05, dpu-sim-01]
+  virtual_ip: 10.9.0.100
+  flow_sync_endpoints:
+    - udp://dpu-sim-05:4789
+    - udp://dpu-sim-01:4789

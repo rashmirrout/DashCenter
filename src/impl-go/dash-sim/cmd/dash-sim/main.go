@@ -41,7 +41,7 @@ func main() {
 	store := model.New(bus)
 	faultInjector := faults.New()
 	counterRegistry := counters.New()
-	svc := server.New(store, bus, faultInjector, counterRegistry)
+	svc := server.New(store, bus, faultInjector, counterRegistry).WithDeviceID(*deviceID)
 
 	if *scenarioPath != "" {
 		if err := scenarios.LoadFile(*scenarioPath, store); err != nil {

@@ -1,7 +1,7 @@
 version: v2
-name: buf.build/rashmirrout/dashcenter
 modules:
   - path: ../../../proto
+    name: buf.build/rashmirrout/dashcenter
     excludes:
       - ../../../proto/vendor/sonic-dash-api/VERSION
 lint:

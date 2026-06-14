@@ -1,0 +1,77 @@
+# 00-vnets.yaml — 14 tenant + shared-services VNets (superset of 04-ha).
+#
+# Tenants: bank, retail, media, iot, analytics, gaming + shared pair.
+# Each tenant has two VNets (web/db, stream/control, etc.).
+# Gaming is new in 05 — exercises DPUs 08-10.
+
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: bank-prod-web, labels: { tenant: bank, tier: web, env: prod } }
+spec: { vni: 1001 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: bank-prod-db, labels: { tenant: bank, tier: db, env: prod } }
+spec: { vni: 1002 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: retail-prod-web, labels: { tenant: retail, tier: web, env: prod } }
+spec: { vni: 1101 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: retail-prod-db, labels: { tenant: retail, tier: db, env: prod } }
+spec: { vni: 1102 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: media-stream, labels: { tenant: media, tier: data, env: prod } }
+spec: { vni: 1201 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: media-control, labels: { tenant: media, tier: ctrl, env: prod } }
+spec: { vni: 1202 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: iot-edge, labels: { tenant: iot, tier: edge, env: prod } }
+spec: { vni: 1301 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: iot-core, labels: { tenant: iot, tier: core, env: prod } }
+spec: { vni: 1302 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: analytics-spark, labels: { tenant: analytics, tier: compute, env: prod } }
+spec: { vni: 1401 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: analytics-kafka, labels: { tenant: analytics, tier: bus, env: prod } }
+spec: { vni: 1402 }
+---
+# ===== NEW in 05: gaming tenant =====
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: gaming-lobby, labels: { tenant: gaming, tier: lobby, env: prod } }
+spec: { vni: 1501 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: gaming-match, labels: { tenant: gaming, tier: match, env: prod } }
+spec: { vni: 1502 }
+---
+# ===== shared services =====
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: shared-ingress, labels: { tenant: shared, tier: ingress, env: prod } }
+spec: { vni: 1901 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: shared-egress, labels: { tenant: shared, tier: egress, env: prod } }
+spec: { vni: 1902 }

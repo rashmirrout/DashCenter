@@ -21,15 +21,19 @@ import (
 
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/cluster"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/config"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/capacity"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/counters"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dispatch"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/dpuclient"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/flow"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/leader"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/ha/orchestrator"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/migration"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/model"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/observability/broadcaster"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/operations"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/reconciler"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/schema"
@@ -195,6 +199,55 @@ migEffect.Rehomer = &service.ServiceEniRehomer{Svc: cpService, Store: st}
 migService := service.NewMigration(migCoord)
 obsService := service.NewObservability(inv, st, obs)
 
+// 8b. Diagnostics engine + service (PE-1). Pure-cache compute over
+// the desired-state store; uses NilHitStats today (PD-G5 wires the
+// real counter store) and a NopResimulator (PE-3 will swap in a
+// dispatch-backed implementation).
+diagEngine := flow.New(st, inv, flow.NilHitStats{}, &flow.NopResimulator{})
+diagService := service.NewDiagnostics(diagEngine)
+
+// 8c. Cluster service (PE-G2). Build the elector EARLY so the
+// aggregator can observe leadership; build the peer registry next
+// (etcd-backed when storage.backend=etcd, self-only otherwise).
+rootCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+defer cancel()
+
+elector, err := newElector(rootCtx, cfg)
+if err != nil {
+	slog.Error("elector open failed", "backend", cfg.HA.Controller.Elector.Backend, "error", err)
+	os.Exit(1)
+}
+
+clusterReg := openClusterRegistry(rootCtx, cfg)
+clusterAgg, err := cluster.NewAggregator(cluster.AggregatorConfig{
+	Registry:  clusterReg,
+	Inventory: inv,
+	Store:     st,
+	Elector:   elector,
+	Version:   version,
+	NodeID:    cfg.NodeID,
+	Namespaces: knownNamespaces(cfg),
+})
+if err != nil {
+	slog.Error("cluster aggregator init failed", "error", err)
+	os.Exit(1)
+}
+clusterBcast := cluster.NewBroadcaster(cluster.DefaultBroadcasterConfig())
+clusterService := service.NewCluster(clusterAgg, clusterBcast)
+
+// PE-G7: wire the peer registry → broadcaster bridge so peer
+// add/remove/update events stream live to WatchTopology subscribers.
+// Inventory + leader-change wiring follows the same pattern but
+// requires Subscribe APIs on the elector that are not yet exported;
+// tracked as a follow-up. For PE-G7 v1 the registry-driven cluster
+// pane is the primary live demo.
+clusterReg.Subscribe(func(kind cluster.ChangeKind, peer cluster.PeerInfo) {
+	cluster.ObserveRegistryChange(kind)
+	cluster.ObservePeerCount(clusterReg.PeerCount())
+	clusterBcast.Publish(cluster.RegistryEvent(kind, peer, elector.LeaderID()))
+})
+cluster.ObservePeerCount(clusterReg.PeerCount())
+
 // --- Dry-run mode ---
 if *dryRun {
 slog.Info("dry-run: config loaded successfully")
@@ -233,33 +286,58 @@ authz, auditWriter, grpcCreds, restListener := buildPDWiring(cfg)
 if auditWriter != nil {
 	defer auditWriter.Close()
 }
+
+// 9d. Counters pipeline (PE-3b / PE-G9). Store caches the most-recent
+// CounterReport per DPU; Poller pulls every cfg.Observability.Counters.PollInterval.
+// Both are always-on subsystems (counter visibility is wanted on leader
+// AND follower).
+// MUST be constructed BEFORE the REST/gRPC servers since their Options
+// take the broadcaster + reader.
+cntStore := counters.NewStore()
+var cntPoller *counters.Poller
+if cfg.Observability.Counters.Enabled {
+	cntPoller = counters.NewPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
+} else {
+	cntPoller = counters.NewDisabledPoller(inv, dpuclient.DefaultFactory, cntStore, cfg.Observability.Counters.PollInterval)
+}
+
+// 9e. PE-3c / PD-G5 counter streaming: Broadcaster + Bridge over the
+// counters.Store change channel. Every knob driven from
+// cfg.Observability.Counters.Stream (defaults already applied).
+cntBcastCfg := counterStreamConfigFrom(cfg.Observability.Counters.Stream)
+cntBcast := broadcaster.NewBroadcaster(cntBcastCfg, slog.Default())
+cntBridge := broadcaster.NewBridge(&counterStoreAdapter{store: cntStore}, cntBcast, slog.Default())
+
 restSrv := restserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, restserver.Options{
-	Listener:    restListener,
-	Authorizer:  authz,
-	AuditWriter: auditWriter,
+	Listener:      restListener,
+	Authorizer:    authz,
+	AuditWriter:   auditWriter,
+	Diagnostics:   diagService,
+	Cluster:       clusterService,
+	CounterBcast:    cntBcast,
+	CounterReader:   &restCounterReader{store: cntStore},
+	CounterResetter: &counterResetter{inv: inv, factory: dpuclient.DefaultFactory},
 })
 grpcSrv := grpcserver.NewWithOptions(cpService, obsService, service.NewHa(haOrch), migService, grpcserver.Options{
 	TLSConfig:   grpcCreds,
 	Authorizer:  authz,
 	AuditWriter: auditWriter,
+	Diagnostics: diagService,
+	Cluster:     clusterService,
 })
+grpcSrv.SetCounterWiring(cntBcast, &grpcCounterReader{store: cntStore})
 
-// 9b. Root context for elector + servers.
-rootCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-defer cancel()
+// 9b. (rootCtx + elector already built above for cluster wiring.)
 
 // 9c. Build elector early so the admin server can report live leader
 // state (admin runs on every node — leader AND follower — so its
 // health/leader endpoints MUST observe real leadership instead of the
 // PA-0 always-true stub).
-elector, err := newElector(rootCtx, cfg)
-if err != nil {
-	slog.Error("elector open failed",
-		"backend", cfg.HA.Controller.Elector.Backend, "error", err)
-	os.Exit(1)
-}
+// (elector already built in step 8c above.)
 
 adminSrv := adminserver.NewWithElector(inv, st, obs, rec, elector)
+adminSrv.SetClusterService(clusterService)
+adminSrv.SetCountersWiring(cntStore, cntPoller)
 
 // 10. Create subscribe PumpSet — wired with the production DpuClient
 // factory so each Pump can open real Subscribe streams.
@@ -313,6 +391,23 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 		prober.Run(rootCtx)
 	}()
 
+	// Counter poller goroutine. Always-on — runs on leader AND follower
+	// so admin /counters endpoints are populated everywhere. Disabled
+	// pollers no-op until /admin/counters/enable flips them on.
+	cntPoller.Start(rootCtx)
+
+	// Counter broadcaster keepalive + bridge goroutine. Both are
+	// always-on; the bridge translates store change notifications into
+	// Broadcaster.Publish calls so SSE / gRPC subscribers see live
+	// updates. Bridge exits on ctx cancel; broadcaster.Stop is in
+	// the shutdown block.
+	cntBcast.Run(rootCtx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cntBridge.Run(rootCtx)
+	}()
+
 	// 13. Leader-only subsystems — reconciler + per-DPU dispatch workers +
 	// per-DPU subscribe pumps. Backend is selected by
 	// cfg.HA.Controller.Elector.Backend ("none" for single-node dev /
@@ -339,9 +434,12 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 	restSrv.Stop()
 	grpcSrv.Stop()
 	adminSrv.Stop()
+	cntPoller.Stop()
+	cntBcast.Stop()
 	pumpSet.StopAll()
 	mgr.Stop()
 	_ = elector.Close()
+	_ = clusterReg.Close()
 	_ = st.Close()
 
 	wg.Wait()
@@ -559,6 +657,78 @@ func newElector(ctx context.Context, cfg *config.Config) (leader.Elector, error)
 		return nil, fmt.Errorf("newElector: unsupported backend %q (config validator should have caught this)", backend)
 	}
 }
+
+// openClusterRegistry returns the cluster.Registry for the PE-G2
+// ClusterService. When storage backend is etcd, the registry publishes
+// this node's listen addresses under its OWN etcd lease (decoupled
+// from the elector's lease so leadership loss does NOT depublish us).
+// Otherwise a self-only registry is returned — the aggregator still
+// works but only sees this node.
+func openClusterRegistry(ctx context.Context, cfg *config.Config) *cluster.Registry {
+	self := cluster.PeerInfo{
+		NodeID:    cfg.NodeID,
+		RESTAddr:  cfg.Listen.RESTAddr,
+		GRPCAddr:  cfg.Listen.GRPCAddr,
+		AdminAddr: cfg.Listen.AdminAddr,
+		Version:   version,
+		StartedAt: time.Now().UTC(),
+	}
+
+	if cfg.Storage.Backend != "etcd" || len(cfg.Storage.Etcd.Endpoints) == 0 {
+		slog.Info("cluster.registry: self-only mode (no etcd endpoints)",
+			"node_id", self.NodeID)
+		return cluster.OpenSelfOnly(self)
+	}
+
+	// Derive the peers key prefix from the storage prefix so all etcd
+	// keys cluster under the same operator-visible root. The store
+	// uses "<KeyPrefix><namespace>/<kind>/..."; we anchor peers at
+	// "<KeyPrefix>peers/".
+	keyPrefix := cfg.Storage.Etcd.KeyPrefix
+	if keyPrefix == "" {
+		keyPrefix = "/dashd/state/"
+	}
+	if keyPrefix[len(keyPrefix)-1] != '/' {
+		keyPrefix += "/"
+	}
+	peerPrefix := keyPrefix + "peers/"
+
+	var tls *cluster.TLSConfig
+	if cfg.Storage.Etcd.TLS.CertFile != "" || cfg.Storage.Etcd.TLS.CAFile != "" {
+		tls = &cluster.TLSConfig{
+			CertFile: cfg.Storage.Etcd.TLS.CertFile,
+			KeyFile:  cfg.Storage.Etcd.TLS.KeyFile,
+			CAFile:   cfg.Storage.Etcd.TLS.CAFile,
+		}
+	}
+
+	reg, err := cluster.Open(ctx, cluster.Config{
+		Endpoints:   cfg.Storage.Etcd.Endpoints,
+		KeyPrefix:   peerPrefix,
+		DialTimeout: cfg.Storage.Etcd.DialTimeout,
+		LeaseTTL:    8 * time.Second,
+		TLS:         tls,
+	}, self)
+	if err != nil {
+		// Production fallback: dashd stays up with a self-only view
+		// rather than failing closed. Operators see the warning in
+		// logs and know peer membership isn't published.
+		slog.Warn("cluster.registry: etcd open failed, falling back to self-only",
+			"error", err, "endpoints", cfg.Storage.Etcd.Endpoints)
+		return cluster.OpenSelfOnly(self)
+	}
+	return reg
+}
+
+// knownNamespaces is the list of namespaces the ClusterService
+// aggregator enumerates for per-namespace object counts. For PE-G2 v1
+// the store has no namespace-enumeration API, so we hardcode the lab
+// namespaces ("default", "edge", "staging"). A follow-up PR can wire
+// this from a `cluster.namespaces:` knob in dashd.yaml.
+func knownNamespaces(_ *config.Config) []string {
+	return []string{"default", "edge", "staging"}
+}
+
 // buildPDWiring derives the runtime auth + audit + TLS handles from
 // cfg.Auth + cfg.Audit. Returns nil/empty values when auth is disabled
 // (cfg.Auth.Mode == "" or "none"), which keeps NewWithOptions on the

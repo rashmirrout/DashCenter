@@ -37,6 +37,16 @@ type fakeClient struct {
 	adminDriftFn     func(ctx context.Context, dpu string) ([]client.DriftItem, error)
 	adminPlacementFn func(ctx context.Context) ([]client.EniPlacementRow, error)
 	simulateFn       func(ctx context.Context, opsJSON []byte) (*client.SimulateResult, error)
+	getTopologyFn    func(ctx context.Context, includeEnis bool) (*client.TopologySnapshot, error)
+	streamTopologyFn func(ctx context.Context, opts client.TopologyWatchOptions) error
+
+	// PE-3c counter streaming injection points.
+	getCountersFn    func(ctx context.Context, dpuIDs []string) (*client.CountersSnapshot, error)
+	streamCountersFn func(ctx context.Context, opts client.CountersWatchOptions) error
+	// PE-3c add-on: details + clear ops.
+	getCounterDetailsFn func(ctx context.Context, dpuID string) (*client.CounterDetails, error)
+	clearCountersFn     func(ctx context.Context) (int, error)
+	clearCounterFn      func(ctx context.Context, dpuID string) (bool, error)
 }
 
 type putCall struct {
@@ -132,6 +142,64 @@ func (f *fakeClient) Simulate(ctx context.Context, opsJSON []byte) (*client.Simu
 		return f.simulateFn(ctx, opsJSON)
 	}
 	return &client.SimulateResult{WouldSucceed: true}, nil
+}
+func (f *fakeClient) GetTopology(ctx context.Context, includeEnis bool) (*client.TopologySnapshot, error) {
+	if f.getTopologyFn != nil {
+		return f.getTopologyFn(ctx, includeEnis)
+	}
+	return &client.TopologySnapshot{}, nil
+}
+func (f *fakeClient) StreamTopology(ctx context.Context, opts client.TopologyWatchOptions) error {
+	if f.streamTopologyFn != nil {
+		return f.streamTopologyFn(ctx, opts)
+	}
+	return nil
+}
+
+// PE-3c counter streaming.
+func (f *fakeClient) GetCountersSnapshot(ctx context.Context, dpuIDs []string) (*client.CountersSnapshot, error) {
+	if f.getCountersFn != nil {
+		return f.getCountersFn(ctx, dpuIDs)
+	}
+	return &client.CountersSnapshot{}, nil
+}
+func (f *fakeClient) StreamCounters(ctx context.Context, opts client.CountersWatchOptions) error {
+	if f.streamCountersFn != nil {
+		return f.streamCountersFn(ctx, opts)
+	}
+	return nil
+}
+func (f *fakeClient) GetCounterDetails(ctx context.Context, dpuID string) (*client.CounterDetails, error) {
+	if f.getCounterDetailsFn != nil {
+		return f.getCounterDetailsFn(ctx, dpuID)
+	}
+	return &client.CounterDetails{DpuID: dpuID}, nil
+}
+func (f *fakeClient) ClearCounters(ctx context.Context) (int, error) {
+	if f.clearCountersFn != nil {
+		return f.clearCountersFn(ctx)
+	}
+	return 0, nil
+}
+func (f *fakeClient) ClearCounter(ctx context.Context, dpuID string) (bool, error) {
+	if f.clearCounterFn != nil {
+		return f.clearCounterFn(ctx, dpuID)
+	}
+	return false, nil
+}
+func (f *fakeClient) ClearCountersWithReset(ctx context.Context) (int, int, error) {
+	if f.clearCountersFn != nil {
+		n, err := f.clearCountersFn(ctx)
+		return n, 0, err
+	}
+	return 0, 0, nil
+}
+func (f *fakeClient) ClearCounterWithReset(ctx context.Context, dpuID string) (bool, int, error) {
+	if f.clearCounterFn != nil {
+		ok, err := f.clearCounterFn(ctx, dpuID)
+		return ok, 0, err
+	}
+	return false, 0, nil
 }
 
 // testApp returns an Application with fake client, captured streams,

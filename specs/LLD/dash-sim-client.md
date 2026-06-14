@@ -35,7 +35,7 @@ controller, and future real-DPU agents.
 A single binary that:
 - dials a `dashapi.v1.DashApi` gRPC service at `--target`
 - exposes every RPC (`Apply`, `Get`, `Delete`, `List`, `Subscribe`,
-  `GetCounters`, `SimulatePacket`) plus two discovery helpers (`kinds`,
+  `GetCounters`, `GetDpuCounters`, `SimulatePacket`) plus two discovery helpers (`kinds`,
   `ping`)
 - accepts JSON or YAML values, supports composite keys joined with `:`,
   emits json / yaml / table output
@@ -78,15 +78,18 @@ dash-sim-client/
 │   │   ├── root.go                 -- root cmd + persistent flags
 │   │   ├── apply.go                -- apply (inline OR -f)
 │   │   ├── crud.go                 -- get, delete, list, counters, ping
+│   │   ├── dpu_counters.go         -- dpu-counters (PE-3a / PE-G8): rollup + watch loop
 │   │   ├── subscribe.go            -- subscribe + kinds
 │   │   ├── simulate.go             -- simulate (calls SimulatePacket)
 │   │   ├── codec.go                -- json/yaml dispatch helpers
 │   │   └── helpers.go              -- parseKindArg, parseKeyArg, printAck, ...
 │   └── render/
 │       └── render.go               -- Object / Objects / CountersMap in 3 formats
+│                                  +  DpuCounters in 4 formats (table / json / yaml / csv) -- PE-3a
 └── pkg/
     └── client/
-        └── client.go               -- Dial(...), Apply, Get, Delete, List, Subscribe, GetCounters
+        └── client.go               -- Dial(...), Apply, Get, Delete, List, Subscribe,
+                                    GetCounters, GetDpuCounters (PE-3a / PE-G8)
 ```
 
 `pkg/client` is **exported**. `internal/cmd` and `internal/render` are
@@ -115,6 +118,7 @@ func (c *Client) List(ctx, ObjectKind, keyPrefix string) ([]*dashapi.Object, err
 func (c *Client) Subscribe(ctx, kinds []ObjectKind, snapshotFirst bool)
     (<-chan *dashapi.Event, <-chan error, error)
 func (c *Client) GetCounters(ctx, ObjectKind, key []string) (map[string]int64, error)
+func (c *Client) GetDpuCounters(ctx, *DpuCountersRequest) (*DpuCountersResponse, error)  // PE-3a / PE-G8
 ```
 
 ### 4.2 Defaults
@@ -122,6 +126,8 @@ func (c *Client) GetCounters(ctx, ObjectKind, key []string) (map[string]int64, e
 - Insecure transport credentials (no TLS).
 - 10s per-RPC timeout (settable via `context.WithTimeout` from the caller).
 - One `*grpc.ClientConn` per `Client`; safe to share across goroutines.
+- `GetDpuCounters` accepts a `nil` request (treated as empty: DPU-wide
+  bucket only, no per-ENI / per-VNET sections).
 
 ### 4.3 Dial pseudocode
 
@@ -275,6 +281,39 @@ k := parseKindArg(--kind)
 m := cl.GetCounters(ctx, k, parseKeyArg(--key))
 render.CountersMap(stdout, format, m)
 ```
+
+### 6.6a `dpu-counters` (PE-3a / PE-G8)
+
+Calls `DashApi.GetDpuCounters` and renders the typed rollup. The
+subcommand has six knobs over and above the persistent root flags:
+
+| Flag | Default | Behaviour |
+|---|---|---|
+| `--include-enis` | `false` | Populate per-ENI rollups. |
+| `--include-vnets` | `false` | Populate per-VNET rollups. |
+| `--eni-names` | (empty) | Filter; implies `--include-enis`. Missing scopes returned with zero bucket. |
+| `--vnet-keys` | (empty) | Filter; implies `--include-vnets`. |
+| `--watch` | `false` | Live tail until SIGINT/SIGTERM. |
+| `--interval` | `1s` | Watch-mode sample period; must be > 0. |
+
+Output formats: `table` (default for `-o`/`--output`), `json`, `yaml`,
+**`csv`** (new in PE-3a; one row per scope with stable header
+`device_id,sampled_at_ns,scope_kind,scope_key,packets_in,packets_out,bytes_in,bytes_out,drops`).
+
+Watch loop:
+
+```
+ctx := streamContext()                  // honours SIGINT/SIGTERM
+oneWatchTick(ctx, cl, req, fmt, stdout) // immediate first snapshot
+for tick := range ticker {
+    if err := oneWatchTick(...); err != nil && ctx.Err() == nil {
+        log.Printf("dpu-counters: rpc error: %v", err)  // keep going
+    }
+}
+```
+
+Transient RPC errors do NOT exit the loop — counter streaming is
+best-effort continuous by design.
 
 ### 6.7 `simulate`
 

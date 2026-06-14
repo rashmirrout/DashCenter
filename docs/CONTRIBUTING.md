@@ -7,6 +7,12 @@
 >
 > If you're adding a tutorial page, see also
 > [`docs/tutorial/CONTRIBUTING-TO-TUTORIAL.md`](tutorial/CONTRIBUTING-TO-TUTORIAL.md).
+>
+> **For AI agents (Claude / Copilot / pair programming)**: read
+> [`docs/agent-operating-discipline.md`](agent-operating-discipline.md)
+> FIRST. It's the authoritative rulebook for per-feature docs, tracker
+> sync, cleanup capture, Future Scopes, and the Definition of Done that
+> survives across sessions.
 
 ## 1. Quick start
 

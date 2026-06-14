@@ -11,6 +11,7 @@ import (
 
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
+"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/observability/broadcaster"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/service"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 "google.golang.org/grpc"
@@ -27,14 +28,18 @@ cp   service.ControlPlaneService
 obs  service.ObservabilityService
 ha   service.HaService
 mig  service.MigrationService
+
+// obsHandler is retained so callers can late-inject PE-3c counter
+// wiring (SetCounterWiring); nil before registration.
+obsHandler *observabilityHandler
 }
 
 // Options bundles the PD-G1..G4 wiring the gRPC server cares about:
 // TLS server identity (cert/key for token/mtls modes; nil for plain),
-// the Authorizer that's installed in the interceptor chain, and the
-// audit writer that records every mutating call. All fields are
-// optional — zero-value Options matches the pre-PD plaintext + AllowAll
-// behaviour exactly.
+// the Authorizer that's installed in the interceptor chain, the
+// audit writer that records every mutating call, and the optional
+// PE-1 DiagnosticsService. All fields are optional — zero-value
+// Options matches the pre-PD plaintext + AllowAll behaviour exactly.
 type Options struct {
 	// TLSConfig terminates the listener in TLS when non-nil.
 	// Production wires this from auth.ListenerConfig + the cert/key
@@ -47,6 +52,14 @@ type Options struct {
 
 	// AuditWriter logs every mutating RPC. nil disables auditing.
 	AuditWriter *audit.Writer
+
+	// Diagnostics registers the PE-1 DiagnosticsService when non-nil.
+	// nil leaves the service unregistered (codes.Unimplemented).
+	Diagnostics service.DiagnosticsService
+
+	// Cluster registers the PE-G2 ClusterService when non-nil. nil
+	// leaves the service unregistered.
+	Cluster service.ClusterService
 }
 
 // New creates a gRPC server wired to the shared service layer. ha and
@@ -65,8 +78,12 @@ func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilitySer
 	unaryChain := []grpc.UnaryServerInterceptor{recoveryInterceptor, loggingInterceptor}
 	streamChain := []grpc.StreamServerInterceptor{}
 	if opts.Authorizer != nil {
-		unaryChain = append(unaryChain, auth.NewUnaryServerInterceptor(opts.Authorizer))
-		streamChain = append(streamChain, auth.NewStreamServerInterceptor(opts.Authorizer))
+		var authOpts []auth.MiddlewareOption
+		if opts.AuditWriter != nil {
+			authOpts = append(authOpts, auth.WithDenyAuditor(audit.DenyAuditor(opts.AuditWriter)))
+		}
+		unaryChain = append(unaryChain, auth.NewUnaryServerInterceptor(opts.Authorizer, authOpts...))
+		streamChain = append(streamChain, auth.NewStreamServerInterceptor(opts.Authorizer, authOpts...))
 	}
 	if opts.AuditWriter != nil {
 		acfg := audit.InterceptorConfig{Writer: opts.AuditWriter, Roles: auth.DefaultRoleMap}
@@ -92,7 +109,7 @@ func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilitySer
 	registerControlPlane(gs, cp)
 
 	// Register ObservabilityService.
-	registerObservability(gs, obs)
+	s.obsHandler = registerObservability(gs, obs)
 
 	// Register HaService (PC-G1..G3).
 	registerHa(gs, ha)
@@ -100,6 +117,10 @@ func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilitySer
 	// Register MigrationService (PC-G4..G6).
 	registerMigration(gs, mig)
 
+	// Register DiagnosticsService (PE-1) when wired.
+	registerDiagnostics(gs, opts.Diagnostics)
+	// Register ClusterService (PE-G2).
+	registerCluster(gs, opts.Cluster)
 	// Enable gRPC server reflection for debugging tools like grpcurl.
 	reflection.Register(gs)
 
@@ -119,6 +140,18 @@ return s.gs.Serve(lis)
 // Stop gracefully stops the gRPC server.
 func (s *Server) Stop() {
 s.gs.GracefulStop()
+}
+
+// SetCounterWiring late-injects the PE-3c counter broadcaster +
+// reader into the ObservabilityService handler. Both nil = handler
+// returns codes.FailedPrecondition. Safe to call any time before
+// Serve; main.go calls it during bootstrap after constructing the
+// broadcaster + counters.Store.
+func (s *Server) SetCounterWiring(bcast *broadcaster.Broadcaster, reader CounterReader) {
+if s.obsHandler == nil {
+return
+}
+s.obsHandler.SetCounterWiring(bcast, reader)
 }
 
 // --- Interceptors ---

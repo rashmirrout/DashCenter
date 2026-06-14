@@ -1572,22 +1572,4 @@ A transparent keyboard shortcut overlay (toggle with `?`):
 #### 8.13.5 Dark/Light Mode with Smooth Transition
 
 While the primary theme is "Network Dark", offer a **light mode** for
-operators who prefer it, with a smooth 300ms CSS transition:
-
-- Toggle in TopBar (sun/moon icon)
-- All CSS custom properties swap
-- Saved in `ui-prefs-store` (persisted)
-- Charts and visualizations adjust colors automatically
-
----
-
-> **End of Vision.** This document is a blueprint for transforming
-> dashw from a management console into a **network operations
-> intelligence platform** — one that fully exploits the extraordinary
-> richness of the DashCenter API surface. Every feature described here
-> is backed by data that dashd already exposes. No new backend
-> endpoints are needed beyond the BFF aggregation layer already designed
-> in the existing LLD.
->
-> **Implementation plan:** [`specs/Impl-Plan/dashw-web-impl-plan.md`](../Impl-Plan/dashw-web-impl-plan.md)
-> tracks all phases (A through E) with gate-level detail.
+operators who prefer it

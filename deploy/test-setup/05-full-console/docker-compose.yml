@@ -210,6 +210,7 @@ services:
       DASHD_REST_ADDR: http://dashd-1:8443
       DASHD_GRPC_ADDR: dashd-1:9443
       DASHD_ADMIN_ADDR: http://dashd-1:7443
+      DASHD_CLUSTER_ADDRS: "http://dashd-1:7443,http://dashd-2:7443,http://dashd-3:7443"
       DASHW_LISTEN: ":3000"
       DASHW_CORS: "true"
       DASHW_LOG_LEVEL: info

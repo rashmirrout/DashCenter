@@ -38,6 +38,12 @@ type Config struct {
 	// HA is the mode-specific HA block. Only the sub-block matching Mode
 	// may be populated. See internal/config/ha.go.
 	HA HAConfig `yaml:"ha"`
+
+	// Observability holds the polling + caching knobs for the counter
+	// ingestion pipeline (PE-3b / PE-G9). Defaults: enabled, poll every
+	// 5s. Operators flip the gate or change the interval through this
+	// block + the corresponding admin endpoints.
+	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 // ListenConfig holds network listener addresses.
@@ -97,6 +103,92 @@ type LogConfig struct {
 	Format string `yaml:"format"` // json|text, default json
 }
 
+// ObservabilityConfig is the top-level observability block. Today it
+// only holds counter polling knobs (PE-3b); diagnostics + audit moved
+// here in future phases.
+type ObservabilityConfig struct {
+	Counters CountersConfig `yaml:"counters"`
+}
+
+// CountersConfig tunes the dashd → dash-sim/DPU counter polling loop
+// AND the downstream PE-3c streaming surface (ObservabilityService.
+// GetCounters + REST/SSE).
+//
+//   - Enabled defaults to true. Set to false to stop polling without
+//     unwiring the pipeline (admin endpoints stay reachable and the
+//     poller can be re-enabled at runtime).
+//   - PollInterval default 5s; minimum 100ms (anything tighter just
+//     thrashes sims with no observable benefit).
+//   - PerDpuOverrides (PE-3c) maps a DPU id to a poll cadence that
+//     trumps PollInterval for that one DPU. Each entry is also
+//     validated against the 100ms floor. Useful for noisy edge DPUs
+//     that need 1s sampling while the rest of the fleet polls at 5s.
+//   - Stream (PE-3c) bundles every broadcaster + handler knob: cap,
+//     ring, coalesce, keepalive, rate-limit, plus the per-protocol
+//     minimum sample interval floors (gRPC vs SSE).
+type CountersConfig struct {
+	Enabled          bool                     `yaml:"enabled"`
+	PollInterval     time.Duration            `yaml:"poll_interval"`
+	PerDpuOverrides  map[string]time.Duration `yaml:"per_dpu_overrides"`
+	Stream           StreamConfig             `yaml:"stream"`
+}
+
+// StreamConfig is the PE-3c broadcaster + handler tuning block.
+//
+// All fields default to production-sane values when zero. Validation
+// enforces the relationships between them (e.g. min_interval_grpc
+// <= default_interval). Operators MUST be free to tune every knob via
+// YAML — this is the project's "ultra-flexible" config posture.
+type StreamConfig struct {
+	// MinIntervalGrpc clamps the sample cadence requested by gRPC
+	// clients (dashctl + automation). Default 100ms (matches poller
+	// floor — automation can keep up).
+	MinIntervalGrpc time.Duration `yaml:"min_interval_grpc"`
+
+	// MinIntervalSse clamps the sample cadence visible to REST/SSE
+	// clients (browsers via dashw). Default 1s (browsers can't usefully
+	// render faster; tighter values just burn CPU + battery).
+	MinIntervalSse time.Duration `yaml:"min_interval_sse"`
+
+	// DefaultInterval is the cadence used when a client sends
+	// CounterRequest.interval_seconds = 0. Default 5s.
+	DefaultInterval time.Duration `yaml:"default_interval"`
+
+	// MaxSubscribers caps total in-flight WatchCounters subscribers
+	// across both transports. Default 256.
+	MaxSubscribers int `yaml:"max_subscribers"`
+
+	// MaxSubscribersPerSubject caps subscribers per auth Subject so
+	// one runaway operator can't hog the pool. Default 8.
+	MaxSubscribersPerSubject int `yaml:"max_subscribers_per_subject"`
+
+	// SubscriberBufferSize is the per-subscriber buffered channel
+	// depth. Smaller = faster overflow detection (KIND_DROPPED fires
+	// sooner); larger = more headroom for transient stalls. Default 64.
+	SubscriberBufferSize int `yaml:"subscriber_buffer_size"`
+
+	// RingSize is the number of recent events retained for
+	// resume_after_event_id replay (mirrors PE-G7 cluster broadcaster).
+	// Default 512.
+	RingSize int `yaml:"ring_size"`
+
+	// CoalesceWindow merges KIND_REPORT events for the same dpu_id that
+	// arrive within this duration. Sentinels are NEVER coalesced.
+	// 0 disables coalescing. Default 250ms.
+	CoalesceWindow time.Duration `yaml:"coalesce_window"`
+
+	// KeepaliveInterval is the cadence of the single global keepalive
+	// goroutine. 0 disables. Default 30s.
+	KeepaliveInterval time.Duration `yaml:"keepalive_interval"`
+
+	// RateLimitPerSecond is the steady-state event ceiling per subscriber
+	// enforced by a leaky bucket. Default 200.
+	RateLimitPerSecond float64 `yaml:"rate_limit_per_second"`
+
+	// RateLimitBurst is the leaky-bucket capacity. Default 400.
+	RateLimitBurst float64 `yaml:"rate_limit_burst"`
+}
+
 // Default returns a Config with all production defaults filled in.
 func Default() *Config {
 	return &Config{
@@ -126,6 +218,35 @@ Source: "api",
 		},
 		Auth: defaultAuthConfig(),
 		HA:   defaultHAConfig(),
+		Observability: ObservabilityConfig{
+			Counters: CountersConfig{
+				Enabled:         true,
+				PollInterval:    5 * time.Second,
+				PerDpuOverrides: nil,
+				Stream:          defaultStreamConfig(),
+			},
+		},
+	}
+}
+
+// defaultStreamConfig is the production-ready PE-3c streaming tuning.
+// Numbers chosen to mirror PE-G7's cluster broadcaster where they apply
+// (max_subscribers, ring_size, keepalive_interval, rate_limit_*) and to
+// match the (Q1/Q2/Q3/Q4) plan decisions where they diverge
+// (min_interval_grpc, min_interval_sse, default_interval, coalesce).
+func defaultStreamConfig() StreamConfig {
+	return StreamConfig{
+		MinIntervalGrpc:          100 * time.Millisecond,
+		MinIntervalSse:           1 * time.Second,
+		DefaultInterval:          5 * time.Second,
+		MaxSubscribers:           256,
+		MaxSubscribersPerSubject: 8,
+		SubscriberBufferSize:     64,
+		RingSize:                 512,
+		CoalesceWindow:           250 * time.Millisecond,
+		KeepaliveInterval:        30 * time.Second,
+		RateLimitPerSecond:       200,
+		RateLimitBurst:           400,
 	}
 }
 
@@ -243,6 +364,97 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
+	// Observability.Counters. Enabled requires a non-zero PollInterval
+	// that is >= 100ms. (Defaults already filled in by applyDefaults;
+	// validation guards explicitly-bad YAML.)
+	if c.Observability.Counters.Enabled {
+		if c.Observability.Counters.PollInterval <= 0 {
+			errs = append(errs, errors.New("observability.counters.poll_interval must be > 0 when enabled"))
+		} else if c.Observability.Counters.PollInterval < 100*time.Millisecond {
+			errs = append(errs, fmt.Errorf("observability.counters.poll_interval = %s; minimum is 100ms", c.Observability.Counters.PollInterval))
+		}
+	}
+
+	// Observability.Counters.PerDpuOverrides (PE-3c). Each entry MUST
+	// have a non-empty DPU id AND honour the same 100ms floor as the
+	// global PollInterval. Empty map is fine — it just means no override.
+	for dpu, d := range c.Observability.Counters.PerDpuOverrides {
+		if dpu == "" {
+			errs = append(errs, errors.New("observability.counters.per_dpu_overrides: empty DPU id"))
+			continue
+		}
+		if d <= 0 {
+			errs = append(errs, fmt.Errorf("observability.counters.per_dpu_overrides[%q]: must be > 0", dpu))
+		} else if d < 100*time.Millisecond {
+			errs = append(errs, fmt.Errorf("observability.counters.per_dpu_overrides[%q] = %s; minimum is 100ms", dpu, d))
+		}
+	}
+
+	// Observability.Counters.Stream (PE-3c). Every knob has a default
+	// applied by applyDefaults; validation guards explicit YAML that
+	// breaks the invariants we depend on (e.g. min_interval_grpc must
+	// be <= default_interval).
+	if err := validateStreamConfig(c.Observability.Counters.Stream); err != nil {
+		errs = append(errs, err)
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateStreamConfig validates every PE-3c streaming knob individually
+// AND the cross-field invariants. Returned as a single joined error so
+// the caller surfaces every problem in one shot.
+func validateStreamConfig(s StreamConfig) error {
+	var errs []error
+	if s.MinIntervalGrpc <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.min_interval_grpc must be > 0"))
+	} else if s.MinIntervalGrpc < 100*time.Millisecond {
+		errs = append(errs, fmt.Errorf("observability.counters.stream.min_interval_grpc = %s; minimum is 100ms", s.MinIntervalGrpc))
+	}
+	if s.MinIntervalSse <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.min_interval_sse must be > 0"))
+	} else if s.MinIntervalSse < 100*time.Millisecond {
+		errs = append(errs, fmt.Errorf("observability.counters.stream.min_interval_sse = %s; minimum is 100ms", s.MinIntervalSse))
+	}
+	if s.DefaultInterval <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.default_interval must be > 0"))
+	}
+	if s.MinIntervalGrpc > 0 && s.DefaultInterval > 0 && s.MinIntervalGrpc > s.DefaultInterval {
+		errs = append(errs, fmt.Errorf("observability.counters.stream: min_interval_grpc (%s) > default_interval (%s)", s.MinIntervalGrpc, s.DefaultInterval))
+	}
+	if s.MinIntervalSse > 0 && s.DefaultInterval > 0 && s.MinIntervalSse > s.DefaultInterval {
+		errs = append(errs, fmt.Errorf("observability.counters.stream: min_interval_sse (%s) > default_interval (%s)", s.MinIntervalSse, s.DefaultInterval))
+	}
+	if s.MaxSubscribers <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.max_subscribers must be > 0"))
+	}
+	if s.MaxSubscribersPerSubject < 0 {
+		errs = append(errs, errors.New("observability.counters.stream.max_subscribers_per_subject must be >= 0 (0 disables per-subject cap)"))
+	}
+	if s.MaxSubscribersPerSubject > 0 && s.MaxSubscribersPerSubject > s.MaxSubscribers {
+		errs = append(errs, fmt.Errorf("observability.counters.stream: max_subscribers_per_subject (%d) > max_subscribers (%d)", s.MaxSubscribersPerSubject, s.MaxSubscribers))
+	}
+	if s.SubscriberBufferSize <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.subscriber_buffer_size must be > 0"))
+	}
+	if s.RingSize <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.ring_size must be > 0"))
+	}
+	if s.CoalesceWindow < 0 {
+		errs = append(errs, errors.New("observability.counters.stream.coalesce_window must be >= 0 (0 disables coalescing)"))
+	}
+	if s.KeepaliveInterval < 0 {
+		errs = append(errs, errors.New("observability.counters.stream.keepalive_interval must be >= 0 (0 disables keepalive)"))
+	}
+	if s.RateLimitPerSecond <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.rate_limit_per_second must be > 0"))
+	}
+	if s.RateLimitBurst <= 0 {
+		errs = append(errs, errors.New("observability.counters.stream.rate_limit_burst must be > 0"))
+	}
+	if s.RateLimitPerSecond > 0 && s.RateLimitBurst > 0 && s.RateLimitBurst < s.RateLimitPerSecond {
+		errs = append(errs, fmt.Errorf("observability.counters.stream: rate_limit_burst (%v) < rate_limit_per_second (%v); burst should be ≥ sustained rate", s.RateLimitBurst, s.RateLimitPerSecond))
+	}
 	return errors.Join(errs...)
 }
 
@@ -295,5 +507,56 @@ func applyDefaults(c *Config) {
 	}
 	if c.Log.Format == "" {
 		c.Log.Format = d.Log.Format
+	}
+
+	// Observability — counters PollInterval + Stream sub-block.
+	if !c.Observability.Counters.Enabled && c.Observability.Counters.PollInterval == 0 {
+		// Zero value: never specified in YAML — inherit full defaults.
+		c.Observability.Counters = d.Observability.Counters
+	} else if c.Observability.Counters.PollInterval == 0 {
+		c.Observability.Counters.PollInterval = d.Observability.Counters.PollInterval
+	}
+	// Per-field merge of Stream sub-block (PE-3c). Per-knob defaults
+	// let operators override one field without re-specifying the entire
+	// block.
+	mergeStreamDefaults(&c.Observability.Counters.Stream, d.Observability.Counters.Stream)
+}
+
+// mergeStreamDefaults fills any zero-value field in cur from def. Each
+// knob is independently defaulted so operators can override just the
+// one they care about.
+func mergeStreamDefaults(cur *StreamConfig, def StreamConfig) {
+	if cur.MinIntervalGrpc == 0 {
+		cur.MinIntervalGrpc = def.MinIntervalGrpc
+	}
+	if cur.MinIntervalSse == 0 {
+		cur.MinIntervalSse = def.MinIntervalSse
+	}
+	if cur.DefaultInterval == 0 {
+		cur.DefaultInterval = def.DefaultInterval
+	}
+	if cur.MaxSubscribers == 0 {
+		cur.MaxSubscribers = def.MaxSubscribers
+	}
+	if cur.MaxSubscribersPerSubject == 0 {
+		cur.MaxSubscribersPerSubject = def.MaxSubscribersPerSubject
+	}
+	if cur.SubscriberBufferSize == 0 {
+		cur.SubscriberBufferSize = def.SubscriberBufferSize
+	}
+	if cur.RingSize == 0 {
+		cur.RingSize = def.RingSize
+	}
+	if cur.CoalesceWindow == 0 {
+		cur.CoalesceWindow = def.CoalesceWindow
+	}
+	if cur.KeepaliveInterval == 0 {
+		cur.KeepaliveInterval = def.KeepaliveInterval
+	}
+	if cur.RateLimitPerSecond == 0 {
+		cur.RateLimitPerSecond = def.RateLimitPerSecond
+	}
+	if cur.RateLimitBurst == 0 {
+		cur.RateLimitBurst = def.RateLimitBurst
 	}
 }

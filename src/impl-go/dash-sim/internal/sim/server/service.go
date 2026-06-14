@@ -27,6 +27,10 @@ type Server struct {
 	faults   *faults.Injector
 	counters *counters.Registry
 	engine   *pipeline.Engine
+	// deviceID identifies this sim instance in cross-cutting responses
+	// (currently DpuCountersResponse.device_id). Optional; empty means
+	// the response field stays empty. Set via WithDeviceID after New().
+	deviceID string
 }
 
 // New constructs a Server. All deps must be non-nil.
@@ -35,6 +39,15 @@ func New(store *model.Store, bus *events.Bus, faultInj *faults.Injector, ctrs *c
 		store: store, bus: bus, faults: faultInj, counters: ctrs,
 		engine: pipeline.New(store, ctrs),
 	}
+}
+
+// WithDeviceID sets the device identifier echoed in
+// DpuCountersResponse.device_id. Safe to call after New() and before any
+// gRPC traffic; not goroutine-safe relative to active RPCs (single setter
+// during bootstrap).
+func (s *Server) WithDeviceID(id string) *Server {
+	s.deviceID = id
+	return s
 }
 
 func nowNs() int64 { return time.Now().UnixNano() }

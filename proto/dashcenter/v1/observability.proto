@@ -30,6 +30,11 @@ option go_package = "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashce
 
 import "google/protobuf/timestamp.proto";
 import "dashcenter/v1/types.proto";
+// Cross-imported for the shared `Notice` message used by both
+// ClusterService.WatchTopology and ObservabilityService.GetCounters
+// streaming envelopes. Consolidation into types.proto is filed as
+// post-GA cleanup T1.4 (see docs/recommended-postGA-cleanup.md).
+import "dashcenter/v1/cluster.proto";
 
 // -----------------------------------------------------------------------------
 // ObservabilityService
@@ -53,7 +58,16 @@ service ObservabilityService {
   rpc GetDrift(DriftRequest) returns (DriftReport);
 
   // Pull the consolidated counter report for one or more DPUs.
-  rpc GetCounters(CounterRequest) returns (stream CounterReport);
+  //
+  // Wire envelope is `CounterEvent` (added PE-3c) — the same wrapper
+  // shape as ClusterService.WatchTopology's TopologyEvent: every frame
+  // carries a `kind` enum, a monotonic `event_id` cursor, a `ts`
+  // timestamp, and either a `CounterReport` body (KIND_SNAPSHOT /
+  // KIND_REPORT) or a `dashcenter.v1.Notice` body (KIND_KEEPALIVE /
+  // KIND_DROPPED / KIND_RATE_LIMITED / KIND_RESYNC). See
+  // docs/dashd-features/counter-streaming.md §3.3.1 for the pattern
+  // rationale.
+  rpc GetCounters(CounterRequest) returns (stream CounterEvent);
 
   // Subscribe to the policy-change event stream. Mirrors the WebSocket payload
   // surfaced by the Web Console.
@@ -206,6 +220,55 @@ message CounterRequest {
   bool follow = 2;
   // Sample interval in seconds when follow=true. Zero = server default.
   int32 interval_seconds = 3;
+  // Optional cursor for ring-buffer resume after reconnect. The server
+  // replays events with id > resume_after_event_id. When the cursor
+  // predates the broadcaster's ring (or the process restarted), the
+  // server sends a single KIND_RESYNC frame whose Notice.current_event_id
+  // is the broadcaster's current head — the client MUST then refetch a
+  // snapshot before relying on subsequent deltas. Matches
+  // WatchTopologyRequest.resume_after_event_id semantics (PE-G7). Added
+  // in PE-3c.
+  uint64 resume_after_event_id = 4;
+}
+
+// CounterEvent is the wire envelope for the GetCounters server-stream
+// (added PE-3c). Shape matches dashcenter.v1.TopologyEvent so all
+// long-lived high-rate streams in DashCenter share one consumer
+// pattern. See docs/dashd-features/counter-streaming.md §3.3.1.
+//
+// Sentinels (kind != KIND_SNAPSHOT / KIND_REPORT) carry a Notice body
+// and signal operator-visible stream lifecycle events:
+//
+//   * KIND_KEEPALIVE     — one global ticker; cheap reverse-proxy nudge
+//   * KIND_DROPPED       — this subscriber's buffer overflowed; resync
+//   * KIND_RATE_LIMITED  — broadcaster suppressed events in the window
+//   * KIND_RESYNC        — cursor stale; refetch via snapshot
+//
+// `event_id` is monotonic per dashd process (resets on restart). Clients
+// use it as the `Last-Event-ID` header value on EventSource reconnect
+// or the resume_after_event_id field on a fresh gRPC Subscribe.
+message CounterEvent {
+  enum Kind {
+    KIND_UNSPECIFIED  = 0;
+    KIND_SNAPSHOT     = 1;   // body = report; emitted once per DPU on subscribe
+    KIND_REPORT       = 2;   // body = report; per-DPU delta after subscribe
+    // ── Resilience sentinels (mirror PE-G7's TopologyEvent) ──
+    KIND_KEEPALIVE    = 9;   // body = notice (optional, may be empty)
+    KIND_DROPPED      = 10;  // body = notice (dropped_count)
+    KIND_RATE_LIMITED = 11;  // body = notice (suppressed_count)
+    KIND_RESYNC       = 12;  // body = notice (current_event_id)
+  }
+  Kind kind = 1;
+  google.protobuf.Timestamp ts = 2;
+  uint64 event_id = 3;
+  oneof body {
+    // Per-DPU counters. Populated for KIND_SNAPSHOT and KIND_REPORT.
+    CounterReport report = 10;
+    // Sentinel payload. Populated for the four resilience kinds above.
+    // `Notice` is shared with cluster.proto (consolidation deferred —
+    // post-GA cleanup T1.4).
+    dashcenter.v1.Notice notice = 11;
+  }
 }
 
 // -----------------------------------------------------------------------------

@@ -1,0 +1,6 @@
+{
+  "vnet_name": "vnet-does-not-exist",
+  "mac_address": "aa:bb:cc:dd:ee:01",
+  "underlay_ip": "10.99.0.11",
+  "admin_state": "up"
+}

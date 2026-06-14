@@ -45,6 +45,17 @@ type DpuClient interface {
 	// prelude of every existing object before live events.
 	Subscribe(ctx context.Context, snapshotFirst bool) (grpc.ServerStreamingClient[dashapiv1.Event], error)
 
+	// GetDpuCounters fetches the typed per-DPU + per-ENI + per-VNET
+	// rollup (PE-3a wire contract). nil req is treated as the empty
+	// request — the DPU-wide bucket is always returned regardless.
+	// Wraps transport + Ack errors in a single error value.
+	GetDpuCounters(ctx context.Context, req *dashapiv1.DpuCountersRequest) (*dashapiv1.DpuCountersResponse, error)
+
+	// ResetDpuCounters zeroes every per-object counter accumulator on
+	// the DPU/sim without disturbing programmed objects (PE-3c add-on).
+	// Returns the number of keys reset.
+	ResetDpuCounters(ctx context.Context, req *dashapiv1.ResetDpuCountersRequest) (*dashapiv1.ResetDpuCountersResponse, error)
+
 	// Close releases the underlying transport. Idempotent.
 	Close() error
 }
@@ -127,6 +138,30 @@ func (c *realClient) Subscribe(ctx context.Context, snapshotFirst bool) (grpc.Se
 		return nil, fmt.Errorf("dpuclient: Subscribe rpc: %w", err)
 	}
 	return stream, nil
+}
+
+// GetDpuCounters implements DpuClient.
+func (c *realClient) GetDpuCounters(ctx context.Context, req *dashapiv1.DpuCountersRequest) (*dashapiv1.DpuCountersResponse, error) {
+	if req == nil {
+		req = &dashapiv1.DpuCountersRequest{}
+	}
+	resp, err := c.api.GetDpuCounters(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("dpuclient: GetDpuCounters rpc: %w", err)
+	}
+	return resp, nil
+}
+
+// ResetDpuCounters implements DpuClient.
+func (c *realClient) ResetDpuCounters(ctx context.Context, req *dashapiv1.ResetDpuCountersRequest) (*dashapiv1.ResetDpuCountersResponse, error) {
+	if req == nil {
+		req = &dashapiv1.ResetDpuCountersRequest{}
+	}
+	resp, err := c.api.ResetDpuCounters(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("dpuclient: ResetDpuCounters rpc: %w", err)
+	}
+	return resp, nil
 }
 
 // Close implements DpuClient. Idempotent — repeated calls return nil.

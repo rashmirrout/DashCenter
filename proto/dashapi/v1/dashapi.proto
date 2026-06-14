@@ -194,6 +194,83 @@ message CountersRequest  { ObjectKind kind = 1; repeated string key = 2; }
 message CountersResponse { map<string, int64> counters = 1; int64 server_ts_ns = 2; }
 
 // -----------------------------------------------------------------------------
+// GetDpuCounters — typed per-DPU counter rollup (PE-3a / PE-G8).
+//
+// While GetCounters returns the bag of synthetic counters scoped to a single
+// (kind, key) tuple, GetDpuCounters returns a single response carrying
+// rollups at three nested scopes:
+//
+//   1. DPU-wide total — sum of every (kind, key) tracked by this device.
+//   2. Per-ENI rollup — for each ENI on this device, the sum of counters
+//      attributable to that ENI (every key whose first joined-component
+//      matches the ENI name; covers OBJECT_KIND_ENI + OBJECT_KIND_ENI_ROUTE
+//      + any other future ENI-scoped kind that uses the same first-component
+//      convention).
+//   3. Per-VNET rollup — same shape, attributed via first-component to a
+//      VNET name (covers OBJECT_KIND_VNET + OBJECT_KIND_VNET_MAPPING).
+//
+// The per-ENI and per-VNET payloads are opt-in via the request flags so
+// operators can keep responses small when they only need the top-line.
+//
+// Per-flow / per-DPU-namespace counter dimensions are intentionally NOT in
+// this RPC; they are scoped at the dashd layer (see PE-3c / PD-G5) where
+// scale + filter caps can be enforced server-side.
+message CounterBucket {
+  int64 packets_in  = 1;
+  int64 packets_out = 2;
+  int64 bytes_in    = 3;
+  int64 bytes_out   = 4;
+  int64 drops       = 5;
+}
+
+// ScopedCounters is a (scope_key, bucket) pair. scope_key is the ENI name
+// or the VNET name; the bucket holds the summed counters for every Registry
+// entry attributable to that scope.
+message ScopedCounters {
+  string        scope_key = 1;
+  CounterBucket bucket    = 2;
+}
+
+message DpuCountersRequest {
+  // If true, populate `enis` in the response.
+  bool include_enis = 1;
+  // If true, populate `vnets` in the response.
+  bool include_vnets = 2;
+  // Optional filter: when non-empty AND include_enis=true, only these ENI
+  // names are returned. Empty = every ENI tracked by the device.
+  repeated string eni_names = 3;
+  // Optional filter: same shape for VNETs.
+  repeated string vnet_keys = 4;
+}
+
+message DpuCountersResponse {
+  // Device identifier (matches the --device-id sim flag).
+  string device_id = 1;
+  // Wall-clock sample time in unix nanoseconds.
+  int64 sampled_at_ns = 2;
+  // DPU-wide rollup. Always populated.
+  CounterBucket dpu = 3;
+  // Per-ENI rollups, sorted by scope_key. Empty unless include_enis=true.
+  repeated ScopedCounters enis = 4;
+  // Per-VNET rollups, sorted by scope_key. Empty unless include_vnets=true.
+  repeated ScopedCounters vnets = 5;
+}
+
+// ResetDpuCounters — zero every counter accumulator on the DPU (or sim)
+// without disturbing the programmed object state (ENIs, VNETs, policies,
+// etc.). Added in PE-3c add-on so `DELETE /v1/observability/counters`
+// can cascade to the southbound device and truly reset values to zero.
+message ResetDpuCountersRequest {
+  // Empty for now = reset ALL accumulators on this device.
+  // Future: optional scope filter (per-ENI, per-VNET).
+}
+
+message ResetDpuCountersResponse {
+  // Number of per-object counter entries that were zeroed.
+  int32 keys_reset = 1;
+}
+
+// -----------------------------------------------------------------------------
 // SimulatePacket — exercise the behavioural DASH pipeline.
 // -----------------------------------------------------------------------------
 
@@ -283,6 +360,19 @@ service DashApi {
   // GetCounters returns synthetic per-object counters (sim) or hardware
   // counters (real DPU). Ack uses an empty key for unknown objects.
   rpc GetCounters (CountersRequest) returns (CountersResponse);
+
+  // GetDpuCounters returns a typed rollup of all device counters at three
+  // nested scopes (DPU-wide, per-ENI, per-VNET) in one round-trip. See the
+  // DpuCountersRequest / DpuCountersResponse comments above for scope
+  // semantics. Added in PE-3a (PE-G8). The legacy per-object GetCounters
+  // RPC remains for back-compat with existing tooling.
+  rpc GetDpuCounters (DpuCountersRequest) returns (DpuCountersResponse);
+
+  // ResetDpuCounters zeroes every per-object counter accumulator on the
+  // device without disturbing object state. Added in PE-3c so dashd's
+  // DELETE counter-clear can cascade to the sim. A real DPU would map
+  // this to its hardware counter-reset mechanism.
+  rpc ResetDpuCounters (ResetDpuCountersRequest) returns (ResetDpuCountersResponse);
 
   // SimulatePacket runs one synthetic packet through the behavioural DASH
   // pipeline (direction lookup -> ACL 1..5 -> route lookup -> vnet_mapping

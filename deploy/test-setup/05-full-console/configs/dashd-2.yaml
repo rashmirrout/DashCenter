@@ -1,4 +1,7 @@
-# dashd-2 config — controller mode with etcd elector.
+# dashd-2 config — controller mode with etcd-elected HA.
+mode: controller
+node_id: dashd-2
+
 listen:
   rest_addr:  ":8443"
   grpc_addr:  ":9443"
@@ -7,23 +10,25 @@ listen:
 storage:
   backend: etcd
   etcd:
-    endpoints: ["etcd:2379"]
-    prefix: /dashd/console/state/
+    endpoints: ["http://etcd:2379"]
+    key_prefix: /dashd/console/state/
+    dial_timeout: 5s
 
 inventory:
   source: file
   file:   /etc/dashd/inventory.yaml
 
 ha:
-  mode: controller
-  etcd:
-    endpoints: ["etcd:2379"]
-    prefix: /dashd/console/leader/
-    node_id: dashd-2
-    lease_ttl: 8s
+  controller:
+    elector:
+      backend: etcd
+      endpoints: ["http://etcd:2379"]
+      leader_key: /dashd/console/leader
+      lease_ttl: 8s
+      dial_timeout: 5s
 
 reconcile:
-  tick_interval:        30s
+  tick_interval:        5s
   per_dpu_inbox_size:   1
   apply_rate_limit:     100
   error_budget_per_min: 10

@@ -562,7 +562,126 @@ What you just proved:
 
 ---
 
-## Step 15 · Tear down
+## Step 15 · Diagnostics — answer "why?" without touching the DPUs
+
+**Objective**: use the PE-1 Diagnostics REST API (landed 2026-06-11) to
+answer the three operator questions every fleet eventually faces:
+
+1. "If a packet arrived now, what would the policy chain decide?" (`trace-flow`)
+2. "Why did rule X match / not match?" (`explain-match`)
+3. "Which ACL rules have never been hit?" (`acl-hit-stats`)
+
+All three are pure-cache compute against dashd's desired state — no DPU
+round-trip, sub-millisecond response, deterministic from the same
+manifest you applied in Step 3.
+
+### The pipeline `trace-flow` walks
+
+```mermaid
+flowchart LR
+  PKT[packet] --> ACL["ACL chain<br/>per-ENI policies"]
+  ACL -- "allow / allow_and_continue" --> RT["Route lookup<br/>longest-prefix + metric tie-break"]
+  ACL -- "deny" --> DROP_ACL((DROP_ACL))
+  RT -- "direct" --> ALLOW((ALLOW))
+  RT -- "service_tunnel" --> ENCAP_ST(("ENCAP via tunnel"))
+  RT -- "drop" --> DROP_NR((DROP_NO_ROUTE))
+  RT -- "vnet" --> VM["VnetMapping lookup<br/>vnet_name + dst_ip"]
+  VM -- "vnet_encap" --> ENCAP((ENCAP))
+  VM -- "service_tunnel" --> ENCAP
+  VM -- "drop" --> DROP_NM((DROP_NO_MAPPING))
+  VM -- "no entry" --> DROP_NM
+```
+
+Three stages, evaluated in order:
+- **ACL chain** — priority asc; first `deny` / `allow` terminates; `allow_and_continue` falls through.
+- **Route lookup** — longest-prefix wins; metric breaks ties.
+- **VnetMapping** — only reached when route's `next_hop_type=vnet`; resolves overlay IP → underlay encap target.
+
+Each `trace[]` line in the response narrates one hop; the round terminal nodes are the `verdict` integer.
+
+**Five endpoints land in PE-1**:
+
+| Endpoint | Answers |
+|---|---|
+| `POST /v1/diagnostics/trace-flow` | "If a packet with this 7-tuple arrived now, what does the chain decide?" |
+| `POST /v1/diagnostics/explain-match` | "Walk every candidate and tell me why each matched or not." |
+| `POST /v1/diagnostics/explain-drift` | "For NameRef X on DPU Y, suggested remediation?" |
+| `POST /v1/diagnostics/acl-hit-stats` | "List ACL rules + hit counters; optionally zero-only." |
+| `POST /v1/diagnostics/trigger-resimulation` | "Tell named DPUs/ENIs to re-evaluate active flows against current policy." |
+
+> All examples use **the leader's REST port** (substitute the result of
+> `pwsh ./show-leader.ps1` — the live capture below was against
+> dashd-2 on `:28453`). Read RPCs work on any dashd. The endpoint
+> ignores leader / follower distinction; we use the leader by
+> convention so the trace-flow response is computed against the
+> freshest desired state without a follower-side replica lag.
+
+### 15.1 `trace-flow` ALLOW — full vnet_encap happy path
+
+```powershell
+$BODY = '{"flow":{"direction":1,"eni_name":"eni-bank-web-04","src_ip":"203.0.113.10","dst_ip":"192.168.11.4","dst_port":443,"protocol":"tcp"}}'
+curl.exe -s -X POST http://127.0.0.1:28453/v1/diagnostics/trace-flow `
+        -H 'Content-Type: application/json' -d $BODY | python -m json.tool
+```
+
+**Expected**: `verdict: 3` (ENCAP) and a 7-line trace[] showing
+INPUT → ACL allow rule 100 → route 192.168.11.0/24 vnet hop →
+vnet_mapping → underlay 10.0.1.14. `matched_acl_rule`, `matched_route`,
+and `matched_vnet_mapping` name the exact spec objects that won.
+
+### 15.2 `trace-flow` DROP_ACL — see every skipped rule
+
+Change `dst_port: 443` to `dst_port: 22` in the body above and re-run.
+**Expected**: `verdict: 6` (DROP_ACL), with the trace[] showing the 6
+preceding `ACL skip:` lines and the final `ACL DENY:` line (priority
+150) that terminated the chain. Each skip carries a reason like
+`dst_port: 22 not in any of [443]` — exactly the information operators
+need to answer "why is my SSH being dropped".
+
+### 15.3 `trace-flow` DROP_NO_MAPPING — half-configured tenant
+
+Change `dst_ip: 192.168.11.4` (mapped) to `dst_ip: 192.168.11.99` (in
+the /24 route but unmapped).
+**Expected**: `verdict: 5` (DROP_NO_MAPPING), trace ending with
+`VNET_MAPPING: no entry for 192.168.11.99 in vnet=bank-prod-web →
+DROP_NO_MAPPING`. Fix: `dashctl apply -f <new VnetMapping>` then
+re-trace — verdict flips to ENCAP.
+
+### 15.4 `explain-match SUBJECT_ROUTE` — see every candidate
+
+```powershell
+$BODY = '{"subject":2,"flow":{"direction":1,"eni_name":"eni-spark-01","src_ip":"10.4.1.11","dst_ip":"10.200.5.5","dst_port":9092,"protocol":"tcp"}}'
+curl.exe -s -X POST http://127.0.0.1:28453/v1/diagnostics/explain-match `
+        -H 'Content-Type: application/json' -d $BODY | python -m json.tool
+```
+
+**Expected**: a `candidates[]` array with every route in scope, each
+carrying `matched: true|false` and a `reason` string using `⊇`
+("contains") / `⊅` ("does not contain"). `selected_candidate_id`
+names the longest-prefix + lowest-metric winner.
+
+### 15.5 `acl-hit-stats {"zero_hits_only":true}` — find dead rules
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:28453/v1/diagnostics/acl-hit-stats `
+        -H 'Content-Type: application/json' -d '{"zero_hits_only":true}' `
+        | python -m json.tool | Select-Object -First 30
+```
+
+**Expected**: ~150 zero-hit rules (every rule across every policy is
+`hits: 0` because PE-1 ships with `HitStatsSource = NilHitStats` —
+the safe-default stub that returns "never observed"). PD-G5 swaps in
+the live counter store and the same endpoint becomes the "find unused
+security rules" report with zero operator-side changes.
+
+> **`5-full-console` extension**: the dashw Web Console proxies these
+> at `http://127.0.0.1:3000/api/v1/diagnostics/*` — same body shapes,
+> same responses. See [05-full-console/manual-handson.md § Lab 12.6](../05-full-console/manual-handson.md)
+> for the BFF-fronted version of these demos.
+
+---
+
+## Step 16 · Tear down
 
 **Objective**: stop all containers; optionally drop volumes.
 

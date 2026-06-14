@@ -29,6 +29,21 @@ curl -X POST http://localhost:8080/admin/scenario `
   -d '{"path":"testdata/scenarios/small.yaml"}'
 ```
 
+> **PE-3a / PE-G8** added a new RPC name `"GetDpuCounters"` that
+> participates in the same fault injector. Inject latency / errors on
+> the typed per-DPU counter rollup with:
+>
+> ```powershell
+> curl -X POST http://localhost:8080/admin/faults `
+>   -d '{"op":"GetDpuCounters","mode":"delay","count":3,"delay_ms":500}'
+> ```
+>
+> Hits 3 successive `GetDpuCounters` calls with a 500ms server-side
+> delay then auto-resets. Useful for testing dashd polling resilience
+> (PE-3b) and the dash-sim-client `--watch` loop's transient-error
+> handling. See [`dash-sim-counter-rollups.md`](../../../docs/dashd-features/dash-sim-counter-rollups.md)
+> for the full design + flag reference.
+
 ## Layout
 
 ```

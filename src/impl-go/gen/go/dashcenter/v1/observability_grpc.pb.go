@@ -69,7 +69,16 @@ type ObservabilityServiceClient interface {
 	// `dashctl drift` and by automated reconciliation triggers.
 	GetDrift(ctx context.Context, in *DriftRequest, opts ...grpc.CallOption) (*DriftReport, error)
 	// Pull the consolidated counter report for one or more DPUs.
-	GetCounters(ctx context.Context, in *CounterRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CounterReport], error)
+	//
+	// Wire envelope is `CounterEvent` (added PE-3c) — the same wrapper
+	// shape as ClusterService.WatchTopology's TopologyEvent: every frame
+	// carries a `kind` enum, a monotonic `event_id` cursor, a `ts`
+	// timestamp, and either a `CounterReport` body (KIND_SNAPSHOT /
+	// KIND_REPORT) or a `dashcenter.v1.Notice` body (KIND_KEEPALIVE /
+	// KIND_DROPPED / KIND_RATE_LIMITED / KIND_RESYNC). See
+	// docs/dashd-features/counter-streaming.md §3.3.1 for the pattern
+	// rationale.
+	GetCounters(ctx context.Context, in *CounterRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CounterEvent], error)
 	// Subscribe to the policy-change event stream. Mirrors the WebSocket payload
 	// surfaced by the Web Console.
 	WatchEvents(ctx context.Context, in *EventFilter, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PolicyEvent], error)
@@ -144,13 +153,13 @@ func (c *observabilityServiceClient) GetDrift(ctx context.Context, in *DriftRequ
 	return out, nil
 }
 
-func (c *observabilityServiceClient) GetCounters(ctx context.Context, in *CounterRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CounterReport], error) {
+func (c *observabilityServiceClient) GetCounters(ctx context.Context, in *CounterRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CounterEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ObservabilityService_ServiceDesc.Streams[2], ObservabilityService_GetCounters_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[CounterRequest, CounterReport]{ClientStream: stream}
+	x := &grpc.GenericClientStream[CounterRequest, CounterEvent]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -161,7 +170,7 @@ func (c *observabilityServiceClient) GetCounters(ctx context.Context, in *Counte
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ObservabilityService_GetCountersClient = grpc.ServerStreamingClient[CounterReport]
+type ObservabilityService_GetCountersClient = grpc.ServerStreamingClient[CounterEvent]
 
 func (c *observabilityServiceClient) WatchEvents(ctx context.Context, in *EventFilter, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PolicyEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -218,7 +227,16 @@ type ObservabilityServiceServer interface {
 	// `dashctl drift` and by automated reconciliation triggers.
 	GetDrift(context.Context, *DriftRequest) (*DriftReport, error)
 	// Pull the consolidated counter report for one or more DPUs.
-	GetCounters(*CounterRequest, grpc.ServerStreamingServer[CounterReport]) error
+	//
+	// Wire envelope is `CounterEvent` (added PE-3c) — the same wrapper
+	// shape as ClusterService.WatchTopology's TopologyEvent: every frame
+	// carries a `kind` enum, a monotonic `event_id` cursor, a `ts`
+	// timestamp, and either a `CounterReport` body (KIND_SNAPSHOT /
+	// KIND_REPORT) or a `dashcenter.v1.Notice` body (KIND_KEEPALIVE /
+	// KIND_DROPPED / KIND_RATE_LIMITED / KIND_RESYNC). See
+	// docs/dashd-features/counter-streaming.md §3.3.1 for the pattern
+	// rationale.
+	GetCounters(*CounterRequest, grpc.ServerStreamingServer[CounterEvent]) error
 	// Subscribe to the policy-change event stream. Mirrors the WebSocket payload
 	// surfaced by the Web Console.
 	WatchEvents(*EventFilter, grpc.ServerStreamingServer[PolicyEvent]) error
@@ -246,7 +264,7 @@ func (UnimplementedObservabilityServiceServer) GetFlowList(*FlowListRequest, grp
 func (UnimplementedObservabilityServiceServer) GetDrift(context.Context, *DriftRequest) (*DriftReport, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetDrift not implemented")
 }
-func (UnimplementedObservabilityServiceServer) GetCounters(*CounterRequest, grpc.ServerStreamingServer[CounterReport]) error {
+func (UnimplementedObservabilityServiceServer) GetCounters(*CounterRequest, grpc.ServerStreamingServer[CounterEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method GetCounters not implemented")
 }
 func (UnimplementedObservabilityServiceServer) WatchEvents(*EventFilter, grpc.ServerStreamingServer[PolicyEvent]) error {
@@ -338,11 +356,11 @@ func _ObservabilityService_GetCounters_Handler(srv interface{}, stream grpc.Serv
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(ObservabilityServiceServer).GetCounters(m, &grpc.GenericServerStream[CounterRequest, CounterReport]{ServerStream: stream})
+	return srv.(ObservabilityServiceServer).GetCounters(m, &grpc.GenericServerStream[CounterRequest, CounterEvent]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ObservabilityService_GetCountersServer = grpc.ServerStreamingServer[CounterReport]
+type ObservabilityService_GetCountersServer = grpc.ServerStreamingServer[CounterEvent]
 
 func _ObservabilityService_WatchEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(EventFilter)

@@ -101,6 +101,11 @@ $c = "C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\bin\dash-sim-client.exe"
 & $c --target localhost:52051 apply --kind vnet --key vnet-prod --value '{"vni":1001}'
 & $c --target localhost:50051 list  --kind vnet -o table
 & $c --target localhost:52051 list  --kind vnet -o table
+
+# PE-3a / PE-G8 typed per-DPU rollup (works against either dash-sim;
+# Redis adapter returns Unimplemented for now):
+& $c --target localhost:50051 dpu-counters --include-enis -o table
+& $c --target localhost:50051 dpu-counters --watch --interval 2s
 ```
 
 ---
@@ -197,6 +202,65 @@ the default `--target`, override the entrypoint:
 docker compose run --rm --entrypoint /usr/local/bin/dash-sim-client cli \
     --target dash-redis-adapter:52051 list --kind vnet -o table
 ```
+
+### 4.7 PE-3a — typed per-DPU counter rollup (`dpu-counters`)
+
+The new typed rollup RPC and its `dpu-counters` subcommand work in the
+container exactly like on bare metal. The simulator's deterministic
+tick loop runs by default at `1s`, so a freshly-started fleet will
+still report meaningful per-ENI / per-VNET breakdowns within a few
+seconds.
+
+```bash
+# One-shot DPU bucket (always populated):
+docker compose run --rm cli dpu-counters -o table
+
+# Include per-ENI + per-VNET rollups, sorted alphabetically:
+docker compose run --rm cli dpu-counters \
+    --include-enis --include-vnets -o table
+
+# Live tail every 2s (Ctrl-C exits cleanly):
+docker compose run --rm cli dpu-counters --watch --interval 2s --include-enis
+
+# Pipe a one-shot CSV out of the container into a host file
+# (note: must use the cli service which doesn't auto-add --target;
+#  see 4.6 for the entrypoint override pattern):
+docker compose run --rm cli dpu-counters \
+    --include-enis --include-vnets -o csv > snapshot.csv
+head -3 snapshot.csv
+```
+
+Expected for `--include-enis`:
+
+```text
+DEVICE  dpu-sim-01
+TIME    2026-06-14T20:14:34Z (ns=...)
+
+DPU TOTALS
+SCOPE  PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+dpu    1251        2492         87308     174616     12
+
+PER-ENI
+SCOPE    PACKETS_IN  PACKETS_OUT  BYTES_IN  BYTES_OUT  DROPS
+eni-001  412         824          28832     57664      4
+eni-002  421         842          29462     58924      4
+```
+
+Fault-inject the new RPC the same way as any other op — the admin
+port is the same HTTP server:
+
+```bash
+docker compose exec dash-sim sh -c "wget -qO- --post-data='{\"op\":\"GetDpuCounters\",\"mode\":\"error\",\"count\":1,\"message\":\"demo\"}' --header='Content-Type: application/json' http://localhost:8080/admin/faults"
+
+docker compose run --rm cli dpu-counters
+# Expected on the first call: "rpc error: code = Unavailable desc = demo"
+
+docker compose run --rm cli dpu-counters
+# Second call succeeds — the fault was a one-shot.
+```
+
+Deep dive (filter flags, JSON envelope shape, scope membership rules):
+[`docs/dashd-features/dash-sim-counter-rollups.md`](../dashd-features/dash-sim-counter-rollups.md).
 
 ---
 
