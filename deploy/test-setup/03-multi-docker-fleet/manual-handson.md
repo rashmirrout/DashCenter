@@ -337,22 +337,50 @@ per-step pipeline trace. `simulate` against `$ada` returns
 `dash-sim` validates foreign-key references at apply time. Wrong refs
 are rejected instantly with a clear error message.
 
+### Why this matters
+
+Each dash-sim instance is an independent DPU with its own store. FK
+validation runs per-DPU — creating a vnet on sim1 does NOT make it
+visible on sim2. Each DPU enforces its own dependency graph.
+
+### Experiment A — wrong config on sim1 (FAIL)
+
 ```powershell
-# Wrong: ENI references a vnet that doesn't exist on dpu-sim-01
 & $c --target $sim1 apply --kind eni --key eni-bad --value '{"vnet":"no-such-vnet"}'
-# → rejected: referential integrity: eni references vnet "no-such-vnet"
-#   (field vnet) which does not exist; create it first
+```
 
-# Right: create vnet first, then ENI
+**Error:**
+```
+referential integrity: eni references vnet "no-such-vnet" (field vnet)
+which does not exist; create it first
+```
+
+**Why**: `"no-such-vnet"` doesn't exist in sim1's store.
+
+### Experiment B — right config on sim1 (PASS)
+
+```powershell
 & $c --target $sim1 apply --kind vnet --key vnet-ri --value '{"vni":42}'
+# → accepted ✅ (Tier 0)
+
 & $c --target $sim1 apply --kind eni  --key eni-ri  --value '{"vnet":"vnet-ri"}'
-# → accepted
+# → accepted ✅ (Tier 1 — vnet-ri exists on sim1)
+```
 
-# dpu-sim-02 is independent — its own store, own FK checks
+### Experiment C — same object fails on sim2 (independence)
+
+```powershell
 & $c --target $sim2 apply --kind eni --key eni-ri --value '{"vnet":"vnet-ri"}'
-# → rejected (vnet-ri doesn't exist on sim2)
+# → rejected! (vnet-ri doesn't exist on sim2's store)
+```
 
-# Clean up
+**Why**: each DPU is independent. `vnet-ri` was created on sim1 only.
+sim2 has never seen it. To create the same ENI on sim2, you'd need to
+create `vnet-ri` on sim2 first.
+
+### Clean up
+
+```powershell
 & $c --target $sim1 delete --kind eni  --key eni-ri
 & $c --target $sim1 delete --kind vnet --key vnet-ri
 ```

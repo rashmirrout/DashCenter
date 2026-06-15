@@ -945,6 +945,72 @@ default     vnet-db    1002   1            tier=db
 This is the safest invocation when you are not sure what context is
 currently active.
 
+### Step 37 — FK validation + delete orphan protection
+
+dashd validates foreign-key references on both Put and Delete.
+
+**Understanding the dependency chain**: when you create an ENI, its
+`vnet_name` field is a foreign key to a VNet object. If that VNet
+doesn't exist in the same namespace, the ENI would be orphaned —
+packets would drop because the pipeline can't find the VNet's
+encapsulation config. dashd catches this at PUT time.
+
+**Experiment A — wrong config: ENI with missing vnet (FAIL):**
+
+```powershell
+PS> & $bin apply -f - <<'EOF'
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bad-ref }
+spec: { vnet_name: vnet-nonexistent, mac_address: "00:00:00:00:00:01", underlay_ip: "10.0.0.99" }
+EOF
+```
+
+**Error:**
+```
+Error: ... cross-namespace reference rejected
+  (referenced default/vnet/vnet-nonexistent not found in this namespace)
+```
+
+**Why it failed**: dashd's `CheckEni()` looked up `vnet-nonexistent`
+in the `default` namespace's store. Not found. The ENI was not stored.
+
+**Experiment B — wrong config: delete vnet with dependents (FAIL):**
+
+```powershell
+PS> & $bin delete vnet vnet-app
+```
+
+**Error:**
+```
+failed precondition: referential integrity: object has dependents:
+  cannot delete vnet "vnet-app" — eni "eni-app-01" still references it
+```
+
+**Why it failed**: dashd scanned all ENIs in the namespace and found
+`eni-app-01` with `vnet_name: "vnet-app"`. Deleting the vnet would
+orphan it, so the delete is blocked.
+
+**Right approach — delete top-down:**
+
+```powershell
+PS> & $bin delete eni eni-app-01   # remove dependent first
+PS> & $bin delete vnet vnet-app    # now the vnet has no dependents
+```
+
+**Pre-flight validation:**
+
+```powershell
+PS> & $bin validate -f deploy/dashctl-fleet/manifests
+# STATUS  KIND    NAMESPACE    NAME         ERROR
+# ✅ OK   vnet    default      vnet-app
+# ✅ OK   eni     default      eni-app-01
+# Total: N  Accepted: N  Rejected: 0
+```
+
+> **Tip**: re-apply the manifests if you deleted objects:
+> `& $bin apply -f deploy/dashctl-fleet/manifests`
+
 ---
 
 ## 9. Drive the fleet from inside a container
@@ -1491,6 +1557,7 @@ $bin = "C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dashctl\bin\dashctl.ex
 & $bin config set-context fleet --endpoint http://localhost:8443
 & $bin config use-context  fleet
 & $bin config view
+& $bin validate -f manifest/
 
 # ── in-container one-shots ──────────────────────────────────────
 docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl version

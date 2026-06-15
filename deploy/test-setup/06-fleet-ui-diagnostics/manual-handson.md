@@ -1832,3 +1832,51 @@ docker exec dc-diag-sim-01 sh -c '
 | 5 | Errors are actionable | Every error names kind, field, ref, and says "create it first" |
 
 > **See also**: [`docs/dashd-features/referential-integrity-validation.md`](../../../docs/dashd-features/referential-integrity-validation.md)
+
+### 15.6 — dashd-side FK validation (dashctl)
+
+Labs 15.1–15.4 tested the sim layer (dash-sim-client → dash-sim).
+Now we test the controller layer (dashctl → dashd). dashd validates
+the same dependencies but at the fleet level — checking that vnets,
+ENIs, and service tunnels exist in the correct namespace.
+
+**Experiment A — wrong config: ENI with missing vnet via REST (FAIL)**
+
+```bash
+curl -s -X PUT http://127.0.0.1:28443/v1/default/enis/eni-bad-ref \
+  -H 'Content-Type: application/json' \
+  -d '{"vnet_name":"vnet-nonexistent","mac_address":"aa:bb:cc:99:00:01","underlay_ip":"10.0.99.1"}'
+```
+
+**Error (HTTP 400):**
+```
+cross-namespace reference rejected
+(referenced default/vnet/vnet-nonexistent not found in this namespace)
+```
+
+**Why it failed**: dashd's `CheckEni()` looked up `vnet-nonexistent`
+in the `default` namespace. Not found. The ENI was not stored.
+
+**Experiment B — wrong config: delete vnet with dependents (FAIL)**
+
+```bash
+curl -s -X DELETE http://127.0.0.1:28443/v1/default/vnets/bank-prod-web
+```
+
+**Error (HTTP 400):**
+```
+referential integrity: object has dependents:
+cannot delete vnet "bank-prod-web" — eni "eni-bank-web-01" still references it
+```
+
+**Why it failed**: dashd scanned all ENIs and found one referencing
+this vnet. Deleting it would orphan the ENI, so the delete is blocked.
+
+**Right approach**: delete dependents first (ENI before vnet), or use
+`dashctl validate` for pre-flight checks:
+
+```bash
+docker exec dc-diag-dashd-1 dashctl validate -f /manifests/ \
+  --endpoint http://localhost:8443 --insecure
+# Total: N  Accepted: N  Rejected: 0
+```

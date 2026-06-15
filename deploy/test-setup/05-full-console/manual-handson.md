@@ -1196,6 +1196,10 @@ message names:
 **Objective**: prove that creating a Tier 2 object (eni_route) without
 its parent ENI is rejected.
 
+**What is an eni_route?** It binds an ENI to a route group — "this ENI
+uses these routes." It's Tier 2 because it references both an ENI
+(Tier 1) and a route group (Tier 0). Both must exist first.
+
 ```bash
 # Still inside the sim container from 14.1
 
@@ -1212,72 +1216,127 @@ Apply rejected: referential integrity: eni_route references eni "eni-ghost"
 (field key.eni) which does not exist; create it first
 ```
 
+**Why it failed**: `eni_route` is a Tier 2 binding object. Its key
+contains the ENI name (`key[0] = "eni-ghost"`), and its `group_id`
+field references a route group. The sim checks both — the ENI
+doesn't exist, so it fails on the first check. Even if the ENI
+existed, `"rg-prod"` would also need to be a real route group.
+
+**The lesson**: binding objects (eni_route, acl_in, acl_out) connect
+two things together. Both things must exist before the binding can
+be created.
+
 ### 14.3 — Right config: correct creation order (PASS)
 
 **Objective**: create a complete ENI pipeline in the right order:
 Tier 0 → Tier 1 → Tier 2. Every Apply succeeds.
 
+**The dependency chain we're building:**
+
+```
+vnet-lab14 (Tier 0)  ←──── eni-lab14-ok (Tier 1) ←──── eni_route (Tier 2)
+                                                              │
+route_group rg-lab14 (Tier 0) ←── route (Tier 1) ←───────────┘
+```
+
+Each arrow means "depends on". We create left-to-right (bottom-up):
+
 ```bash
-# Step 1: Create a vnet (Tier 0 — no FK dependencies)
+# ═══ Tier 0: roots — no dependencies, create first ═══════════
+
+# Step 1: VNet — the virtual network identity
 dash-sim-client --target localhost:50051 apply \
   --kind vnet --key vnet-lab14 \
   --value '{"vni":9999}'
 # → accepted ✅
+# WHY: vnet is Tier 0. It has no FK fields. Always succeeds.
 
-# Step 2: Create a route_group (Tier 0 — no FK dependencies)
+# Step 2: Route group — a container for routes
 dash-sim-client --target localhost:50051 apply \
   --kind route_group --key rg-lab14 \
   --value '{}'
 # → accepted ✅
+# WHY: route_group is Tier 0. No FK fields.
 
-# Step 3: Create the ENI (Tier 1 — references vnet)
+# ═══ Tier 1: reference Tier 0 ════════════════════════════════
+
+# Step 3: ENI — references the vnet from step 1
 dash-sim-client --target localhost:50051 apply \
   --kind eni --key eni-lab14-ok \
   --value '{"vnet":"vnet-lab14"}'
-# → accepted ✅  (vnet-lab14 exists from step 1)
+# → accepted ✅
+# WHY: eni.vnet = "vnet-lab14" → exists (created in step 1)
 
-# Step 4: Create a route (Tier 1 — references route_group + vnet)
+# Step 4: Route — references the route group AND vnet
 dash-sim-client --target localhost:50051 apply \
   --kind route --key rg-lab14 --key 10.0.0.0/8 \
   --value '{"vnet":"vnet-lab14"}'
-# → accepted ✅  (both rg-lab14 and vnet-lab14 exist)
+# → accepted ✅
+# WHY: route key[0] = "rg-lab14" → exists (step 2)
+#      route.vnet = "vnet-lab14" → exists (step 1)
 
-# Step 5: Create an eni_route (Tier 2 — references ENI + route_group)
+# ═══ Tier 2: reference Tier 0 + Tier 1 ══════════════════════
+
+# Step 5: ENI route — binds the ENI to the route group
 dash-sim-client --target localhost:50051 apply \
   --kind eni_route --key eni-lab14-ok \
   --value '{"group_id":"rg-lab14"}'
-# → accepted ✅  (eni-lab14-ok and rg-lab14 both exist)
+# → accepted ✅
+# WHY: eni_route key[0] = "eni-lab14-ok" → exists (step 3)
+#      eni_route.group_id = "rg-lab14" → exists (step 2)
 
-# Verify everything was created
+# Verify the complete pipeline
 dash-sim-client --target localhost:50051 list --kind eni -o table
 ```
 
+**What you built**: a complete ENI data path:
+`vnet-lab14 → eni-lab14-ok → eni_route → rg-lab14 → route → vnet-lab14`.
+Packets arriving at this ENI will be routed through the 10.0.0.0/8 prefix
+and encapsulated with VNI 9999.
+
 ### 14.4 — Fix-then-retry workflow
 
-**Objective**: demonstrate the operator workflow when an Apply fails —
-create the missing parent, then retry.
+**Objective**: demonstrate what happens in real operations — you hit an
+FK error, read the message, create what's missing, and retry.
+
+**The scenario**: you want to create an ACL rule, but you forgot to
+create the ACL group first.
 
 ```bash
-# Step 1: Try to create an ACL rule in a group that doesn't exist
+# Step 1: Try to create an ACL rule in group "acl-lab14-grp"
 dash-sim-client --target localhost:50051 apply \
   --kind acl_rule --key acl-lab14-grp --key 100 \
   --value '{}'
-# → rejected: acl_group "acl-lab14-grp" does not exist
+```
 
-# Step 2: Create the missing ACL group
+**Error:**
+```
+Apply rejected: referential integrity: acl_rule references acl_group
+"acl-lab14-grp" (field key.group_id) which does not exist; create it first
+```
+
+**What the error tells you**: the ACL rule's key starts with the group
+ID (`acl-lab14-grp`). That group must exist as an `acl_group` object.
+It doesn't. The fix is in the error: "create it first."
+
+```bash
+# Step 2: Create the missing ACL group (Tier 0 — no deps)
 dash-sim-client --target localhost:50051 apply \
   --kind acl_group --key acl-lab14-grp \
   --value '{}'
 # → accepted ✅
 
-# Step 3: Retry the ACL rule — now succeeds
+# Step 3: Retry the exact same ACL rule command — now succeeds
 dash-sim-client --target localhost:50051 apply \
   --kind acl_rule --key acl-lab14-grp --key 100 \
   --value '{}'
-# → accepted ✅
+# → accepted ✅ (acl_group "acl-lab14-grp" now exists)
 
 exit
 ```
+
+**The lesson**: FK errors are not fatal. Read the error, create the
+missing dependency, retry. No need to start over.
 
 ### 14.5 — Clean up lab objects
 
@@ -1329,3 +1388,56 @@ Tier 2 — References Tier 0 + Tier 1:
 
 > **See also**: [`docs/dashd-features/referential-integrity-validation.md`](../../../docs/dashd-features/referential-integrity-validation.md)
 > for the full FK map, design rationale, and future phases.
+
+### 14.6 — dashd-side FK validation (dashctl)
+
+Labs 14.1–14.4 tested the **sim layer** (dash-sim-client → dash-sim).
+Now we test the **controller layer** (dashctl → dashd). dashd
+validates the same dependency rules but at the fleet level — checking
+that vnets, ENIs, and service tunnels exist in the correct namespace.
+
+**Experiment A — wrong config: ENI with missing vnet via REST (FAIL)**
+
+```powershell
+$BODY = '{"vnet_name":"vnet-nonexistent","mac_address":"aa:bb:cc:99:00:01","underlay_ip":"10.0.99.1","admin_state":"up"}'
+curl.exe -s -X PUT http://127.0.0.1:28443/v1/default/enis/eni-bad-ref `
+  -H 'Content-Type: application/json' -d $BODY
+```
+
+**Error (HTTP 400):**
+```
+cross-namespace reference rejected
+(referenced default/vnet/vnet-nonexistent not found in this namespace)
+```
+
+**Why it failed**: dashd's `CheckEni()` looked up `vnet-nonexistent`
+in the `default` namespace. No vnet by that name exists. The ENI was
+not stored — dashd rejected it before it could reach any DPU.
+
+**Experiment B — wrong config: delete a vnet with dependents (FAIL)**
+
+The fleet has ENIs referencing `bank-prod-web`. Try to delete it:
+
+```powershell
+curl.exe -s -X DELETE http://127.0.0.1:28443/v1/default/vnets/bank-prod-web
+```
+
+**Error (HTTP 400):**
+```
+referential integrity: object has dependents:
+cannot delete vnet "bank-prod-web" — eni "eni-bank-web-01" still references it
+```
+
+**Why it failed**: dashd's `CheckDelete()` scanned all ENIs in the
+`default` namespace and found `eni-bank-web-01` with
+`vnet_name: "bank-prod-web"`. Deleting the vnet would orphan the ENI,
+so the delete is blocked.
+
+**Right approach**: delete dependents first (ENI before vnet), or use
+`dashctl validate` to check manifests before applying:
+
+```bash
+docker exec dc-console-dashd-1 dashctl validate -f /manifests/ \
+  --endpoint http://localhost:8443 --insecure
+# Total: N  Accepted: N  Rejected: 0
+```

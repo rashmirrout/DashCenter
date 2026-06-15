@@ -300,22 +300,60 @@ The 8 conformance cases pin the exact pipeline semantics. Read them like
 contract tests — any behavioural change in the pipeline must update these
 tests.
 
-### 10a. Referential integrity tests
+### 10a. Referential integrity — how objects depend on each other
+
+The DASH object graph is deeply interconnected. Before `Apply()` writes
+an object to the store, it validates that every FK reference points to
+an existing object. This is implemented in `model/refs.go` via a
+declarative `fkRules` table with 25 rules covering all object kinds.
+
+**Why this matters**: without FK validation, a typo in `vnet_name` goes
+undetected. The ENI sits in the store with a dangling reference. Packets
+arrive, the pipeline looks up the vnet mapping, finds nothing, and
+drops silently. The operator discovers it 20 minutes later via counter
+spikes — instead of at the PUT that caused it.
+
+**How it works internally**:
+
+1. `Store.Apply()` receives an object (kind + key + payload).
+2. It iterates `fkRules` to find rules matching the object's kind.
+3. Each rule extracts a ref value (e.g., `Eni.vnet`) and checks if
+   the referenced object exists in the store.
+4. If any ref is missing → error with kind, field, ref value, and fix.
+5. If all refs resolve → object is written.
+
+**The dependency tiers**:
+
+```
+Tier 0: vnet, qos, acl_group, route_group, tunnel, ...   (no FKs)
+Tier 1: eni→vnet, acl_rule→acl_group, route→route_group  (refs T0)
+Tier 2: eni_route→eni+route_group, acl_in→eni+acl_group  (refs T0+T1)
+```
+
+**Example error** (Apply an ENI when the vnet doesn't exist):
+
+```
+referential integrity: eni references vnet "vnet-bllue" (field vnet)
+which does not exist; create it first
+```
+
+**Key design decisions**:
+- `--strict-refs=true` is the default. Use `false` only for tests that
+  don't care about FK order.
+- Optional refs (empty string) are skipped — an ENI with `qos: ""`
+  passes without looking up a qos object.
+- The check runs under the store's write lock, so the ref can't be
+  deleted between check and write.
+
+**Tests**:
 
 ```bash
-# Unit tests — 51 tests, 100% coverage on checkRefs/nonEmpty/kindNameOf
+# 51 unit tests — all 25 FK families, StrictRefs toggle, error quality
 go test -v ./dash-sim/internal/sim/model/ -run TestRefs
 
-# Integration tests — 9 tests exercising FK validation over gRPC
+# 9 integration tests — FK validation over the full gRPC stack
 go test -v ./dash-sim/test/integration/ -run TestIntegration_Refs
 ```
 
-The unit tests cover all 25 FK families (missing ref → error, valid ref →
-accepted), the `StrictRefs` toggle, Tier 0 roots (no FK check), error
-message quality, and edge cases (empty optional refs, defensive skip
-branches).
-
-The integration tests exercise the full client → gRPC → server → store
-stack: rejected applies return `Ack{Accepted: false, Error: ...}` with
-the FK violation message; correct creation order succeeds; fix-then-retry
-workflow works.
+For the hands-on experiments (wrong config → error → right config → success),
+see [RUN_AND_TEST.md §9c](../../../src/impl-go/dash-sim/RUN_AND_TEST.md).

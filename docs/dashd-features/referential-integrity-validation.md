@@ -13,8 +13,11 @@
 > (sim parity roadmap),
 > [features.md §5](features.md) (CRUD reference),
 > [CLI_GUIDE.md](../CLI_GUIDE.md) (dashctl command reference).
-> **Status**: ⏳ Phase 1 (dash-sim southbound) **implemented**.
-> Phases 2–3 (dashd northbound, delete-side, tooling) are proposed.
+> **Status**: ✅ Phases 1–3 **implemented**.
+> Phase 1: dash-sim southbound (25/25 FK validated).
+> Phase 2a: dashd northbound Put-side (service_tunnel + HaSet DPU IDs).
+> Phase 2b: dashd Delete-side orphan protection (vnet, eni, service_tunnel).
+> Phase 3: `dashctl validate` + `dash-sim-client validate` CLIs.
 
 ---
 
@@ -147,10 +150,10 @@ dropping all traffic with no warning.
 
 | Surface | Validated | Total | Coverage |
 |---|---|---|---|
-| dashd northbound (Put) | 5 | 12 | **42%** |
+| dashd northbound (Put) | **7** | 12 | **58%** ✅ |
 | dash-sim southbound (Apply) | **25** | 25 | **100%** ✅ |
-| Delete orphan protection | 0 | 12 | **0%** |
-| **Overall** | **30** | **~49** | **~61%** |
+| Delete orphan protection | **3** | 12 | **25%** ✅ |
+| **Overall** | **35** | **~49** | **~71%** |
 
 ---
 

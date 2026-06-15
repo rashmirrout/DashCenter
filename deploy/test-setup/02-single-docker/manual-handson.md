@@ -286,20 +286,52 @@ network you use the **host port** (50051). Both work.
 ## Step 10a — Referential integrity (FK validation)
 
 `dash-sim` validates foreign-key references at apply time. Wrong refs
-are rejected instantly.
+are rejected instantly with a clear error telling you what's missing.
+
+### Why this matters
+
+Every DASH object kind exists in a dependency hierarchy:
+
+```
+Tier 0 (roots):  vnet, acl_group, route_group, ...  (no dependencies)
+Tier 1 (→ T0):   eni→vnet, acl_rule→acl_group, route→route_group
+Tier 2 (→ T0+1): eni_route→eni+route_group, acl_in→eni+acl_group
+```
+
+If you create an ENI before its vnet, the ENI has a dangling reference.
+Packets will drop silently. FK validation catches this at Apply time.
+
+### Experiment A — wrong config (FAIL)
 
 ```powershell
-# Wrong: ENI references a vnet that doesn't exist
+# ENI references a vnet that doesn't exist
 & $c --target $sim apply --kind eni --key eni-bad --value '{"vnet":"no-such-vnet"}'
-# → rejected: referential integrity: eni references vnet "no-such-vnet"
-#   (field vnet) which does not exist; create it first
+```
 
-# Right: create vnet first, then ENI
+**Error:**
+```
+referential integrity: eni references vnet "no-such-vnet" (field vnet)
+which does not exist; create it first
+```
+
+**Why**: `eni` is Tier 1 — its `vnet` field must point to an existing
+vnet object. `"no-such-vnet"` doesn't exist. The ENI is not stored.
+
+### Experiment B — right config: create dependencies first (PASS)
+
+```powershell
+# Tier 0: vnet first (no FK checks needed)
 & $c --target $sim apply --kind vnet --key vnet-ri --value '{"vni":42}'
-& $c --target $sim apply --kind eni  --key eni-ri  --value '{"vnet":"vnet-ri"}'
-# → accepted
+# → accepted ✅
 
-# Clean up
+# Tier 1: eni references the vnet (now exists)
+& $c --target $sim apply --kind eni  --key eni-ri  --value '{"vnet":"vnet-ri"}'
+# → accepted ✅  (vnet-ri exists — FK check passes)
+```
+
+### Clean up
+
+```powershell
 & $c --target $sim delete --kind eni  --key eni-ri
 & $c --target $sim delete --kind vnet --key vnet-ri
 ```

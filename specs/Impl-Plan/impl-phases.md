@@ -2,7 +2,7 @@
 
 > **Purpose**: Single source of truth for dashd implementation progress across all phases.
 > **Ground truth**: [`impl-plan-basic.md`](impl-plan-basic.md) (Phase 1), [`impl-plan-advanced.md`](impl-plan-advanced.md) (Phase 2).
-> **Last updated**: 2026-06-09
+> **Last updated**: 2026-06-15
 
 ---
 
@@ -847,6 +847,7 @@ Deliver **operator diagnostic tools** that run entirely in dashd's memory agains
 | PE-G7.1 | PE-G6/G7 polish — `dashctl topology [--follow]` CLI parity + `EtcdElector` background leader-observer (followers now report `leader_id` without explicit lookup) + Cordon/Uncordon button in `/topology-v2` SPA inspector drawer | ✅ |
 | PE-G8 | dash-sim per-DPU + per-ENI + per-VNET counter rollups via new `dashapi.v1.GetDpuCounters` RPC; `dash-sim-client dpu-counters` operator subcommand inspects them standalone (no dashd involvement). 60 unit tests at 100% coverage on every new function + 4 in-process integration tests all green. Design doc: [docs/dashd-features/dash-sim-counter-rollups.md](../../docs/dashd-features/dash-sim-counter-rollups.md). Per-flow + multi-DPU scalability deferred to PE-G9/PD-G5 design docs as Future Scopes. | ✅ |
 | PE-G9 | dashd ingests `GetDpuCounters` into typed `dashcenter.v1.CounterReport` via `internal/counters/mapper.go` (Option B translator); per-DPU `counters.Store` cache populated by `counters.Poller` (5s default, 100ms min clamp, runtime SetInterval + SetEnabled); admin endpoints `GET /admin/counters[?dpu=ID]` + `POST /admin/counters/poll-interval` + `POST /admin/counters/enable`; new `cfg.Observability.Counters{Enabled,PollInterval}` config block. DpuClient interface extended with `GetDpuCounters(ctx,req)`. 60 unit tests + 4 in-process gRPC e2e at **99.3% line coverage**. All 34 packages green (27 dashd + 4 dash-sim + 3 dash-sim-client). Per-DPU poll-interval override deferred to PE-G10 / PD-G5 with explicit Future-Scope rationale in the counters design doc. | ✅ |
+| PE-G10 | **Referential integrity validation** — full-stack FK validation across dash-sim (25/25 southbound FKs), dashd (Put-side: RoutePolicy→service_tunnel, HaSet→DPU IDs; Delete-side: vnet→ENI/VnetMapping, eni→AclPolicy/RoutePolicy, service_tunnel→RoutePolicy orphan protection), `dash-sim-client validate -f`, `dashctl validate -f`. 51 dash-sim unit tests (100% on core functions) + 9 gRPC integration tests + 28 dashd namespace tests (95.2% coverage) + all 45 packages green. Live e2e: wrong ENI→400, delete-with-deps→412, valid create→200, clean delete→204. Design doc: [docs/dashd-features/referential-integrity-validation.md](../../docs/dashd-features/referential-integrity-validation.md). | ✅ |
 
 ---
 

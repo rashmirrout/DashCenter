@@ -45,10 +45,12 @@ package namespace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
+	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/inventory"
 	"github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/store"
 )
 
@@ -65,6 +67,14 @@ var (
 	// that lives in a different namespace (or does not exist in the
 	// caller's namespace).
 	ErrCrossNamespace = errors.New("namespace: cross-namespace reference rejected")
+
+	// ErrDanglingReference is returned when a spec references an
+	// object that does not exist (inventory DPU, service_tunnel, etc.).
+	ErrDanglingReference = errors.New("referential integrity: dangling reference")
+
+	// ErrHasDependents is returned when deleting an object that is
+	// still referenced by other objects.
+	ErrHasDependents = errors.New("referential integrity: object has dependents")
 )
 
 // Validator checks namespace invariants against a store. It is read-only;
@@ -72,12 +82,20 @@ var (
 // across goroutines.
 type Validator struct {
 	store store.DesiredStore
+	inv   *inventory.Inventory // may be nil — skips DPU existence checks
 }
 
 // NewValidator constructs a Validator backed by the given store.
 // The store is used only for read-side reference checks (store.Get).
 func NewValidator(st store.DesiredStore) *Validator {
 	return &Validator{store: st}
+}
+
+// WithInventory sets the inventory reference for DPU existence checks.
+// Returns the Validator for chaining.
+func (v *Validator) WithInventory(inv *inventory.Inventory) *Validator {
+	v.inv = inv
+	return v
 }
 
 // CheckSpecNamespace verifies that a spec's own namespace field (if
@@ -202,18 +220,38 @@ func (v *Validator) CheckRoutePolicy(ctx context.Context, ns string, spec *dashc
 					i, r.GetNextHopTarget(), err)
 			}
 		}
+		if r.GetNextHopType() == "service_tunnel" && r.GetNextHopTarget() != "" {
+			if err := v.refExists(ctx, ns, "service_tunnel", r.GetNextHopTarget()); err != nil {
+				return fmt.Errorf("route_policy.routes[%d].next_hop_target=%q (type=service_tunnel): %w",
+					i, r.GetNextHopTarget(), err)
+			}
+		}
 	}
 	return nil
 }
 
-// CheckHaSet validates an HaSetSpec. HA sets reference DPUs (global,
-// operator-owned), not tenant-scoped objects, so the only namespace
-// check is the spec-namespace consistency one.
+// CheckHaSet validates an HaSetSpec:
+//   - spec-namespace consistency;
+//   - every member_dpu_ids[i] MUST exist in the DPU inventory.
 func (v *Validator) CheckHaSet(_ context.Context, ns string, spec *dashcenterv1.HaSetSpec) error {
 	if spec == nil {
 		return nil
 	}
-	return v.CheckSpecNamespace(ns, spec.GetNamespace())
+	if err := v.CheckSpecNamespace(ns, spec.GetNamespace()); err != nil {
+		return err
+	}
+	if v.inv != nil {
+		for i, dpuID := range spec.GetMemberDpuIds() {
+			if dpuID == "" {
+				continue
+			}
+			if _, err := v.inv.Get(dpuID); err != nil {
+				return fmt.Errorf("%w: ha_set.member_dpu_ids[%d]=%q not found in inventory",
+					ErrDanglingReference, i, dpuID)
+			}
+		}
+	}
+	return nil
 }
 
 // CheckServiceTunnel validates a ServiceTunnelSpec. Like HA sets,
@@ -242,4 +280,109 @@ func (v *Validator) refExists(ctx context.Context, ns, kind, name string) error 
 	// Some other store error — propagate as-is so the caller can
 	// distinguish "validator broke" from "validator rejected".
 	return fmt.Errorf("namespace: store lookup failed: %w", err)
+}
+
+// CheckDelete validates that no other object references the target
+// before deletion. Returns ErrHasDependents if dependents exist.
+// force=true bypasses the check (emergency operations).
+func (v *Validator) CheckDelete(ctx context.Context, ns, kind, name string, force bool) error {
+	if force {
+		return nil
+	}
+	switch kind {
+	case "vnet":
+		return v.checkVnetDependents(ctx, ns, name)
+	case "eni":
+		return v.checkEniDependents(ctx, ns, name)
+	case "service_tunnel":
+		return v.checkServiceTunnelDependents(ctx, ns, name)
+	}
+	return nil
+}
+
+// checkVnetDependents scans for ENIs and VnetMappings that reference
+// the given vnet.
+func (v *Validator) checkVnetDependents(ctx context.Context, ns, vnetName string) error {
+	// Check ENIs referencing this vnet
+	enis, err := v.store.List(ctx, ns, "eni")
+	if err != nil {
+		return nil // store error — don't block deletion
+	}
+	for _, sp := range enis {
+		var spec dashcenterv1.EniSpec
+		if json.Unmarshal(sp.Data, &spec) == nil && spec.GetVnetName() == vnetName {
+			return fmt.Errorf("%w: cannot delete vnet %q — eni %q still references it",
+				ErrHasDependents, vnetName, sp.Key.Name)
+		}
+	}
+	// Check VnetMappings referencing this vnet
+	mappings, err := v.store.List(ctx, ns, "vnet_mapping")
+	if err != nil {
+		return nil
+	}
+	for _, sp := range mappings {
+		var spec dashcenterv1.VnetMappingSpec
+		if json.Unmarshal(sp.Data, &spec) == nil && spec.GetVnetName() == vnetName {
+			return fmt.Errorf("%w: cannot delete vnet %q — vnet_mapping %q still references it",
+				ErrHasDependents, vnetName, sp.Key.Name)
+		}
+	}
+	return nil
+}
+
+// checkEniDependents scans for AclPolicies and RoutePolicies that
+// reference the given ENI.
+func (v *Validator) checkEniDependents(ctx context.Context, ns, eniName string) error {
+	acls, err := v.store.List(ctx, ns, "acl_policy")
+	if err != nil {
+		return nil
+	}
+	for _, sp := range acls {
+		var spec dashcenterv1.AclPolicySpec
+		if json.Unmarshal(sp.Data, &spec) == nil {
+			for _, en := range spec.GetEniNames() {
+				if en == eniName {
+					return fmt.Errorf("%w: cannot delete eni %q — acl_policy %q still references it",
+						ErrHasDependents, eniName, sp.Key.Name)
+				}
+			}
+		}
+	}
+	routes, err := v.store.List(ctx, ns, "route_policy")
+	if err != nil {
+		return nil
+	}
+	for _, sp := range routes {
+		var spec dashcenterv1.RoutePolicySpec
+		if json.Unmarshal(sp.Data, &spec) == nil {
+			for _, en := range spec.GetEniNames() {
+				if en == eniName {
+					return fmt.Errorf("%w: cannot delete eni %q — route_policy %q still references it",
+						ErrHasDependents, eniName, sp.Key.Name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// checkServiceTunnelDependents scans for RoutePolicies that reference
+// the given service tunnel.
+func (v *Validator) checkServiceTunnelDependents(ctx context.Context, ns, tunnelName string) error {
+	routes, err := v.store.List(ctx, ns, "route_policy")
+	if err != nil {
+		return nil
+	}
+	for _, sp := range routes {
+		var spec dashcenterv1.RoutePolicySpec
+		if json.Unmarshal(sp.Data, &spec) == nil {
+			for _, r := range spec.GetRoutes() {
+				if r != nil && r.GetNextHopType() == "service_tunnel" && r.GetNextHopTarget() == tunnelName {
+					return fmt.Errorf("%w: cannot delete service_tunnel %q — route_policy %q still references it",
+						ErrHasDependents, tunnelName, sp.Key.Name)
+				}
+			}
+		}
+	}
+	return nil
 }

@@ -425,6 +425,35 @@ Verify gone:
 # Error: rpc error: code = NotFound desc = not found
 ```
 
+### 10a. Delete orphan protection (dashd)
+
+dashd rejects deleting an object when other objects still reference it.
+This prevents silent orphaning that leads to traffic drops.
+
+**Protected kinds:**
+
+| Deleting | Blocked when referenced by |
+|---|---|
+| `vnet` | any ENI (`vnet_name`) or VnetMapping (`vnet_name`) |
+| `eni` | any AclPolicy (`eni_names[]`) or RoutePolicy (`eni_names[]`) |
+| `service_tunnel` | any RoutePolicy (`routes[].next_hop_target` when type=service_tunnel) |
+
+**Example — delete a vnet that an ENI still references:**
+
+```powershell
+dashctl delete vnet vnet-prod --endpoint http://localhost:8443 --insecure
+# Error: failed precondition: referential integrity: object has dependents:
+#   cannot delete vnet "vnet-prod" — eni "eni-001" still references it
+```
+
+**Fix**: delete the dependent first, then retry:
+
+```powershell
+dashctl delete eni eni-001 --endpoint http://localhost:8443 --insecure
+dashctl delete vnet vnet-prod --endpoint http://localhost:8443 --insecure
+# OK
+```
+
 ---
 
 ## 11. Subscribe (snapshot + live)
@@ -752,6 +781,42 @@ Exit code = number of rejected objects (0 = all valid).
 
 ---
 
+## 12d. dashctl validate — pre-flight FK validation of manifests
+
+Loads manifests and PUTs each spec to dashd, reporting which objects
+pass referential integrity checks and which are rejected. Unlike
+`apply`, it continues past failures and prints a summary.
+
+Validated FK rules at the dashd level:
+- ENI → `vnet_name` must exist in the same namespace
+- VnetMapping → `vnet_name` must exist in the same namespace
+- AclPolicy → every `eni_names[i]` must exist
+- RoutePolicy → every `eni_names[i]` + `vnet`/`service_tunnel` targets must exist
+- HaSet → every `member_dpu_ids[i]` must exist in inventory
+
+```powershell
+# Validate a manifest directory:
+dashctl validate -f manifest/ --endpoint http://localhost:8443 --insecure
+# STATUS  KIND             NAMESPACE     NAME                            ERROR
+# ------  ---------------  ------------  ------------------------------  -----
+# ✅ OK   vnet             default       vnet-prod
+# ✅ OK   eni              default       eni-001
+# ❌ FAIL route_policy     default       rp-bad                          ... cross-namespace reference ...
+#
+# Total: 3  Accepted: 2  Rejected: 1
+
+# Validate recursively:
+dashctl validate -f manifest/ -R --endpoint http://localhost:8443 --insecure
+```
+
+Exit code = number of rejected objects (0 = all valid).
+
+> **Note**: objects that pass validation ARE applied to dashd (this is
+> an apply-and-report tool). Use a test environment for non-destructive
+> validation.
+
+---
+
 ## 13. SimulatePacket (dash-sim only)
 
 Walks the full DASH pipeline:
@@ -916,6 +981,15 @@ dashctl counters clear --reset-sim                     # wipe cache + zero sim a
 dashctl counters clear --dpu=<id> --reset-sim          # single DPU: cache + sim reset
 ```
 
+### dashctl validate + delete commands
+
+```powershell
+dashctl validate -f manifest/                          # pre-flight FK validation
+dashctl validate -f manifest/ -R                       # recursive
+dashctl delete vnet vnet-prod                          # blocked if dependents exist
+dashctl delete eni eni-001                             # blocked if policies reference it
+```
+
 ### Running CLIs from inside Docker containers
 
 Both CLIs are shipped inside their respective Docker images — no need to install anything on the host.
@@ -948,6 +1022,7 @@ dashctl version --endpoint http://localhost:8443 --insecure
 dashctl counters --endpoint http://localhost:8443 --insecure
 dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
 dashctl counters details --dpu=dpu-sim-01 --endpoint http://localhost:8443 --insecure
+dashctl validate -f manifest/ --endpoint http://localhost:8443 --insecure
 
 # Or run without entering the shell:
 docker exec dc-console-dashd-1 dashctl counters --endpoint http://localhost:8443 --insecure
