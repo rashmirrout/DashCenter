@@ -1,0 +1,86 @@
+# route-policy-experiments.yaml — Hands-on experiments with RoutePolicy specs
+#
+# RoutePolicy depends on ENIs (eni_names[]) and VNets/ServiceTunnels
+# (routes[].next_hop_target). All referenced objects must exist.
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: WRONG — route with missing service_tunnel target (FAIL)
+# ═══════════════════════════════════════════════════════════════
+#
+# Prerequisites: eni-exp-ok from eni-experiments.yaml
+# Run:    dashctl apply -f - <<< '<paste>'
+# Expect: FAILED — routes[0].next_hop_target="tun-ghost" (type=service_tunnel): not found
+#
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: rp-exp-bad
+spec:
+  eni_names: [eni-exp-ok]
+  routes:
+    - prefix: "0.0.0.0/0"
+      next_hop_type: service_tunnel
+      next_hop_target: tun-ghost            # ← doesn't exist → REJECTED
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: RIGHT — route policy with valid references (PASS)
+# ═══════════════════════════════════════════════════════════════
+#
+# Prerequisites: eni-exp-ok + vnet-exp-1 from previous experiments
+#
+# RoutePolicy fields:
+#   eni_names   — FK[] → which ENIs use this routing table (REQUIRED)
+#   routes[]    — ordered list of prefix→action pairs:
+#     prefix          — IP CIDR to match ("10.0.0.0/8", "0.0.0.0/0")
+#     next_hop_type   — "vnet" | "service_tunnel" | "direct" | "drop"
+#     next_hop_target — FK → Vnet or ServiceTunnel name (required for vnet/service_tunnel)
+#     metric          — tie-break for overlapping prefixes (lower wins)
+#
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: rp-exp-ok
+  labels: { experiment: route }
+spec:
+  eni_names: [eni-exp-ok]
+  routes:
+    - prefix: "192.168.99.0/24"             # local subnet → VNet encap
+      next_hop_type: vnet
+      next_hop_target: vnet-exp-1           # FK → must be an existing Vnet
+      metric: 10
+    - prefix: "10.0.0.0/8"                  # management → direct
+      next_hop_type: direct
+      metric: 50
+    - prefix: "0.0.0.0/0"                   # everything else → drop
+      next_hop_type: drop
+      metric: 1000
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 3: ECMP — multiple routes for the same prefix
+# ═══════════════════════════════════════════════════════════════
+#
+# When two routes match the same prefix with equal metric,
+# the DPU load-balances across them (ECMP).
+#
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: rp-exp-ecmp
+  labels: { experiment: route, feature: ecmp }
+spec:
+  eni_names: [eni-exp-ok]
+  routes:
+    - prefix: "192.168.99.0/24"
+      next_hop_type: vnet
+      next_hop_target: vnet-exp-1
+      metric: 10                             # same prefix, same metric = ECMP
+    - prefix: "0.0.0.0/0"
+      next_hop_type: drop
+      metric: 1000
+---
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete route-policy rp-exp-ecmp --ignore-not-found
+#   dashctl delete route-policy rp-exp-ok --ignore-not-found
+#   dashctl delete route-policy rp-exp-bad --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

@@ -8,6 +8,7 @@
 #   ./start-fleet.sh --with-console     # also build & start dashw at :3000
 #   ./start-fleet.sh --skip-build       # reuse cached images
 #   ./start-fleet.sh --skip-context     # skip dashctl context setup
+#   ./start-fleet.sh --skip-dashctl-build  # skip auto-building dashctl from source
 #   ./start-fleet.sh --ready-timeout 120
 
 set -euo pipefail
@@ -16,12 +17,14 @@ cd "$(dirname "$0")"
 WITH_CONSOLE=0
 SKIP_BUILD=0
 SKIP_CONTEXT=0
+SKIP_DASHCTL_BUILD=0
 READY_TIMEOUT_SEC=90
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --with-console) WITH_CONSOLE=1; shift ;;
         --skip-build) SKIP_BUILD=1; shift ;;
         --skip-context) SKIP_CONTEXT=1; shift ;;
+        --skip-dashctl-build) SKIP_DASHCTL_BUILD=1; shift ;;
         --ready-timeout) READY_TIMEOUT_SEC="$2"; shift 2 ;;
         -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -51,6 +54,15 @@ fi
 SVC_LABEL=$([[ $WITH_CONSOLE -eq 1 ]] && echo "14 (incl. dashw)" || echo "13 (core)")
 echo "==> Starting fleet (${SVC_LABEL} services)"
 docker compose up -d "${ALL_SERVICES[@]}"
+
+# Build dashctl from source while the fleet is starting up.
+# This runs in parallel with leader election — Go compilation takes
+# ~5-10s on a warm cache, and we need to wait ~10s for the leader
+# anyway. If Go is not installed, the script continues gracefully
+# and provision.sh falls back to bootstrap.py.
+if [[ $SKIP_DASHCTL_BUILD -eq 0 ]]; then
+    ./build-dashctl.sh
+fi
 
 echo "==> Waiting for a dashd leader to be elected (max ${READY_TIMEOUT_SEC}s)"
 deadline=$(( $(date +%s) + READY_TIMEOUT_SEC ))

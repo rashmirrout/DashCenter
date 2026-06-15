@@ -1,0 +1,85 @@
+# acl-policy-experiments.yaml — Hands-on experiments with AclPolicy specs
+#
+# AclPolicy depends on ENIs (eni_names[]). The referenced ENIs must exist.
+# Rules are evaluated by priority (lower number = higher priority).
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: WRONG — ACL referencing an ENI that doesn't exist (FAIL)
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f - <<< '<paste>'
+# Expect: FAILED — acl_policy.eni_names[0]="eni-ghost": not found
+#
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-exp-bad
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-ghost]                   # ← doesn't exist → REJECTED
+  rules:
+    - priority: 100
+      action: allow
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: RIGHT — ACL with valid ENI reference (PASS)
+# ═══════════════════════════════════════════════════════════════
+#
+# Prerequisites: eni-exp-ok from eni-experiments.yaml
+#
+# AclPolicy fields:
+#   stage       — "inbound" or "outbound" (which direction to filter)
+#   priority    — policy priority (lower = evaluated first among policies)
+#   eni_names   — FK[] → which ENIs this ACL applies to
+#   rules[]     — ordered list of match/action pairs:
+#     priority    — rule priority within this policy (lower = first)
+#     action      — "allow" or "deny"
+#     src_prefix  — source IP CIDR to match (optional; omit = any)
+#     dst_prefix  — destination IP CIDR (optional)
+#     src_port    — source port or range "1024-65535" (optional)
+#     dst_port    — destination port "443" or range (optional)
+#     protocol    — "tcp" | "udp" | "icmp" | "6" | "17" (optional)
+#
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-exp-ok
+  labels: { experiment: acl }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-exp-ok]
+  rules:
+    - priority: 100                        # allow HTTPS
+      action: allow
+      dst_port: "443"
+      protocol: tcp
+    - priority: 200                        # allow SSH from mgmt
+      action: allow
+      src_prefix: "10.0.0.0/8"
+      dst_port: "22"
+      protocol: tcp
+    - priority: 300                        # allow ICMP ping
+      action: allow
+      protocol: icmp
+    - priority: 1000                       # deny everything else
+      action: deny
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 3: Delete protection — try deleting the ENI while ACL refs it
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl delete eni eni-exp-ok
+# Expect: ERROR — cannot delete eni "eni-exp-ok"
+#         — acl_policy "acl-exp-ok" still references it
+#
+# Fix:    dashctl delete acl-policy acl-exp-ok
+#         dashctl delete eni eni-exp-ok
+#         (delete policies first, then the ENI)
+#
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete acl-policy acl-exp-ok --ignore-not-found
+#   dashctl delete acl-policy acl-exp-bad --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

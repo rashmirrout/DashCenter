@@ -1,0 +1,45 @@
+# 04-route-policies.yaml — Policies: Route Policies (depend on ENIs + VNets)
+#
+# Route policies define how traffic is routed for the ENIs they bind to.
+# Each policy has eni_names[] (which ENIs use this routing table) and
+# routes[] (prefix → next_hop_type + target).
+#
+# Apply:  dashctl apply -f deploy/test-setup/scenarios/hands-on/bootstrap/04-route-policies.yaml
+# Verify: dashctl get route-policy -o table
+# Error:  If eni-lab-web-01 doesn't exist → "cross-namespace reference rejected"
+
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: rp-lab-web
+  labels: { tenant: lab, tier: web }
+spec:
+  eni_names: [eni-lab-web-01, eni-lab-web-02]   # FK → ENIs that use this routing table
+  routes:
+    - prefix: "192.168.50.0/24"                  # traffic to the web subnet
+      next_hop_type: vnet                         # encap via VNet mappings
+      next_hop_target: lab-web                    # FK → Vnet name
+      metric: 10
+    - prefix: "192.168.51.0/24"                  # traffic to the DB subnet
+      next_hop_type: vnet
+      next_hop_target: lab-db
+      metric: 20
+    - prefix: "0.0.0.0/0"                        # default route → drop
+      next_hop_type: drop
+      metric: 1000
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: rp-lab-db
+  labels: { tenant: lab, tier: db }
+spec:
+  eni_names: [eni-lab-db-01]
+  routes:
+    - prefix: "192.168.51.0/24"
+      next_hop_type: vnet
+      next_hop_target: lab-db
+      metric: 10
+    - prefix: "0.0.0.0/0"
+      next_hop_type: drop
+      metric: 1000

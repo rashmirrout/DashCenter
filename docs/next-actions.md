@@ -16,7 +16,7 @@
 | Phase 2 · PB · Admission (capacity + schema + simulate) | ✅ `dashd-2.0.0-beta` |
 | Phase 2 · PC · Operations (HA + migration + cordon/drain/saga) | ✅ `dashd-2.0.0-rc1` + `dashd-2.0.0-beta-ENI-Live-Migration` |
 | Phase 2 · PD · Security & Observability | ✅ 5/5 (PD-G5 closed 2026-06-14 via PE-3c counter streaming end-to-end — see row #22) |
-| Phase 2 · PE · Diagnostics & gNMI | ⏳ PE-1 diagnostics ✅, PE-3a/b/c counters ✅, **RI Phase 1 ✅** (25/25 sim FK validation); **PE-4 sim parity planned** (rows #23–#25: flow table + transforms + HA) |
+| Phase 2 · PE · Diagnostics & gNMI | ⏳ PE-1 diagnostics ✅, PE-3a/b/c counters ✅, **RI Phases 1–3 ✅** (25/25 sim FK + dashd Put/Delete FK + validate CLIs), **Bundles + apply --force ✅** (EniBundle/AclBundle/RouteBundle/HaBundle + create-vs-update); **PE-4 sim parity planned** (rows #23–#25: flow table + transforms + HA) |
 | Phase 2 · PF · Controllerless | ❌ not started (intentional last per Strategy B) |
 
 **Known unblockers shipped this session (post-tagging)**:
@@ -223,6 +223,14 @@ fixture     ha+migration  diag+gNMI  + denial  GA tag
 
 When all rows are ✅, archive this file by renaming it to `docs/next-actions-2026-Q2.md` and open a fresh one for the next horizon (PF / `dashd-3.x`).
 
-### Immediate next step (as of 2026-06-11 evening)
+### Immediate next step (as of 2026-06-15)
 
-**Pick row 5 — PE-2** (Saga + EventBroadcaster + gNMI Subscribe bridge). Saga was already partially landed under PC-G8 — first task is to confirm reuse and only add what's still missing (durable `Resume()` on dashd restart for in-flight rollbacks per the original PE-G3/G4 contract). gNMI Subscribe is a fresh code path; PE-G5 wants a single `Notification` delivered to a gNMI client within 2s of a `PutVnet`. Estimated 1–2 days; ~400 LOC + tests.
+All RI + Bundle work is complete (rows #26–#30 ✅). The next items per the agreed Option C sequence are:
+
+1. **Row #12** — dashw aggregator collapse (3h win, −600 LOC)
+2. **Row #7** — MigrationService ExportMigrationBundle/ImportMigrationBundle
+3. **Row #5** — PE-2 Saga + gNMI Subscribe bridge
+4. **Row #10** — Tag dashd-2.0.0 GA
+5. **Row #23** — PE-4 flow table (sim parity)
+
+Alternatively, jump straight to #23 if sim parity is the higher priority.

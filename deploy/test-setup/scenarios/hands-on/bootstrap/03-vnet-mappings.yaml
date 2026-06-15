@@ -1,0 +1,44 @@
+# 03-vnet-mappings.yaml — Tier 1: VNet Mappings (depend on VNets)
+#
+# VNet mappings tell the DPU how to encapsulate traffic for a specific
+# overlay IP within a VNet. Each mapping says "overlay IP X in VNet Y
+# → send to underlay IP Z with MAC M".
+#
+# Apply:  dashctl apply -f deploy/test-setup/scenarios/hands-on/bootstrap/03-vnet-mappings.yaml
+# Verify: dashctl get vnet-mapping -o table
+
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: lab-web-192.168.50.1
+  labels: { tenant: lab }
+spec:
+  vnet_name: lab-web                # FK → Vnet that owns this mapping
+  ip_address: "192.168.50.1"       # overlay IP (what the VM sees)
+  underlay_ip: "10.0.50.11"        # physical IP (where packets go on the wire)
+  mac_address: "aa:bb:cc:50:01:01"
+  action: vnet_encap               # vnet_encap | service_tunnel | drop
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: lab-web-192.168.50.2
+  labels: { tenant: lab }
+spec:
+  vnet_name: lab-web
+  ip_address: "192.168.50.2"
+  underlay_ip: "10.0.50.12"
+  mac_address: "aa:bb:cc:50:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: lab-db-192.168.51.1
+  labels: { tenant: lab }
+spec:
+  vnet_name: lab-db
+  ip_address: "192.168.51.1"
+  underlay_ip: "10.0.50.21"
+  mac_address: "aa:bb:cc:50:02:01"
+  action: vnet_encap

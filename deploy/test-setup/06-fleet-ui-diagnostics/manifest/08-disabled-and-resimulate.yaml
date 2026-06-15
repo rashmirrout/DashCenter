@@ -1,0 +1,33 @@
+# 08-disabled-and-resimulate.yaml — admin_state: down + resimulate_flows: true
+#
+# 1. eni-quarantine-01 — analytics ENI quarantined for incident response.
+#    admin_state: down, label quarantine=true, placed on dpu-sim-08.
+#
+# 2. eni-bank-web-04 RESCOPED with resimulate_flows=true. Replaces the
+#    02-enis.yaml version, bumps generation to 2.
+
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-quarantine-01
+  labels: { tenant: analytics, tier: compute, quarantine: "true" }
+spec:
+  vnet_name: analytics-spark
+  mac_address: aa:bb:cc:41:0f:01
+  underlay_ip: 10.4.1.99
+  admin_state: down
+  placement_hint_dpu_ids: [dpu-sim-08]
+  resimulate_flows: false
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-bank-web-04
+  labels: { tenant: bank, tier: web, resimulated: "true" }
+spec:
+  vnet_name: bank-prod-web
+  mac_address: aa:bb:cc:01:00:04
+  underlay_ip: 10.0.1.14
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-02]
+  resimulate_flows: true

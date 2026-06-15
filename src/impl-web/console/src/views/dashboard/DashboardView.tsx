@@ -158,11 +158,27 @@ export default function DashboardView() {
           whileInView="visible"
           viewport={{ once: true }}
           variants={sectionVariants}
-          className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4"
+          className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4"
         >
-          {/* Fleet Connectivity Map */}
-          <GlassCard className="flex flex-col items-center justify-center min-h-[440px]">
-            <div className="w-full flex items-center justify-between mb-2">
+          {/* Fleet Connectivity Map — dominant width column. The grid
+              template `lg:grid-cols-[1fr_280px]` gives Fleet Connectivity
+              ALL remaining horizontal space (`1fr`) while the KPI cards
+              get a fixed narrow 280px column on the right.
+
+              The card uses a FIXED height (`h-[520px]`) so the box stays
+              compact and visually balanced with the KPI column on its
+              right (which is ~488px tall naturally). The
+              `<FleetConnectivityViz fill maxFillSize={720} />` then
+              measures the card's interior width AND height and renders
+              the SVG as a RECTANGLE of that exact size, with the DPU ring
+              laid out as an ELLIPSE that stretches horizontally on wide
+              panels — so the animation actually FILLS the box instead of
+              leaving big empty bands on either side of a centred circle.
+              `maxFillSize` caps each axis at 720 px on ultra-wide monitors.
+              On mobile (< lg breakpoint) both sections stack full-width
+              and the oval becomes nearly circular on more-square cards. */}
+          <GlassCard className="flex flex-col h-[520px]">
+            <div className="w-full flex items-center justify-between mb-2 flex-shrink-0">
               <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-secondary)]">
                 Fleet Connectivity
               </p>
@@ -172,16 +188,23 @@ export default function DashboardView() {
                 </span>
               )}
             </div>
-            <FleetConnectivityViz size={380} />
+            {/* `min-h-0` is critical: without it a flex child of a
+                flex column will not shrink below its content's intrinsic
+                height, so the ResizeObserver would read the SVG's own
+                rendered height instead of the available space and the
+                viz couldn't downsize. */}
+            <div className="flex-1 min-h-0 w-full">
+              <FleetConnectivityViz fill maxFillSize={720} />
+            </div>
           </GlassCard>
 
-          {/* Primary KPI grid (4 stats cards) */}
+          {/* Primary KPI grid (4 stats cards stacked vertically) */}
           <motion.div
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true }}
             variants={gridStagger}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-4 content-start"
+            className="grid grid-cols-1 gap-4 content-start"
           >
             {fleet.isLoading ? (
               Array.from({ length: 4 }, (_, i) => (

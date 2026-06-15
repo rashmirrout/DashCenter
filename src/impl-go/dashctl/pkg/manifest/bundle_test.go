@@ -1,0 +1,407 @@
+package manifest
+
+import (
+	"fmt"
+	"testing"
+)
+
+func TestExpandBundles_NonBundle_PassThrough(t *testing.T) {
+	envs := []*Envelope{
+		{APIVersion: APIVersion, Kind: "Vnet", Metadata: Metadata{Name: "v1"}, Spec: map[string]any{"vni": 1}},
+		{APIVersion: APIVersion, Kind: "Eni", Metadata: Metadata{Name: "e1"}, Spec: map[string]any{"vnet_name": "v1"}},
+	}
+	out := ExpandBundles(envs)
+	if len(out) != 2 {
+		t.Fatalf("expected 2, got %d", len(out))
+	}
+	if out[0].Kind != "Vnet" || out[1].Kind != "Eni" {
+		t.Fatalf("kinds wrong: %s, %s", out[0].Kind, out[1].Kind)
+	}
+}
+
+func TestExpandBundles_EniBundle_FullExpansion(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "EniBundle",
+		Metadata:   Metadata{Name: "eni-web-01", Namespace: "prod", Labels: map[string]string{"tier": "web"}},
+		Spec: map[string]any{
+			"vnet": map[string]any{
+				"name": "vnet-prod",
+				"vni":  float64(1001),
+			},
+			"eni": map[string]any{
+				"mac_address":  "aa:bb:cc:00:00:01",
+				"underlay_ip":  "10.0.1.11",
+				"admin_state":  "up",
+			},
+			"vnet_mappings": []any{
+				map[string]any{
+					"ip_address":  "192.168.1.1",
+					"underlay_ip": "10.0.1.11",
+					"action":      "vnet_encap",
+				},
+			},
+			"route_policy": map[string]any{
+				"name": "rp-web",
+				"routes": []any{
+					map[string]any{"prefix": "192.168.1.0/24", "next_hop_type": "vnet", "next_hop_target": "vnet-prod"},
+				},
+			},
+			"acl_policies": []any{
+				map[string]any{
+					"name":  "acl-web-in",
+					"stage": "inbound",
+					"rules": []any{
+						map[string]any{"priority": float64(100), "action": "allow"},
+					},
+				},
+			},
+		},
+	}
+
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 5 {
+		t.Fatalf("expected 5 expanded envelopes, got %d", len(out))
+	}
+
+	// Check order: Vnet → Eni → VnetMapping → RoutePolicy → AclPolicy
+	wantKinds := []string{"Vnet", "Eni", "VnetMapping", "RoutePolicy", "AclPolicy"}
+	for i, want := range wantKinds {
+		if out[i].Kind != want {
+			t.Errorf("out[%d].Kind = %q, want %q", i, out[i].Kind, want)
+		}
+	}
+
+	// Check Vnet
+	if out[0].Metadata.Name != "vnet-prod" {
+		t.Errorf("vnet name = %q, want vnet-prod", out[0].Metadata.Name)
+	}
+	if out[0].Metadata.Namespace != "prod" {
+		t.Errorf("vnet namespace = %q, want prod", out[0].Metadata.Namespace)
+	}
+
+	// Check ENI auto-wiring
+	if out[1].Spec["vnet_name"] != "vnet-prod" {
+		t.Errorf("eni.vnet_name = %v, want vnet-prod", out[1].Spec["vnet_name"])
+	}
+	if out[1].Metadata.Name != "eni-web-01" {
+		t.Errorf("eni name = %q, want eni-web-01", out[1].Metadata.Name)
+	}
+
+	// Check VnetMapping auto-wiring
+	if out[2].Spec["vnet_name"] != "vnet-prod" {
+		t.Errorf("mapping.vnet_name = %v, want vnet-prod", out[2].Spec["vnet_name"])
+	}
+
+	// Check RoutePolicy auto-wiring of eni_names
+	eniNames, ok := out[3].Spec["eni_names"].([]any)
+	if !ok || len(eniNames) != 1 || eniNames[0] != "eni-web-01" {
+		t.Errorf("route_policy.eni_names = %v, want [eni-web-01]", out[3].Spec["eni_names"])
+	}
+
+	// Check AclPolicy auto-wiring of eni_names
+	aclEniNames, ok := out[4].Spec["eni_names"].([]any)
+	if !ok || len(aclEniNames) != 1 || aclEniNames[0] != "eni-web-01" {
+		t.Errorf("acl_policy.eni_names = %v, want [eni-web-01]", out[4].Spec["eni_names"])
+	}
+
+	// Check labels propagated
+	for i, env := range out {
+		if env.Metadata.Labels["tier"] != "web" {
+			t.Errorf("out[%d] labels missing tier=web: %v", i, env.Metadata.Labels)
+		}
+	}
+}
+
+func TestExpandBundles_EniBundle_MinimalSpec(t *testing.T) {
+	// Minimal bundle: just vnet + eni, no mappings/policies
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "EniBundle",
+		Metadata:   Metadata{Name: "eni-min"},
+		Spec: map[string]any{
+			"vnet": map[string]any{"name": "v1", "vni": float64(100)},
+			"eni":  map[string]any{"mac_address": "00:00:00:00:00:01"},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 2 {
+		t.Fatalf("expected 2 (vnet + eni), got %d", len(out))
+	}
+	if out[0].Kind != "Vnet" || out[1].Kind != "Eni" {
+		t.Fatalf("kinds: %s, %s", out[0].Kind, out[1].Kind)
+	}
+	if out[1].Spec["vnet_name"] != "v1" {
+		t.Errorf("auto-wired vnet_name = %v, want v1", out[1].Spec["vnet_name"])
+	}
+}
+
+func TestExpandBundles_EniBundle_WithServiceTunnel(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "EniBundle",
+		Metadata:   Metadata{Name: "eni-st"},
+		Spec: map[string]any{
+			"vnet":           map[string]any{"name": "v1", "vni": float64(100)},
+			"service_tunnel": map[string]any{"name": "st-1", "vni": float64(9000)},
+			"eni":            map[string]any{"mac_address": "00:00:00:00:00:01"},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 3 {
+		t.Fatalf("expected 3 (vnet + tunnel + eni), got %d", len(out))
+	}
+	if out[0].Kind != "Vnet" || out[1].Kind != "ServiceTunnel" || out[2].Kind != "Eni" {
+		t.Fatalf("kinds: %s, %s, %s", out[0].Kind, out[1].Kind, out[2].Kind)
+	}
+}
+
+func TestExpandBundles_EniBundle_VnetNameAutoGenerated(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "EniBundle",
+		Metadata:   Metadata{Name: "eni-auto"},
+		Spec: map[string]any{
+			"vnet": map[string]any{"vni": float64(100)}, // no "name" field
+			"eni":  map[string]any{},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if out[0].Metadata.Name != "eni-auto-vnet" {
+		t.Errorf("auto-generated vnet name = %q, want eni-auto-vnet", out[0].Metadata.Name)
+	}
+	if out[1].Spec["vnet_name"] != "eni-auto-vnet" {
+		t.Errorf("auto-wired vnet_name = %v, want eni-auto-vnet", out[1].Spec["vnet_name"])
+	}
+}
+
+func TestExpandBundles_EniBundle_ExplicitVnetNamePreserved(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "EniBundle",
+		Metadata:   Metadata{Name: "eni-explicit"},
+		Spec: map[string]any{
+			"vnet": map[string]any{"name": "my-vnet"},
+			"eni":  map[string]any{"vnet_name": "my-vnet"}, // explicitly set
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if out[1].Spec["vnet_name"] != "my-vnet" {
+		t.Errorf("explicit vnet_name = %v, want my-vnet", out[1].Spec["vnet_name"])
+	}
+}
+
+func TestExpandBundles_MixedInput(t *testing.T) {
+	envs := []*Envelope{
+		{APIVersion: APIVersion, Kind: "Vnet", Metadata: Metadata{Name: "standalone"}, Spec: map[string]any{}},
+		{APIVersion: APIVersion, Kind: "EniBundle", Metadata: Metadata{Name: "bundled"},
+			Spec: map[string]any{
+				"vnet": map[string]any{"name": "bv"},
+				"eni":  map[string]any{},
+			}},
+		{APIVersion: APIVersion, Kind: "Eni", Metadata: Metadata{Name: "standalone-eni"}, Spec: map[string]any{}},
+	}
+	out := ExpandBundles(envs)
+	// standalone-vnet + bv(vnet) + bundled(eni) + standalone-eni = 4
+	if len(out) != 4 {
+		t.Fatalf("expected 4, got %d", len(out))
+	}
+	if out[0].Kind != "Vnet" || out[0].Metadata.Name != "standalone" {
+		t.Errorf("out[0] = %s/%s", out[0].Kind, out[0].Metadata.Name)
+	}
+	if out[1].Kind != "Vnet" || out[1].Metadata.Name != "bv" {
+		t.Errorf("out[1] = %s/%s", out[1].Kind, out[1].Metadata.Name)
+	}
+	if out[2].Kind != "Eni" || out[2].Metadata.Name != "bundled" {
+		t.Errorf("out[2] = %s/%s", out[2].Kind, out[2].Metadata.Name)
+	}
+	if out[3].Kind != "Eni" || out[3].Metadata.Name != "standalone-eni" {
+		t.Errorf("out[3] = %s/%s", out[3].Kind, out[3].Metadata.Name)
+	}
+}
+
+func TestEniBundle_ParseValidates(t *testing.T) {
+	doc := []byte(`apiVersion: dashcenter.v1
+kind: EniBundle
+metadata:
+  name: eni-test
+spec:
+  vnet: { name: v1, vni: 100 }
+  eni: { mac_address: "00:00:00:00:00:01" }
+`)
+	env, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if env.Kind != "EniBundle" {
+		t.Errorf("kind = %q, want EniBundle", env.Kind)
+	}
+}
+
+func TestStrField(t *testing.T) {
+	m := map[string]any{"name": "hello", "count": 42}
+	if got := strField(m, "name"); got != "hello" {
+		t.Errorf("strField(name) = %q", got)
+	}
+	if got := strField(m, "count"); got != "" {
+		t.Errorf("strField(count) = %q, want empty (non-string)", got)
+	}
+	if got := strField(m, "missing"); got != "" {
+		t.Errorf("strField(missing) = %q", got)
+	}
+}
+
+func TestCopyMap(t *testing.T) {
+	orig := map[string]any{"a": 1, "b": "two"}
+	cp := copyMap(orig)
+	cp["a"] = 99
+	if orig["a"] != 1 {
+		t.Error("copyMap should not modify original")
+	}
+}
+
+// ── AclBundle tests ──────────────────────────────────────────────────
+
+func TestExpandBundles_AclBundle(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "AclBundle",
+		Metadata:   Metadata{Name: "acl-web", Namespace: "prod"},
+		Spec: map[string]any{
+			"vnet": map[string]any{"name": "vnet-web", "vni": float64(100)},
+			"eni":  map[string]any{"name": "eni-web", "mac_address": "00:00:00:00:00:01"},
+			"acl_policy": map[string]any{
+				"name":      "acl-web-in",
+				"stage":     "inbound",
+				"eni_names": []any{"eni-web"},
+				"rules":     []any{map[string]any{"priority": float64(100), "action": "allow"}},
+			},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 3 {
+		t.Fatalf("expected 3 (vnet + eni + acl_policy), got %d", len(out))
+	}
+	if out[0].Kind != "Vnet" || out[1].Kind != "Eni" || out[2].Kind != "AclPolicy" {
+		t.Fatalf("kinds: %s, %s, %s", out[0].Kind, out[1].Kind, out[2].Kind)
+	}
+	// ENI auto-wires vnet_name
+	if out[1].Spec["vnet_name"] != "vnet-web" {
+		t.Errorf("eni.vnet_name = %v, want vnet-web", out[1].Spec["vnet_name"])
+	}
+}
+
+func TestExpandBundles_AclBundle_PolicyOnly(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "AclBundle",
+		Metadata:   Metadata{Name: "acl-simple"},
+		Spec: map[string]any{
+			"acl_policy": map[string]any{
+				"stage": "inbound",
+				"rules": []any{map[string]any{"priority": float64(100), "action": "deny"}},
+			},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 (acl_policy only), got %d", len(out))
+	}
+	if out[0].Kind != "AclPolicy" {
+		t.Errorf("kind = %s, want AclPolicy", out[0].Kind)
+	}
+}
+
+// ── RouteBundle tests ────────────────────────────────────────────────
+
+func TestExpandBundles_RouteBundle(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "RouteBundle",
+		Metadata:   Metadata{Name: "rp-web", Namespace: "prod"},
+		Spec: map[string]any{
+			"vnet":           map[string]any{"name": "vnet-web", "vni": float64(100)},
+			"service_tunnel": map[string]any{"name": "st-egress"},
+			"eni":            map[string]any{"name": "eni-web", "mac_address": "00:00:00:00:00:01"},
+			"route_policy": map[string]any{
+				"name":      "rp-web-default",
+				"eni_names": []any{"eni-web"},
+				"routes": []any{
+					map[string]any{"prefix": "10.0.0.0/8", "next_hop_type": "vnet", "next_hop_target": "vnet-web"},
+				},
+			},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 4 {
+		t.Fatalf("expected 4 (vnet + tunnel + eni + route_policy), got %d", len(out))
+	}
+	wantKinds := []string{"Vnet", "ServiceTunnel", "Eni", "RoutePolicy"}
+	for i, want := range wantKinds {
+		if out[i].Kind != want {
+			t.Errorf("out[%d].Kind = %q, want %q", i, out[i].Kind, want)
+		}
+	}
+	// ENI auto-wires vnet_name
+	if out[2].Spec["vnet_name"] != "vnet-web" {
+		t.Errorf("eni.vnet_name = %v, want vnet-web", out[2].Spec["vnet_name"])
+	}
+}
+
+func TestExpandBundles_RouteBundle_PolicyOnly(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "RouteBundle",
+		Metadata:   Metadata{Name: "rp-simple"},
+		Spec: map[string]any{
+			"route_policy": map[string]any{
+				"routes": []any{map[string]any{"prefix": "0.0.0.0/0", "next_hop_type": "drop"}},
+			},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 1 || out[0].Kind != "RoutePolicy" {
+		t.Fatalf("expected 1 RoutePolicy, got %d %v", len(out), out)
+	}
+}
+
+// ── HaBundle tests ───────────────────────────────────────────────────
+
+func TestExpandBundles_HaBundle(t *testing.T) {
+	bundle := &Envelope{
+		APIVersion: APIVersion,
+		Kind:       "HaBundle",
+		Metadata:   Metadata{Name: "ha-bank-prod", Namespace: "prod"},
+		Spec: map[string]any{
+			"ha_set": map[string]any{
+				"mode":           "active_standby",
+				"member_dpu_ids": []any{"dpu-1", "dpu-2"},
+			},
+		},
+	}
+	out := ExpandBundles([]*Envelope{bundle})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 (ha_set), got %d", len(out))
+	}
+	if out[0].Kind != "HaSet" {
+		t.Errorf("kind = %s, want HaSet", out[0].Kind)
+	}
+	if out[0].Metadata.Name != "ha-bank-prod" {
+		t.Errorf("name = %s, want ha-bank-prod", out[0].Metadata.Name)
+	}
+}
+
+// ── Parse validates bundle kinds ─────────────────────────────────────
+
+func TestAclBundle_ParseValidates(t *testing.T) {
+	for _, kind := range []string{"AclBundle", "RouteBundle", "HaBundle"} {
+		doc := []byte(fmt.Sprintf("apiVersion: dashcenter.v1\nkind: %s\nmetadata: { name: test }\nspec: {}\n", kind))
+		env, err := Parse(doc)
+		if err != nil {
+			t.Fatalf("Parse(%s): %v", kind, err)
+		}
+		if env.Kind != kind {
+			t.Errorf("kind = %q, want %s", env.Kind, kind)
+		}
+	}
+}

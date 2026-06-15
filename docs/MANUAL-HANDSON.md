@@ -900,6 +900,40 @@ PS> & $bin validate -f deploy/dashctl-fleet/manifests
 # Total: N  Accepted: N  Rejected: 0
 ```
 
+**Experiment D — EniBundle: full ENI from one file:**
+
+Bundle manifests define a complete DASH construct in one YAML file.
+The CLI auto-expands bundles into individual specs in tier order:
+
+```powershell
+PS> @"
+apiVersion: dashcenter.v1
+kind: EniBundle
+metadata: { name: eni-bundle-demo }
+spec:
+  vnet: { name: vnet-bundle-demo, vni: 8888 }
+  eni: { mac_address: "aa:bb:cc:88:00:01", underlay_ip: "10.0.88.1", admin_state: up }
+  acl_policies:
+    - name: acl-bundle-demo
+      stage: inbound
+      eni_names: [eni-bundle-demo]
+      rules: [{ priority: 100, action: allow }]
+"@ | Set-Content demo-bundle.yaml
+
+PS> & $bin apply -f demo-bundle.yaml
+# vnet/vnet-bundle-demo CREATE (generation 1)
+# eni/eni-bundle-demo CREATE (generation 1)
+# aclpolicy/acl-bundle-demo CREATE (generation 1)
+
+# Clean up
+PS> & $bin delete acl-policy acl-bundle-demo
+PS> & $bin delete eni eni-bundle-demo
+PS> & $bin delete vnet vnet-bundle-demo
+PS> Remove-Item demo-bundle.yaml
+```
+
+Other bundle kinds: `AclBundle`, `RouteBundle`, `HaBundle`.
+
 ---
 
 ## 8. Drive the fleet from inside the container

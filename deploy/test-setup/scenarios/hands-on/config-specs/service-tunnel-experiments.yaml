@@ -1,0 +1,59 @@
+# service-tunnel-experiments.yaml — Hands-on experiments with ServiceTunnel specs
+#
+# ServiceTunnel is Tier 0 — no dependencies. Always succeeds on create.
+# The interesting experiment is showing it as a route_policy next_hop_target.
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: Create a service tunnel (always succeeds — Tier 0)
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f deploy/test-setup/scenarios/hands-on/config-specs/service-tunnel-experiments.yaml
+# Expect: CREATE (generation 1)
+#
+# ServiceTunnel fields:
+#   local_underlay_ip   — this site's physical tunnel endpoint
+#   remote_underlay_ip  — remote site's physical tunnel endpoint
+#   vni                 — VXLAN identifier for this tunnel
+#   params              — optional key-value parameters (tunnel-specific)
+#
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata:
+  name: st-exp-1
+  labels: { experiment: tunnel, direction: egress }
+spec:
+  local_underlay_ip: "10.0.0.1"
+  remote_underlay_ip: "10.0.0.2"
+  vni: 9901
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: Use the tunnel in a route policy
+# ═══════════════════════════════════════════════════════════════
+#
+# Prerequisites: eni-exp-ok from eni-experiments.yaml
+#
+# Step 1 — apply this file (creates st-exp-1)
+# Step 2 — apply a route policy:
+#   dashctl apply --force -f - <<< '
+#   apiVersion: dashcenter.v1
+#   kind: RoutePolicy
+#   metadata: { name: rp-exp-tunnel }
+#   spec:
+#     eni_names: [eni-exp-ok]
+#     routes:
+#       - prefix: "0.0.0.0/0"
+#         next_hop_type: service_tunnel
+#         next_hop_target: st-exp-1
+#   '
+# Expect: CREATE (generation 1) — the tunnel exists, so the FK check passes.
+#
+# Step 3 — try to delete the tunnel while the route still refs it:
+#   dashctl delete service-tunnel st-exp-1
+#   Expect: ERROR — cannot delete service_tunnel "st-exp-1"
+#           — route_policy "rp-exp-tunnel" still references it
+#
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete route-policy rp-exp-tunnel --ignore-not-found
+#   dashctl delete service-tunnel st-exp-1 --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

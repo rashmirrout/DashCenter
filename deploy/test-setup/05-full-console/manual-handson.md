@@ -1441,3 +1441,78 @@ docker exec dc-console-dashd-1 dashctl validate -f /manifests/ \
   --endpoint http://localhost:8443 --insecure
 # Total: N  Accepted: N  Rejected: 0
 ```
+
+### 14.7 — Bundle manifests (EniBundle, AclBundle, RouteBundle, HaBundle)
+
+Bundle manifests let you define a complete DASH construct and its
+dependency chain in a single YAML file. The bundle auto-expands into
+individual specs in the correct tier order with auto-wired FK
+references.
+
+**Experiment — create a complete ENI from one file:**
+
+```bash
+# Create a temp EniBundle manifest
+cat > /tmp/eni-lab14.yaml << 'EOF'
+apiVersion: dashcenter.v1
+kind: EniBundle
+metadata:
+  name: eni-lab14-bundle
+  labels: { lab: "14" }
+spec:
+  vnet: { name: vnet-lab14-bundle, vni: 7777 }
+  eni:
+    mac_address: "aa:bb:cc:77:00:01"
+    underlay_ip: "10.0.77.1"
+    admin_state: up
+    placement_hint_dpu_ids: [dpu-sim-01]
+  route_policy:
+    name: rp-lab14-bundle
+    routes:
+      - { prefix: "192.168.77.0/24", next_hop_type: vnet, next_hop_target: vnet-lab14-bundle }
+  acl_policies:
+    - name: acl-lab14-bundle-in
+      stage: inbound
+      rules:
+        - { priority: 100, action: allow }
+EOF
+
+# Apply — creates 4 objects in tier order
+docker exec dc-console-dashd-1 dashctl apply -f /tmp/eni-lab14.yaml \
+  --endpoint http://localhost:8443 --insecure
+# vnet/vnet-lab14-bundle CREATE (generation 1)
+# eni/eni-lab14-bundle CREATE (generation 1)
+# routepolicy/rp-lab14-bundle CREATE (generation 1)
+# aclpolicy/acl-lab14-bundle-in CREATE (generation 1)
+# Applied 4 object(s): 4 created, 0 modified, 0 blocked, 0 failed
+
+# Re-apply WITHOUT --force — blocked
+docker exec dc-console-dashd-1 dashctl apply -f /tmp/eni-lab14.yaml \
+  --endpoint http://localhost:8443 --insecure
+# BLOCKED — already exists; use --force to overwrite
+
+# Re-apply WITH --force — modifies
+docker exec dc-console-dashd-1 dashctl apply -f /tmp/eni-lab14.yaml \
+  --endpoint http://localhost:8443 --insecure --force
+# MODIFY (generation 2)
+```
+
+**Why this matters**: without bundles, operators must create 4+ separate
+YAML files in the right order. With an `EniBundle`, one file defines the
+complete ENI pipeline — the CLI handles dependency ordering and FK wiring.
+
+**Other bundle kinds** (same pattern):
+- `AclBundle` — ACL policy + optional VNet/ENI dependencies
+- `RouteBundle` — route policy + optional VNet/ServiceTunnel/ENI
+- `HaBundle` — HA set configuration
+
+**Clean up:**
+
+```bash
+docker exec dc-console-dashd-1 sh -c '
+  dashctl delete acl-policy acl-lab14-bundle-in --endpoint http://localhost:8443 --insecure
+  dashctl delete route-policy rp-lab14-bundle --endpoint http://localhost:8443 --insecure
+  dashctl delete eni eni-lab14-bundle --endpoint http://localhost:8443 --insecure
+  dashctl delete vnet vnet-lab14-bundle --endpoint http://localhost:8443 --insecure
+'
+```

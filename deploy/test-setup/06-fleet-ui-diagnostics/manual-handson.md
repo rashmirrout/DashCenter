@@ -1880,3 +1880,29 @@ docker exec dc-diag-dashd-1 dashctl validate -f /manifests/ \
   --endpoint http://localhost:8443 --insecure
 # Total: N  Accepted: N  Rejected: 0
 ```
+
+### 15.7 — Bundle manifests (EniBundle)
+
+Bundle manifests define a complete DASH construct in one YAML file.
+The CLI auto-expands bundles into individual specs in tier order:
+
+```bash
+# Create an EniBundle via REST
+docker exec dc-diag-dashd-1 dashctl apply -f - \
+  --endpoint http://localhost:8443 --insecure << 'EOF'
+apiVersion: dashcenter.v1
+kind: EniBundle
+metadata: { name: eni-bundle-lab15 }
+spec:
+  vnet: { name: vnet-lab15-bundle, vni: 7777 }
+  eni: { mac_address: "aa:bb:cc:77:00:01", underlay_ip: "10.0.77.1", admin_state: up }
+  acl_policies:
+    - name: acl-lab15-bundle
+      stage: inbound
+      eni_names: [eni-bundle-lab15]
+      rules: [{ priority: 100, action: allow }]
+EOF
+# CREATE: vnet → eni → acl_policy (3 objects)
+```
+
+Other bundle kinds: `AclBundle`, `RouteBundle`, `HaBundle`.

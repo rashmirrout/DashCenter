@@ -1,0 +1,52 @@
+# 06-ha-sets.yaml - 10 HA sets
+# 5 intra-appliance (active_standby) + 5 cross-zone (active_active)
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-appliance-1, labels: { rack: appliance-1, type: intra } }
+spec: { mode: active_standby, member_dpu_ids: [dpu-sim-01, dpu-sim-02], virtual_ip: "10.0.100.1" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-appliance-2, labels: { rack: appliance-2, type: intra } }
+spec: { mode: active_standby, member_dpu_ids: [dpu-sim-03, dpu-sim-04], virtual_ip: "10.0.100.2" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-appliance-3, labels: { rack: appliance-3, type: intra } }
+spec: { mode: active_standby, member_dpu_ids: [dpu-sim-05, dpu-sim-06], virtual_ip: "10.0.100.3" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-appliance-4, labels: { rack: appliance-4, type: intra } }
+spec: { mode: active_standby, member_dpu_ids: [dpu-sim-07, dpu-sim-08], virtual_ip: "10.0.100.4" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-appliance-5, labels: { rack: appliance-5, type: intra } }
+spec: { mode: active_standby, member_dpu_ids: [dpu-sim-09, dpu-sim-10], virtual_ip: "10.0.100.5" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-cross-zone-1, labels: { type: cross-zone } }
+spec: { mode: active_active, member_dpu_ids: [dpu-sim-11, dpu-sim-21], virtual_ip: "10.0.200.1" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-cross-zone-2, labels: { type: cross-zone } }
+spec: { mode: active_active, member_dpu_ids: [dpu-sim-13, dpu-sim-23], virtual_ip: "10.0.200.2" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-cross-zone-3, labels: { type: cross-zone } }
+spec: { mode: active_active, member_dpu_ids: [dpu-sim-15, dpu-sim-25], virtual_ip: "10.0.200.3" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-cross-zone-4, labels: { type: cross-zone } }
+spec: { mode: active_active, member_dpu_ids: [dpu-sim-31, dpu-sim-41], virtual_ip: "10.0.200.4" }
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-cross-zone-5, labels: { type: cross-zone } }
+spec: { mode: active_active, member_dpu_ids: [dpu-sim-33, dpu-sim-43], virtual_ip: "10.0.200.5" }

@@ -1,0 +1,2403 @@
+# 03-vnet-mappings.yaml - 240 VnetMappings (2 per ENI x 120 ENIs)
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.1.1, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.1.1"
+  underlay_ip: "10.1.1.11"
+  mac_address: "aa:bb:cc:01:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.1.2, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.1.2"
+  underlay_ip: "10.1.1.12"
+  mac_address: "aa:bb:cc:01:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.1.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.1.1"
+  underlay_ip: "10.1.1.21"
+  mac_address: "aa:bb:cc:01:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.1.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.1.2"
+  underlay_ip: "10.1.1.22"
+  mac_address: "aa:bb:cc:01:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.2.1, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.2.1"
+  underlay_ip: "10.1.2.11"
+  mac_address: "aa:bb:cc:02:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.2.2, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.2.2"
+  underlay_ip: "10.1.2.12"
+  mac_address: "aa:bb:cc:02:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.2.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.2.1"
+  underlay_ip: "10.1.2.21"
+  mac_address: "aa:bb:cc:02:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.2.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.2.2"
+  underlay_ip: "10.1.2.22"
+  mac_address: "aa:bb:cc:02:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.3.1, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.3.1"
+  underlay_ip: "10.1.3.11"
+  mac_address: "aa:bb:cc:03:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.3.2, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.3.2"
+  underlay_ip: "10.1.3.12"
+  mac_address: "aa:bb:cc:03:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.3.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.3.1"
+  underlay_ip: "10.1.3.21"
+  mac_address: "aa:bb:cc:03:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.3.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.3.2"
+  underlay_ip: "10.1.3.22"
+  mac_address: "aa:bb:cc:03:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.4.1, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.4.1"
+  underlay_ip: "10.1.4.11"
+  mac_address: "aa:bb:cc:04:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.4.2, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.4.2"
+  underlay_ip: "10.1.4.12"
+  mac_address: "aa:bb:cc:04:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.4.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.4.1"
+  underlay_ip: "10.1.4.21"
+  mac_address: "aa:bb:cc:04:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.4.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.4.2"
+  underlay_ip: "10.1.4.22"
+  mac_address: "aa:bb:cc:04:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.5.1, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.5.1"
+  underlay_ip: "10.1.5.11"
+  mac_address: "aa:bb:cc:05:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: bank-prod-192.168.5.2, labels: { tenant: bank } }
+spec:
+  vnet_name: bank-prod
+  ip_address: "192.168.5.2"
+  underlay_ip: "10.1.5.12"
+  mac_address: "aa:bb:cc:05:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.5.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.5.1"
+  underlay_ip: "10.1.5.21"
+  mac_address: "aa:bb:cc:05:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.5.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.5.2"
+  underlay_ip: "10.1.5.22"
+  mac_address: "aa:bb:cc:05:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.6.1, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.6.1"
+  underlay_ip: "10.1.6.11"
+  mac_address: "aa:bb:cc:06:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.6.2, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.6.2"
+  underlay_ip: "10.1.6.12"
+  mac_address: "aa:bb:cc:06:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.6.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.6.1"
+  underlay_ip: "10.1.6.21"
+  mac_address: "aa:bb:cc:06:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.6.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.6.2"
+  underlay_ip: "10.1.6.22"
+  mac_address: "aa:bb:cc:06:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.7.1, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.7.1"
+  underlay_ip: "10.1.7.11"
+  mac_address: "aa:bb:cc:07:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.7.2, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.7.2"
+  underlay_ip: "10.1.7.12"
+  mac_address: "aa:bb:cc:07:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.7.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.7.1"
+  underlay_ip: "10.1.7.21"
+  mac_address: "aa:bb:cc:07:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.7.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.7.2"
+  underlay_ip: "10.1.7.22"
+  mac_address: "aa:bb:cc:07:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.8.1, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.8.1"
+  underlay_ip: "10.1.8.11"
+  mac_address: "aa:bb:cc:08:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.8.2, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.8.2"
+  underlay_ip: "10.1.8.12"
+  mac_address: "aa:bb:cc:08:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.8.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.8.1"
+  underlay_ip: "10.1.8.21"
+  mac_address: "aa:bb:cc:08:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.8.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.8.2"
+  underlay_ip: "10.1.8.22"
+  mac_address: "aa:bb:cc:08:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.9.1, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.9.1"
+  underlay_ip: "10.1.9.11"
+  mac_address: "aa:bb:cc:09:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.9.2, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.9.2"
+  underlay_ip: "10.1.9.12"
+  mac_address: "aa:bb:cc:09:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.9.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.9.1"
+  underlay_ip: "10.1.9.21"
+  mac_address: "aa:bb:cc:09:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.9.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.9.2"
+  underlay_ip: "10.1.9.22"
+  mac_address: "aa:bb:cc:09:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.10.1, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.10.1"
+  underlay_ip: "10.1.10.11"
+  mac_address: "aa:bb:cc:10:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: retail-prod-192.168.10.2, labels: { tenant: retail } }
+spec:
+  vnet_name: retail-prod
+  ip_address: "192.168.10.2"
+  underlay_ip: "10.1.10.12"
+  mac_address: "aa:bb:cc:10:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.10.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.10.1"
+  underlay_ip: "10.1.10.21"
+  mac_address: "aa:bb:cc:10:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.10.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.10.2"
+  underlay_ip: "10.1.10.22"
+  mac_address: "aa:bb:cc:10:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.11.1, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.11.1"
+  underlay_ip: "10.1.11.11"
+  mac_address: "aa:bb:cc:11:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.11.2, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.11.2"
+  underlay_ip: "10.1.11.12"
+  mac_address: "aa:bb:cc:11:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.11.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.11.1"
+  underlay_ip: "10.1.11.21"
+  mac_address: "aa:bb:cc:11:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.11.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.11.2"
+  underlay_ip: "10.1.11.22"
+  mac_address: "aa:bb:cc:11:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.12.1, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.12.1"
+  underlay_ip: "10.1.12.11"
+  mac_address: "aa:bb:cc:12:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.12.2, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.12.2"
+  underlay_ip: "10.1.12.12"
+  mac_address: "aa:bb:cc:12:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.12.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.12.1"
+  underlay_ip: "10.1.12.21"
+  mac_address: "aa:bb:cc:12:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.12.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.12.2"
+  underlay_ip: "10.1.12.22"
+  mac_address: "aa:bb:cc:12:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.13.1, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.13.1"
+  underlay_ip: "10.1.13.11"
+  mac_address: "aa:bb:cc:13:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.13.2, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.13.2"
+  underlay_ip: "10.1.13.12"
+  mac_address: "aa:bb:cc:13:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.13.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.13.1"
+  underlay_ip: "10.1.13.21"
+  mac_address: "aa:bb:cc:13:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.13.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.13.2"
+  underlay_ip: "10.1.13.22"
+  mac_address: "aa:bb:cc:13:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.14.1, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.14.1"
+  underlay_ip: "10.1.14.11"
+  mac_address: "aa:bb:cc:14:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.14.2, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.14.2"
+  underlay_ip: "10.1.14.12"
+  mac_address: "aa:bb:cc:14:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.14.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.14.1"
+  underlay_ip: "10.1.14.21"
+  mac_address: "aa:bb:cc:14:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.14.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.14.2"
+  underlay_ip: "10.1.14.22"
+  mac_address: "aa:bb:cc:14:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.15.1, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.15.1"
+  underlay_ip: "10.1.15.11"
+  mac_address: "aa:bb:cc:15:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: media-prod-192.168.15.2, labels: { tenant: media } }
+spec:
+  vnet_name: media-prod
+  ip_address: "192.168.15.2"
+  underlay_ip: "10.1.15.12"
+  mac_address: "aa:bb:cc:15:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.15.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.15.1"
+  underlay_ip: "10.1.15.21"
+  mac_address: "aa:bb:cc:15:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.15.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.15.2"
+  underlay_ip: "10.1.15.22"
+  mac_address: "aa:bb:cc:15:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.16.1, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.16.1"
+  underlay_ip: "10.1.16.11"
+  mac_address: "aa:bb:cc:16:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.16.2, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.16.2"
+  underlay_ip: "10.1.16.12"
+  mac_address: "aa:bb:cc:16:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.16.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.16.1"
+  underlay_ip: "10.1.16.21"
+  mac_address: "aa:bb:cc:16:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.16.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.16.2"
+  underlay_ip: "10.1.16.22"
+  mac_address: "aa:bb:cc:16:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.17.1, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.17.1"
+  underlay_ip: "10.1.17.11"
+  mac_address: "aa:bb:cc:17:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.17.2, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.17.2"
+  underlay_ip: "10.1.17.12"
+  mac_address: "aa:bb:cc:17:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.17.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.17.1"
+  underlay_ip: "10.1.17.21"
+  mac_address: "aa:bb:cc:17:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.17.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.17.2"
+  underlay_ip: "10.1.17.22"
+  mac_address: "aa:bb:cc:17:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.18.1, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.18.1"
+  underlay_ip: "10.1.18.11"
+  mac_address: "aa:bb:cc:18:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.18.2, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.18.2"
+  underlay_ip: "10.1.18.12"
+  mac_address: "aa:bb:cc:18:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.18.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.18.1"
+  underlay_ip: "10.1.18.21"
+  mac_address: "aa:bb:cc:18:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.18.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.18.2"
+  underlay_ip: "10.1.18.22"
+  mac_address: "aa:bb:cc:18:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.19.1, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.19.1"
+  underlay_ip: "10.1.19.11"
+  mac_address: "aa:bb:cc:19:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.19.2, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.19.2"
+  underlay_ip: "10.1.19.12"
+  mac_address: "aa:bb:cc:19:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.19.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.19.1"
+  underlay_ip: "10.1.19.21"
+  mac_address: "aa:bb:cc:19:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.19.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.19.2"
+  underlay_ip: "10.1.19.22"
+  mac_address: "aa:bb:cc:19:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.20.1, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.20.1"
+  underlay_ip: "10.1.20.11"
+  mac_address: "aa:bb:cc:20:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: iot-prod-192.168.20.2, labels: { tenant: iot } }
+spec:
+  vnet_name: iot-prod
+  ip_address: "192.168.20.2"
+  underlay_ip: "10.1.20.12"
+  mac_address: "aa:bb:cc:20:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.20.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.20.1"
+  underlay_ip: "10.1.20.21"
+  mac_address: "aa:bb:cc:20:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.20.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.20.2"
+  underlay_ip: "10.1.20.22"
+  mac_address: "aa:bb:cc:20:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.21.1, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.21.1"
+  underlay_ip: "10.1.21.11"
+  mac_address: "aa:bb:cc:21:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.21.2, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.21.2"
+  underlay_ip: "10.1.21.12"
+  mac_address: "aa:bb:cc:21:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.21.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.21.1"
+  underlay_ip: "10.1.21.21"
+  mac_address: "aa:bb:cc:21:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.21.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.21.2"
+  underlay_ip: "10.1.21.22"
+  mac_address: "aa:bb:cc:21:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.22.1, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.22.1"
+  underlay_ip: "10.1.22.11"
+  mac_address: "aa:bb:cc:22:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.22.2, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.22.2"
+  underlay_ip: "10.1.22.12"
+  mac_address: "aa:bb:cc:22:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.22.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.22.1"
+  underlay_ip: "10.1.22.21"
+  mac_address: "aa:bb:cc:22:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.22.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.22.2"
+  underlay_ip: "10.1.22.22"
+  mac_address: "aa:bb:cc:22:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.23.1, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.23.1"
+  underlay_ip: "10.1.23.11"
+  mac_address: "aa:bb:cc:23:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.23.2, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.23.2"
+  underlay_ip: "10.1.23.12"
+  mac_address: "aa:bb:cc:23:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.23.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.23.1"
+  underlay_ip: "10.1.23.21"
+  mac_address: "aa:bb:cc:23:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.23.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.23.2"
+  underlay_ip: "10.1.23.22"
+  mac_address: "aa:bb:cc:23:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.24.1, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.24.1"
+  underlay_ip: "10.1.24.11"
+  mac_address: "aa:bb:cc:24:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.24.2, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.24.2"
+  underlay_ip: "10.1.24.12"
+  mac_address: "aa:bb:cc:24:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.24.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.24.1"
+  underlay_ip: "10.1.24.21"
+  mac_address: "aa:bb:cc:24:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.24.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.24.2"
+  underlay_ip: "10.1.24.22"
+  mac_address: "aa:bb:cc:24:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.25.1, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.25.1"
+  underlay_ip: "10.1.25.11"
+  mac_address: "aa:bb:cc:25:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: analytics-prod-192.168.25.2, labels: { tenant: analytics } }
+spec:
+  vnet_name: analytics-prod
+  ip_address: "192.168.25.2"
+  underlay_ip: "10.1.25.12"
+  mac_address: "aa:bb:cc:25:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.25.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.25.1"
+  underlay_ip: "10.1.25.21"
+  mac_address: "aa:bb:cc:25:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.25.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.25.2"
+  underlay_ip: "10.1.25.22"
+  mac_address: "aa:bb:cc:25:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.26.1, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.26.1"
+  underlay_ip: "10.1.26.11"
+  mac_address: "aa:bb:cc:26:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.26.2, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.26.2"
+  underlay_ip: "10.1.26.12"
+  mac_address: "aa:bb:cc:26:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.26.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.26.1"
+  underlay_ip: "10.1.26.21"
+  mac_address: "aa:bb:cc:26:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.26.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.26.2"
+  underlay_ip: "10.1.26.22"
+  mac_address: "aa:bb:cc:26:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.27.1, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.27.1"
+  underlay_ip: "10.1.27.11"
+  mac_address: "aa:bb:cc:27:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.27.2, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.27.2"
+  underlay_ip: "10.1.27.12"
+  mac_address: "aa:bb:cc:27:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.27.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.27.1"
+  underlay_ip: "10.1.27.21"
+  mac_address: "aa:bb:cc:27:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.27.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.27.2"
+  underlay_ip: "10.1.27.22"
+  mac_address: "aa:bb:cc:27:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.28.1, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.28.1"
+  underlay_ip: "10.1.28.11"
+  mac_address: "aa:bb:cc:28:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.28.2, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.28.2"
+  underlay_ip: "10.1.28.12"
+  mac_address: "aa:bb:cc:28:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.28.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.28.1"
+  underlay_ip: "10.1.28.21"
+  mac_address: "aa:bb:cc:28:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.28.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.28.2"
+  underlay_ip: "10.1.28.22"
+  mac_address: "aa:bb:cc:28:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.29.1, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.29.1"
+  underlay_ip: "10.1.29.11"
+  mac_address: "aa:bb:cc:29:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.29.2, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.29.2"
+  underlay_ip: "10.1.29.12"
+  mac_address: "aa:bb:cc:29:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.29.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.29.1"
+  underlay_ip: "10.1.29.21"
+  mac_address: "aa:bb:cc:29:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.29.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.29.2"
+  underlay_ip: "10.1.29.22"
+  mac_address: "aa:bb:cc:29:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.30.1, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.30.1"
+  underlay_ip: "10.1.30.11"
+  mac_address: "aa:bb:cc:30:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: telecom-prod-192.168.30.2, labels: { tenant: telecom } }
+spec:
+  vnet_name: telecom-prod
+  ip_address: "192.168.30.2"
+  underlay_ip: "10.1.30.12"
+  mac_address: "aa:bb:cc:30:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.30.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.30.1"
+  underlay_ip: "10.1.30.21"
+  mac_address: "aa:bb:cc:30:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.30.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.30.2"
+  underlay_ip: "10.1.30.22"
+  mac_address: "aa:bb:cc:30:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.31.1, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.31.1"
+  underlay_ip: "10.1.31.11"
+  mac_address: "aa:bb:cc:31:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.31.2, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.31.2"
+  underlay_ip: "10.1.31.12"
+  mac_address: "aa:bb:cc:31:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.31.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.31.1"
+  underlay_ip: "10.1.31.21"
+  mac_address: "aa:bb:cc:31:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.31.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.31.2"
+  underlay_ip: "10.1.31.22"
+  mac_address: "aa:bb:cc:31:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.32.1, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.32.1"
+  underlay_ip: "10.1.32.11"
+  mac_address: "aa:bb:cc:32:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.32.2, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.32.2"
+  underlay_ip: "10.1.32.12"
+  mac_address: "aa:bb:cc:32:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.32.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.32.1"
+  underlay_ip: "10.1.32.21"
+  mac_address: "aa:bb:cc:32:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.32.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.32.2"
+  underlay_ip: "10.1.32.22"
+  mac_address: "aa:bb:cc:32:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.33.1, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.33.1"
+  underlay_ip: "10.1.33.11"
+  mac_address: "aa:bb:cc:33:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.33.2, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.33.2"
+  underlay_ip: "10.1.33.12"
+  mac_address: "aa:bb:cc:33:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.33.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.33.1"
+  underlay_ip: "10.1.33.21"
+  mac_address: "aa:bb:cc:33:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.33.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.33.2"
+  underlay_ip: "10.1.33.22"
+  mac_address: "aa:bb:cc:33:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.34.1, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.34.1"
+  underlay_ip: "10.1.34.11"
+  mac_address: "aa:bb:cc:34:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.34.2, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.34.2"
+  underlay_ip: "10.1.34.12"
+  mac_address: "aa:bb:cc:34:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.34.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.34.1"
+  underlay_ip: "10.1.34.21"
+  mac_address: "aa:bb:cc:34:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.34.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.34.2"
+  underlay_ip: "10.1.34.22"
+  mac_address: "aa:bb:cc:34:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.35.1, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.35.1"
+  underlay_ip: "10.1.35.11"
+  mac_address: "aa:bb:cc:35:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: health-prod-192.168.35.2, labels: { tenant: health } }
+spec:
+  vnet_name: health-prod
+  ip_address: "192.168.35.2"
+  underlay_ip: "10.1.35.12"
+  mac_address: "aa:bb:cc:35:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.35.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.35.1"
+  underlay_ip: "10.1.35.21"
+  mac_address: "aa:bb:cc:35:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.35.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.35.2"
+  underlay_ip: "10.1.35.22"
+  mac_address: "aa:bb:cc:35:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.36.1, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.36.1"
+  underlay_ip: "10.1.36.11"
+  mac_address: "aa:bb:cc:36:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.36.2, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.36.2"
+  underlay_ip: "10.1.36.12"
+  mac_address: "aa:bb:cc:36:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.36.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.36.1"
+  underlay_ip: "10.1.36.21"
+  mac_address: "aa:bb:cc:36:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.36.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.36.2"
+  underlay_ip: "10.1.36.22"
+  mac_address: "aa:bb:cc:36:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.37.1, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.37.1"
+  underlay_ip: "10.1.37.11"
+  mac_address: "aa:bb:cc:37:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.37.2, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.37.2"
+  underlay_ip: "10.1.37.12"
+  mac_address: "aa:bb:cc:37:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.37.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.37.1"
+  underlay_ip: "10.1.37.21"
+  mac_address: "aa:bb:cc:37:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.37.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.37.2"
+  underlay_ip: "10.1.37.22"
+  mac_address: "aa:bb:cc:37:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.38.1, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.38.1"
+  underlay_ip: "10.1.38.11"
+  mac_address: "aa:bb:cc:38:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.38.2, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.38.2"
+  underlay_ip: "10.1.38.12"
+  mac_address: "aa:bb:cc:38:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.38.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.38.1"
+  underlay_ip: "10.1.38.21"
+  mac_address: "aa:bb:cc:38:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.38.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.38.2"
+  underlay_ip: "10.1.38.22"
+  mac_address: "aa:bb:cc:38:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.39.1, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.39.1"
+  underlay_ip: "10.1.39.11"
+  mac_address: "aa:bb:cc:39:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.39.2, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.39.2"
+  underlay_ip: "10.1.39.12"
+  mac_address: "aa:bb:cc:39:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.39.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.39.1"
+  underlay_ip: "10.1.39.21"
+  mac_address: "aa:bb:cc:39:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.39.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.39.2"
+  underlay_ip: "10.1.39.22"
+  mac_address: "aa:bb:cc:39:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.40.1, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.40.1"
+  underlay_ip: "10.1.40.11"
+  mac_address: "aa:bb:cc:40:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: fintech-prod-192.168.40.2, labels: { tenant: fintech } }
+spec:
+  vnet_name: fintech-prod
+  ip_address: "192.168.40.2"
+  underlay_ip: "10.1.40.12"
+  mac_address: "aa:bb:cc:40:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.40.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.40.1"
+  underlay_ip: "10.1.40.21"
+  mac_address: "aa:bb:cc:40:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.40.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.40.2"
+  underlay_ip: "10.1.40.22"
+  mac_address: "aa:bb:cc:40:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.41.1, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.41.1"
+  underlay_ip: "10.1.41.11"
+  mac_address: "aa:bb:cc:41:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.41.2, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.41.2"
+  underlay_ip: "10.1.41.12"
+  mac_address: "aa:bb:cc:41:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.41.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.41.1"
+  underlay_ip: "10.1.41.21"
+  mac_address: "aa:bb:cc:41:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.41.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.41.2"
+  underlay_ip: "10.1.41.22"
+  mac_address: "aa:bb:cc:41:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.42.1, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.42.1"
+  underlay_ip: "10.1.42.11"
+  mac_address: "aa:bb:cc:42:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.42.2, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.42.2"
+  underlay_ip: "10.1.42.12"
+  mac_address: "aa:bb:cc:42:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.42.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.42.1"
+  underlay_ip: "10.1.42.21"
+  mac_address: "aa:bb:cc:42:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.42.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.42.2"
+  underlay_ip: "10.1.42.22"
+  mac_address: "aa:bb:cc:42:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.43.1, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.43.1"
+  underlay_ip: "10.1.43.11"
+  mac_address: "aa:bb:cc:43:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.43.2, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.43.2"
+  underlay_ip: "10.1.43.12"
+  mac_address: "aa:bb:cc:43:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.43.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.43.1"
+  underlay_ip: "10.1.43.21"
+  mac_address: "aa:bb:cc:43:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.43.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.43.2"
+  underlay_ip: "10.1.43.22"
+  mac_address: "aa:bb:cc:43:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.44.1, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.44.1"
+  underlay_ip: "10.1.44.11"
+  mac_address: "aa:bb:cc:44:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.44.2, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.44.2"
+  underlay_ip: "10.1.44.12"
+  mac_address: "aa:bb:cc:44:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.44.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.44.1"
+  underlay_ip: "10.1.44.21"
+  mac_address: "aa:bb:cc:44:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.44.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.44.2"
+  underlay_ip: "10.1.44.22"
+  mac_address: "aa:bb:cc:44:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.45.1, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.45.1"
+  underlay_ip: "10.1.45.11"
+  mac_address: "aa:bb:cc:45:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: gaming-prod-192.168.45.2, labels: { tenant: gaming } }
+spec:
+  vnet_name: gaming-prod
+  ip_address: "192.168.45.2"
+  underlay_ip: "10.1.45.12"
+  mac_address: "aa:bb:cc:45:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.45.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.45.1"
+  underlay_ip: "10.1.45.21"
+  mac_address: "aa:bb:cc:45:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.45.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.45.2"
+  underlay_ip: "10.1.45.22"
+  mac_address: "aa:bb:cc:45:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.46.1, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.46.1"
+  underlay_ip: "10.1.46.11"
+  mac_address: "aa:bb:cc:46:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.46.2, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.46.2"
+  underlay_ip: "10.1.46.12"
+  mac_address: "aa:bb:cc:46:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.46.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.46.1"
+  underlay_ip: "10.1.46.21"
+  mac_address: "aa:bb:cc:46:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.46.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.46.2"
+  underlay_ip: "10.1.46.22"
+  mac_address: "aa:bb:cc:46:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.47.1, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.47.1"
+  underlay_ip: "10.1.47.11"
+  mac_address: "aa:bb:cc:47:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.47.2, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.47.2"
+  underlay_ip: "10.1.47.12"
+  mac_address: "aa:bb:cc:47:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.47.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.47.1"
+  underlay_ip: "10.1.47.21"
+  mac_address: "aa:bb:cc:47:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.47.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.47.2"
+  underlay_ip: "10.1.47.22"
+  mac_address: "aa:bb:cc:47:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.48.1, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.48.1"
+  underlay_ip: "10.1.48.11"
+  mac_address: "aa:bb:cc:48:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.48.2, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.48.2"
+  underlay_ip: "10.1.48.12"
+  mac_address: "aa:bb:cc:48:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.48.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.48.1"
+  underlay_ip: "10.1.48.21"
+  mac_address: "aa:bb:cc:48:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.48.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.48.2"
+  underlay_ip: "10.1.48.22"
+  mac_address: "aa:bb:cc:48:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.49.1, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.49.1"
+  underlay_ip: "10.1.49.11"
+  mac_address: "aa:bb:cc:49:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.49.2, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.49.2"
+  underlay_ip: "10.1.49.12"
+  mac_address: "aa:bb:cc:49:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.49.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.49.1"
+  underlay_ip: "10.1.49.21"
+  mac_address: "aa:bb:cc:49:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.49.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.49.2"
+  underlay_ip: "10.1.49.22"
+  mac_address: "aa:bb:cc:49:02:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.50.1, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.50.1"
+  underlay_ip: "10.1.50.11"
+  mac_address: "aa:bb:cc:50:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: logistics-prod-192.168.50.2, labels: { tenant: logistics } }
+spec:
+  vnet_name: logistics-prod
+  ip_address: "192.168.50.2"
+  underlay_ip: "10.1.50.12"
+  mac_address: "aa:bb:cc:50:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.50.1, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.50.1"
+  underlay_ip: "10.1.50.21"
+  mac_address: "aa:bb:cc:50:02:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-mgmt-10.10.50.2, labels: { shared: "true" } }
+spec:
+  vnet_name: vnet-mgmt
+  ip_address: "10.10.50.2"
+  underlay_ip: "10.1.50.22"
+  mac_address: "aa:bb:cc:50:02:02"
+  action: vnet_encap
+
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.1.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.1.1"
+  underlay_ip: "10.1.1.31"
+  mac_address: "aa:bb:cc:01:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.1.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.1.2"
+  underlay_ip: "10.1.1.32"
+  mac_address: "aa:bb:cc:01:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.5.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.5.1"
+  underlay_ip: "10.1.5.31"
+  mac_address: "aa:bb:cc:05:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.5.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.5.2"
+  underlay_ip: "10.1.5.32"
+  mac_address: "aa:bb:cc:05:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.6.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.6.1"
+  underlay_ip: "10.1.6.31"
+  mac_address: "aa:bb:cc:06:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.6.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.6.2"
+  underlay_ip: "10.1.6.32"
+  mac_address: "aa:bb:cc:06:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.10.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.10.1"
+  underlay_ip: "10.1.10.31"
+  mac_address: "aa:bb:cc:10:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.10.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.10.2"
+  underlay_ip: "10.1.10.32"
+  mac_address: "aa:bb:cc:10:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.11.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.11.1"
+  underlay_ip: "10.1.11.31"
+  mac_address: "aa:bb:cc:11:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.11.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.11.2"
+  underlay_ip: "10.1.11.32"
+  mac_address: "aa:bb:cc:11:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.15.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.15.1"
+  underlay_ip: "10.1.15.31"
+  mac_address: "aa:bb:cc:15:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.15.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.15.2"
+  underlay_ip: "10.1.15.32"
+  mac_address: "aa:bb:cc:15:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.16.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.16.1"
+  underlay_ip: "10.1.16.31"
+  mac_address: "aa:bb:cc:16:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.16.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.16.2"
+  underlay_ip: "10.1.16.32"
+  mac_address: "aa:bb:cc:16:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.20.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.20.1"
+  underlay_ip: "10.1.20.31"
+  mac_address: "aa:bb:cc:20:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.20.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.20.2"
+  underlay_ip: "10.1.20.32"
+  mac_address: "aa:bb:cc:20:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.21.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.21.1"
+  underlay_ip: "10.1.21.31"
+  mac_address: "aa:bb:cc:21:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.21.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.21.2"
+  underlay_ip: "10.1.21.32"
+  mac_address: "aa:bb:cc:21:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.25.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.25.1"
+  underlay_ip: "10.1.25.31"
+  mac_address: "aa:bb:cc:25:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.25.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.25.2"
+  underlay_ip: "10.1.25.32"
+  mac_address: "aa:bb:cc:25:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.26.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.26.1"
+  underlay_ip: "10.1.26.31"
+  mac_address: "aa:bb:cc:26:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.26.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.26.2"
+  underlay_ip: "10.1.26.32"
+  mac_address: "aa:bb:cc:26:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.30.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.30.1"
+  underlay_ip: "10.1.30.31"
+  mac_address: "aa:bb:cc:30:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.30.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.30.2"
+  underlay_ip: "10.1.30.32"
+  mac_address: "aa:bb:cc:30:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.31.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.31.1"
+  underlay_ip: "10.1.31.31"
+  mac_address: "aa:bb:cc:31:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.31.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.31.2"
+  underlay_ip: "10.1.31.32"
+  mac_address: "aa:bb:cc:31:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.35.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.35.1"
+  underlay_ip: "10.1.35.31"
+  mac_address: "aa:bb:cc:35:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.35.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.35.2"
+  underlay_ip: "10.1.35.32"
+  mac_address: "aa:bb:cc:35:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.36.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.36.1"
+  underlay_ip: "10.1.36.31"
+  mac_address: "aa:bb:cc:36:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.36.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.36.2"
+  underlay_ip: "10.1.36.32"
+  mac_address: "aa:bb:cc:36:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.40.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.40.1"
+  underlay_ip: "10.1.40.31"
+  mac_address: "aa:bb:cc:40:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.40.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.40.2"
+  underlay_ip: "10.1.40.32"
+  mac_address: "aa:bb:cc:40:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.41.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.41.1"
+  underlay_ip: "10.1.41.31"
+  mac_address: "aa:bb:cc:41:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.41.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.41.2"
+  underlay_ip: "10.1.41.32"
+  mac_address: "aa:bb:cc:41:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.45.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.45.1"
+  underlay_ip: "10.1.45.31"
+  mac_address: "aa:bb:cc:45:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.45.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.45.2"
+  underlay_ip: "10.1.45.32"
+  mac_address: "aa:bb:cc:45:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.46.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.46.1"
+  underlay_ip: "10.1.46.31"
+  mac_address: "aa:bb:cc:46:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.46.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.46.2"
+  underlay_ip: "10.1.46.32"
+  mac_address: "aa:bb:cc:46:03:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.50.1, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.50.1"
+  underlay_ip: "10.1.50.31"
+  mac_address: "aa:bb:cc:50:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: vnet-dmz-172.16.50.2, labels: { shared: "true", zone: dmz } }
+spec:
+  vnet_name: vnet-dmz
+  ip_address: "172.16.50.2"
+  underlay_ip: "10.1.50.32"
+  mac_address: "aa:bb:cc:50:03:02"
+  action: vnet_encap
+

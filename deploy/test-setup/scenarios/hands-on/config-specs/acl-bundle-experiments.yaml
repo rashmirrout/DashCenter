@@ -1,0 +1,41 @@
+# acl-bundle-experiments.yaml — Hands-on experiments with AclBundle
+#
+# AclBundle creates an ACL policy + optional VNet/ENI dependencies.
+# Auto-expands to: Vnet → ENI → AclPolicy (in tier order).
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment: Full AclBundle — creates 3 objects from 1 file
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f deploy/test-setup/scenarios/hands-on/config-specs/acl-bundle-experiments.yaml
+# Expect: 3 CREATE — vnet → eni → acl_policy
+#
+apiVersion: dashcenter.v1
+kind: AclBundle
+metadata:
+  name: acl-bundle-exp
+  labels: { experiment: bundle, type: acl }
+spec:
+  vnet:
+    name: vnet-acl-bundle-exp
+    vni: 9802
+  eni:
+    name: eni-acl-bundle-exp
+    mac_address: "aa:bb:cc:98:00:02"
+    underlay_ip: "10.0.98.2"
+    admin_state: up
+  acl_policy:
+    name: acl-bundle-exp-in
+    stage: inbound
+    priority: 100
+    eni_names: [eni-acl-bundle-exp]
+    rules:
+      - { priority: 100, action: allow, protocol: tcp, dst_port: "443" }
+      - { priority: 1000, action: deny }
+---
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete acl-policy acl-bundle-exp-in --ignore-not-found
+#   dashctl delete eni eni-acl-bundle-exp --ignore-not-found
+#   dashctl delete vnet vnet-acl-bundle-exp --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

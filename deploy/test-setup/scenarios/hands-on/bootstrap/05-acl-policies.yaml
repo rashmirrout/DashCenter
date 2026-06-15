@@ -1,0 +1,63 @@
+# 05-acl-policies.yaml — Policies: ACL Policies (depend on ENIs)
+#
+# ACL policies define firewall rules for the ENIs they bind to.
+# Each policy has a stage (inbound/outbound), eni_names[], and rules[].
+# Rules are evaluated in priority order (lower = higher priority).
+#
+# Apply:  dashctl apply -f deploy/test-setup/scenarios/hands-on/bootstrap/05-acl-policies.yaml
+# Verify: dashctl get acl-policy -o table
+# Error:  If eni-lab-web-01 doesn't exist → "cross-namespace reference rejected"
+
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-lab-web-inbound
+  labels: { tenant: lab, tier: web, direction: inbound }
+spec:
+  stage: inbound                                  # inbound | outbound
+  priority: 100                                   # lower = evaluated first
+  eni_names: [eni-lab-web-01, eni-lab-web-02]     # FK → which ENIs this ACL applies to
+  rules:
+    - priority: 100                               # allow HTTPS from 10.0.0.0/8
+      action: allow
+      src_prefix: "10.0.0.0/8"
+      dst_port: "443"
+      protocol: tcp
+    - priority: 200                               # allow SSH from management subnet
+      action: allow
+      src_prefix: "10.0.50.0/24"
+      dst_port: "22"
+      protocol: tcp
+    - priority: 1000                              # deny everything else
+      action: deny
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-lab-web-outbound
+  labels: { tenant: lab, tier: web, direction: outbound }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-lab-web-01, eni-lab-web-02]
+  rules:
+    - priority: 100                               # allow all outbound
+      action: allow
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-lab-db-inbound
+  labels: { tenant: lab, tier: db, direction: inbound }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-lab-db-01]
+  rules:
+    - priority: 100                               # allow DB port from web tier only
+      action: allow
+      src_prefix: "192.168.50.0/24"
+      dst_port: "5432"
+      protocol: tcp
+    - priority: 1000
+      action: deny

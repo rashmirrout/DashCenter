@@ -1,0 +1,148 @@
+# vnet-full.yaml — VNet hosting a 3-VM tier with every dependency inline.
+#
+# WHAT THIS CREATES (12 objects):
+#   Tier 0   : 1 Vnet, 1 ServiceTunnel (privatelink)
+#   Tier 1   : 3 ENIs (web-01, web-02, app-01), 4 VnetMappings
+#   Policies : 2 RoutePolicies (web tier + app tier), 1 AclPolicy (shared inbound)
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/vnet-full.yaml --force
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+
+# ─── Tier 0: VNet ────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata:
+  name: full-vnet-svc
+  labels: { demo: vnet-full, tier: "0", role: 3-tier-service }
+spec:
+  vni: 60002
+---
+# ─── Tier 0: ServiceTunnel — privatelink to managed DB ───────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata:
+  name: full-vnet-st-db
+  labels: { demo: vnet-full, class: privatelink }
+spec:
+  local_underlay_ip: "10.60.0.20"
+  remote_underlay_ip: "10.60.255.40"
+  vni: 60201
+  params:
+    action: privatelink
+    target_fqdn: "vnet-full-db.privatelink.example.com"
+---
+# ─── Tier 1: ENIs — web tier (2) and app tier (1) ────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: full-vnet-web-01
+  labels: { demo: vnet-full, role: web }
+spec:
+  vnet_name: full-vnet-svc
+  mac_address: "aa:bb:cc:60:01:01"
+  underlay_ip: "10.60.1.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-01]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: full-vnet-web-02
+  labels: { demo: vnet-full, role: web }
+spec:
+  vnet_name: full-vnet-svc
+  mac_address: "aa:bb:cc:60:01:02"
+  underlay_ip: "10.60.1.12"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-02]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: full-vnet-app-01
+  labels: { demo: vnet-full, role: app }
+spec:
+  vnet_name: full-vnet-svc
+  mac_address: "aa:bb:cc:60:01:21"
+  underlay_ip: "10.60.1.21"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-03]
+---
+# ─── Tier 1: VnetMappings — overlay↔underlay table for the VNet ──────────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-vnet-map-web-01, labels: { demo: vnet-full } }
+spec:
+  vnet_name: full-vnet-svc
+  ip_address: "192.168.61.11"
+  underlay_ip: "10.60.1.11"
+  mac_address: "aa:bb:cc:60:01:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-vnet-map-web-02, labels: { demo: vnet-full } }
+spec:
+  vnet_name: full-vnet-svc
+  ip_address: "192.168.61.12"
+  underlay_ip: "10.60.1.12"
+  mac_address: "aa:bb:cc:60:01:02"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-vnet-map-app-01, labels: { demo: vnet-full } }
+spec:
+  vnet_name: full-vnet-svc
+  ip_address: "192.168.61.21"
+  underlay_ip: "10.60.1.21"
+  mac_address: "aa:bb:cc:60:01:21"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-vnet-map-db-shim, labels: { demo: vnet-full } }
+spec:
+  vnet_name: full-vnet-svc
+  ip_address: "192.168.61.99"
+  underlay_ip: "10.60.0.20"
+  mac_address: "aa:bb:cc:60:01:99"
+  action: service_tunnel
+---
+# ─── Policy: RoutePolicy — web tier (egress to app + privatelink to db) ──
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-vnet-rp-web, labels: { demo: vnet-full } }
+spec:
+  eni_names: [full-vnet-web-01, full-vnet-web-02]
+  routes:
+    - { prefix: "192.168.61.0/24",  next_hop_type: vnet,           next_hop_target: full-vnet-svc,  metric: 10 }
+    - { prefix: "10.60.255.40/32",  next_hop_type: service_tunnel, next_hop_target: full-vnet-st-db, metric: 20 }
+    - { prefix: "0.0.0.0/0",        next_hop_type: drop,                                              metric: 1000 }
+---
+# ─── Policy: RoutePolicy — app tier (db privatelink + intra-vnet) ────────
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-vnet-rp-app, labels: { demo: vnet-full } }
+spec:
+  eni_names: [full-vnet-app-01]
+  routes:
+    - { prefix: "192.168.61.0/24",  next_hop_type: vnet,           next_hop_target: full-vnet-svc,  metric: 10 }
+    - { prefix: "10.60.255.40/32",  next_hop_type: service_tunnel, next_hop_target: full-vnet-st-db, metric: 5 }
+    - { prefix: "0.0.0.0/0",        next_hop_type: drop,                                              metric: 1000 }
+---
+# ─── Policy: AclPolicy — shared inbound across all 3 ENIs ────────────────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: full-vnet-acl-in, labels: { demo: vnet-full, stage: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [full-vnet-web-01, full-vnet-web-02, full-vnet-app-01]
+  rules:
+    - { priority: 100,  action: allow, protocol: tcp,  dst_port: "443" }
+    - { priority: 110,  action: allow, protocol: tcp,  dst_port: "80" }
+    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "8080", src_prefix: "192.168.61.0/24" }
+    - { priority: 300,  action: allow, protocol: icmp, src_prefix: "10.0.0.0/8" }
+    - { priority: 1000, action: deny }

@@ -1,0 +1,17 @@
+# 01-service-tunnels.yaml — Tier 0: Service Tunnels (no dependencies)
+#
+# Service tunnels define encapsulation endpoints for inter-site traffic.
+# They are optional — only needed if route policies use next_hop_type=service_tunnel.
+#
+# Apply:  dashctl apply -f deploy/test-setup/scenarios/hands-on/bootstrap/01-service-tunnels.yaml
+# Verify: dashctl get service-tunnel -o table
+
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata:
+  name: st-internet-egress
+  labels: { role: egress }
+spec:
+  local_underlay_ip: "10.0.0.1"
+  remote_underlay_ip: "10.0.0.2"
+  vni: 9001

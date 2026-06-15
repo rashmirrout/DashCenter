@@ -1,0 +1,49 @@
+# 06-ha-sets.yaml — 4 HA sets (superset of 04-ha).
+#
+# 04-ha originals: bank active/standby, retail active/standby, shared active/active.
+# NEW in 05: gaming cross-rack active/standby using DPUs 09+10.
+
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-bank-prod, labels: { tenant: bank, env: prod } }
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-sim-01, dpu-sim-02]
+  virtual_ip: 10.0.0.100
+  flow_sync_endpoints:
+    - udp://dpu-sim-01:4789
+    - udp://dpu-sim-02:4789
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-retail-prod, labels: { tenant: retail, env: prod } }
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-sim-03, dpu-sim-04]
+  virtual_ip: 10.1.0.100
+  flow_sync_endpoints:
+    - udp://dpu-sim-03:4789
+    - udp://dpu-sim-04:4789
+---
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-shared-services, labels: { tenant: shared, env: prod } }
+spec:
+  mode: active_active
+  member_dpu_ids: [dpu-sim-05, dpu-sim-01]
+  virtual_ip: 10.9.0.100
+  flow_sync_endpoints:
+    - udp://dpu-sim-05:4789
+    - udp://dpu-sim-01:4789
+---
+# NEW in 05: gaming cross-rack HA (DPUs 09+10 simulate different racks).
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: ha-gaming-crossrack, labels: { tenant: gaming, env: prod, topology: cross-rack } }
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-sim-09, dpu-sim-10]
+  virtual_ip: 10.5.0.100
+  flow_sync_endpoints:
+    - udp://dpu-sim-09:4789
+    - udp://dpu-sim-10:4789

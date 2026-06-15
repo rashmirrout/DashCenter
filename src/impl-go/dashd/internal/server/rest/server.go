@@ -13,6 +13,8 @@ import (
 "net/http"
 "time"
 
+"golang.org/x/time/rate"
+
 dashcenterv1 "github.com/rashmirrout/DashCenter/src/impl-go/gen/go/dashcenter/v1"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/audit"
 "github.com/rashmirrout/DashCenter/src/impl-go/dashd/internal/auth"
@@ -66,12 +68,53 @@ type Options struct {
 	CounterBcast *broadcaster.Broadcaster
 	CounterReader CounterReader
 	CounterResetter CounterResetter // PE-3c add-on; may be nil
+
+	// WriteRateLimit caps the sustained write RPS (PUT/POST/DELETE)
+	// to protect the etcd backend from burst overload that can starve
+	// the leader election keepalive. 0 means use the default (200 rps).
+	// Set to -1 to disable.
+	WriteRateLimit float64
+}
+
+// defaultWriteRateLimit is the sustained write RPS when WriteRateLimit
+// is not configured. High enough for normal operation, low enough to
+// prevent a bootstrap script from saturating a single-node etcd.
+const defaultWriteRateLimit = 200
+
+// writeThrottleMiddleware rate-limits mutating requests (PUT/POST/DELETE)
+// to protect the etcd backend from burst overload. Read requests (GET)
+// pass through unthrottled.
+func writeThrottleMiddleware(rps float64) func(http.Handler) http.Handler {
+	limiter := rate.NewLimiter(rate.Limit(rps), int(rps))
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut, http.MethodPost, http.MethodDelete, http.MethodPatch:
+				if !limiter.Allow() {
+					w.Header().Set("Retry-After", "1")
+					http.Error(w, `{"error":"write rate limit exceeded, retry after 1s"}`, http.StatusTooManyRequests)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // NewWithOptions is the production constructor.
 func NewWithOptions(cp service.ControlPlaneService, obs service.ObservabilityService, ha service.HaService, mig service.MigrationService, opts Options) *Server {
 h := &handler{cp: cp, obs: obs, ha: ha, mig: mig, diag: opts.Diagnostics, cluster: opts.Cluster, cntBcast: opts.CounterBcast, cntReader: opts.CounterReader, cntResetter: opts.CounterResetter}
 var handlerChain http.Handler = h.router()
+
+// Write throttle — innermost middleware (runs after auth/audit).
+writeRPS := opts.WriteRateLimit
+if writeRPS == 0 {
+	writeRPS = defaultWriteRateLimit
+}
+if writeRPS > 0 {
+	handlerChain = writeThrottleMiddleware(writeRPS)(handlerChain)
+}
+
 // Compose OUTSIDE -> IN so auth runs first and audit reads Subject
 // from ctx.
 if opts.AuditWriter != nil {

@@ -1,0 +1,44 @@
+# 02-enis.yaml — Tier 1: ENIs (depend on VNets)
+#
+# Each ENI references a VNet via vnet_name. The VNet MUST exist first.
+# ENIs represent virtual network interfaces attached to VMs/containers.
+#
+# Apply:  dashctl apply -f deploy/test-setup/scenarios/hands-on/bootstrap/02-enis.yaml
+# Verify: dashctl get eni -o wide
+# Error:  If lab-web vnet doesn't exist → "cross-namespace reference rejected"
+
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-lab-web-01
+  labels: { tenant: lab, tier: web, vm: web-01 }
+spec:
+  vnet_name: lab-web                      # FK → must match a Vnet.metadata.name
+  mac_address: "aa:bb:cc:50:01:01"
+  underlay_ip: "10.0.50.11"
+  admin_state: up                          # "up" or "down"
+  placement_hint_dpu_ids: [dpu-sim-01]     # which DPU to place on (hint, not hard)
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-lab-web-02
+  labels: { tenant: lab, tier: web, vm: web-02 }
+spec:
+  vnet_name: lab-web
+  mac_address: "aa:bb:cc:50:01:02"
+  underlay_ip: "10.0.50.12"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-02]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-lab-db-01
+  labels: { tenant: lab, tier: db, vm: db-01 }
+spec:
+  vnet_name: lab-db
+  mac_address: "aa:bb:cc:50:02:01"
+  underlay_ip: "10.0.50.21"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-01]

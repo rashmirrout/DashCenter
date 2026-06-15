@@ -15,6 +15,7 @@ param(
     [switch]$WithConsole,
     [switch]$SkipBuild,
     [switch]$SkipContext,
+    [switch]$SkipDashctlBuild,
     [int]$ReadyTimeoutSec = 90
 )
 
@@ -46,6 +47,11 @@ if (-not $SkipBuild) {
 $svcLabel = if ($WithConsole) { '14 (incl. dashw)' } else { '13 (core)' }
 Write-Host ("==> Starting fleet ({0} services)" -f $svcLabel) -ForegroundColor Cyan
 docker compose up -d @allServices
+
+# Build dashctl from source while the fleet is starting up.
+if (-not $SkipDashctlBuild) {
+    pwsh (Join-Path $PSScriptRoot 'build-dashctl.ps1')
+}
 
 Write-Host ("==> Waiting for a dashd leader to be elected (max {0}s)" -f $ReadyTimeoutSec) -ForegroundColor Cyan
 $deadline = (Get-Date).AddSeconds($ReadyTimeoutSec)

@@ -1,0 +1,79 @@
+# eni-experiments.yaml — Hands-on experiments with ENI specs
+#
+# ENI is a Tier 1 object — it depends on a VNet (vnet_name field).
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: WRONG — Create ENI without its VNet (FAIL)
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f - <<< '<paste the YAML below>'
+# Expect: FAILED — eni.vnet_name="vnet-does-not-exist":
+#         cross-namespace reference rejected (not found in this namespace)
+#
+# WHY: ENI's vnet_name is a foreign key. The VNet must exist first.
+#
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-exp-bad
+spec:
+  vnet_name: vnet-does-not-exist        # ← this VNet doesn't exist → REJECTED
+  mac_address: "aa:bb:cc:99:00:01"
+  underlay_ip: "10.0.99.1"
+  admin_state: up
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: RIGHT — Create VNet first, then ENI (PASS)
+# ═══════════════════════════════════════════════════════════════
+#
+# Step 1 — create the VNet:
+#   dashctl apply -f deploy/test-setup/scenarios/hands-on/config-specs/vnet-experiments.yaml
+#
+# Step 2 — apply this:
+#   dashctl apply -f - <<< '<paste the YAML below>'
+# Expect: eni/eni-exp-ok CREATE (generation 1)
+#
+# ENI fields:
+#   vnet_name              — FK to the VNet this ENI belongs to (REQUIRED)
+#   mac_address            — virtual MAC of the VM/container (aa:bb:cc:xx:xx:xx)
+#   underlay_ip            — physical IP on the host where this ENI runs
+#   admin_state            — "up" (active) or "down" (disabled, drops all traffic)
+#   placement_hint_dpu_ids — which DPU(s) should host this ENI (optional hint)
+#   resimulate_flows       — if true, forces re-evaluation of all cached flows
+#   labels                 — operator-defined tags for filtering
+#
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-exp-ok
+  labels: { experiment: eni, vm: test-01 }
+spec:
+  vnet_name: vnet-exp-1                  # ← must match a Vnet.metadata.name
+  mac_address: "aa:bb:cc:99:00:01"
+  underlay_ip: "10.0.99.1"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-01]
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 3: Modify — change admin_state to "down"
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply --force -f - <<< '<paste the YAML below>'
+# Expect: eni/eni-exp-ok MODIFY (generation 2)
+# Check:  dashctl describe eni eni-exp-ok  →  admin_state: down
+#
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: eni-exp-ok
+spec:
+  vnet_name: vnet-exp-1
+  mac_address: "aa:bb:cc:99:00:01"
+  underlay_ip: "10.0.99.1"
+  admin_state: down                       # ← changed from "up" to "down"
+---
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete eni eni-exp-ok --ignore-not-found
+#   dashctl delete eni eni-exp-bad --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

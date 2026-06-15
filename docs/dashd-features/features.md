@@ -998,7 +998,8 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 - [dash-sim-counter-rollups.md](dash-sim-counter-rollups.md) — PE-3a / PE-G8 sim `GetDpuCounters` RPC + `dash-sim-client dpu-counters` subcommand (standalone, no dashd)
 - [counter-streaming.md](counter-streaming.md) — PE-3c / PD-G5 counter streaming end-to-end (`ObservabilityService.GetCounters` + dashw Hub + `/topology-v2` `CounterWidget`)
 - [docker-cli-packaging.md](docker-cli-packaging.md) — bundled operator CLIs in every container (Alpine base + `dash-sim-client` in sim + `dashctl` in dashd)
-- [referential-integrity-validation.md](referential-integrity-validation.md) — FK validation gap analysis + design proposal (29 object kinds, ~49 FK relationships, 4-phase implementation plan)
+- [referential-integrity-validation.md](referential-integrity-validation.md) — FK validation across dash-sim (25/25 southbound) + dashd (Put-side + Delete-side orphan protection) + `dashctl validate` + `dash-sim-client validate` CLIs — Phases 1–3 implemented
+- Bundle manifests (`EniBundle`, `AclBundle`, `RouteBundle`, `HaBundle`) — full DASH construct + dependency chain in one YAML with auto-wired FKs; `dashctl apply --force` for create-vs-update detection — see [CLI_GUIDE.md §6](../CLI_GUIDE.md)
 - [proto/dashcenter/v1/](../../proto/dashcenter/v1) — proto sources of truth
 - [docs/CLI_GUIDE.md](../CLI_GUIDE.md) — `dashctl` equivalents
 - [deploy/test-setup/05-full-console/manual-handson.md](../../deploy/test-setup/05-full-console/manual-handson.md) — Lab 12.6 live captures of every diagnostic

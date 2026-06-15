@@ -1,0 +1,51 @@
+# route-bundle-experiments.yaml — Hands-on experiments with RouteBundle
+#
+# RouteBundle creates a route policy + optional VNet/ServiceTunnel/ENI deps.
+# Auto-expands to: Vnet → ServiceTunnel → ENI → RoutePolicy.
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment: Full RouteBundle — creates 4 objects from 1 file
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f deploy/test-setup/scenarios/hands-on/config-specs/route-bundle-experiments.yaml
+# Expect: 4 CREATE — vnet → service_tunnel → eni → route_policy
+#
+apiVersion: dashcenter.v1
+kind: RouteBundle
+metadata:
+  name: route-bundle-exp
+  labels: { experiment: bundle, type: route }
+spec:
+  vnet:
+    name: vnet-route-bundle-exp
+    vni: 9803
+  service_tunnel:
+    name: st-route-bundle-exp
+    local_underlay_ip: "10.0.0.1"
+    remote_underlay_ip: "10.0.0.2"
+    vni: 9903
+  eni:
+    name: eni-route-bundle-exp
+    mac_address: "aa:bb:cc:98:00:03"
+    underlay_ip: "10.0.98.3"
+    admin_state: up
+  route_policy:
+    name: rp-route-bundle-exp
+    eni_names: [eni-route-bundle-exp]
+    routes:
+      - prefix: "192.168.98.0/24"
+        next_hop_type: vnet
+        next_hop_target: vnet-route-bundle-exp
+        metric: 10
+      - prefix: "0.0.0.0/0"
+        next_hop_type: service_tunnel
+        next_hop_target: st-route-bundle-exp
+        metric: 100
+---
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete route-policy rp-route-bundle-exp --ignore-not-found
+#   dashctl delete eni eni-route-bundle-exp --ignore-not-found
+#   dashctl delete service-tunnel st-route-bundle-exp --ignore-not-found
+#   dashctl delete vnet vnet-route-bundle-exp --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

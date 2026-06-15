@@ -1,0 +1,381 @@
+# Static DPU inventory - 50 simulated DPUs across 25 appliances.
+#
+# Appliance mapping (2 DPUs per appliance):
+#   Appliance-1: dpu-sim-01 (slot 0), dpu-sim-02 (slot 1)
+#   Appliance-2: dpu-sim-03 (slot 0), dpu-sim-04 (slot 1)
+#   Appliance-3: dpu-sim-05 (slot 0), dpu-sim-06 (slot 1)
+#   Appliance-4: dpu-sim-07 (slot 0), dpu-sim-08 (slot 1)
+#   Appliance-5: dpu-sim-09 (slot 0), dpu-sim-10 (slot 1)
+#   Appliance-6: dpu-sim-11 (slot 0), dpu-sim-12 (slot 1)
+#   Appliance-7: dpu-sim-13 (slot 0), dpu-sim-14 (slot 1)
+#   Appliance-8: dpu-sim-15 (slot 0), dpu-sim-16 (slot 1)
+#   Appliance-9: dpu-sim-17 (slot 0), dpu-sim-18 (slot 1)
+#   Appliance-10: dpu-sim-19 (slot 0), dpu-sim-20 (slot 1)
+#   Appliance-11: dpu-sim-21 (slot 0), dpu-sim-22 (slot 1)
+#   Appliance-12: dpu-sim-23 (slot 0), dpu-sim-24 (slot 1)
+#   Appliance-13: dpu-sim-25 (slot 0), dpu-sim-26 (slot 1)
+#   Appliance-14: dpu-sim-27 (slot 0), dpu-sim-28 (slot 1)
+#   Appliance-15: dpu-sim-29 (slot 0), dpu-sim-30 (slot 1)
+#   Appliance-16: dpu-sim-31 (slot 0), dpu-sim-32 (slot 1)
+#   Appliance-17: dpu-sim-33 (slot 0), dpu-sim-34 (slot 1)
+#   Appliance-18: dpu-sim-35 (slot 0), dpu-sim-36 (slot 1)
+#   Appliance-19: dpu-sim-37 (slot 0), dpu-sim-38 (slot 1)
+#   Appliance-20: dpu-sim-39 (slot 0), dpu-sim-40 (slot 1)
+#   Appliance-21: dpu-sim-41 (slot 0), dpu-sim-42 (slot 1)
+#   Appliance-22: dpu-sim-43 (slot 0), dpu-sim-44 (slot 1)
+#   Appliance-23: dpu-sim-45 (slot 0), dpu-sim-46 (slot 1)
+#   Appliance-24: dpu-sim-47 (slot 0), dpu-sim-48 (slot 1)
+#   Appliance-25: dpu-sim-49 (slot 0), dpu-sim-50 (slot 1)
+
+dpus:
+  - id: dpu-sim-01
+    endpoint: dash-sim-01:50051
+    labels:
+      rack: appliance-1
+      slot: "0"
+      zone: us-west-2a
+      tier: gold
+  - id: dpu-sim-02
+    endpoint: dash-sim-02:50051
+    labels:
+      rack: appliance-1
+      slot: "1"
+      zone: us-west-2a
+      tier: gold
+  - id: dpu-sim-03
+    endpoint: dash-sim-03:50051
+    labels:
+      rack: appliance-2
+      slot: "0"
+      zone: us-west-2b
+      tier: silver
+  - id: dpu-sim-04
+    endpoint: dash-sim-04:50051
+    labels:
+      rack: appliance-2
+      slot: "1"
+      zone: us-west-2b
+      tier: silver
+  - id: dpu-sim-05
+    endpoint: dash-sim-05:50051
+    labels:
+      rack: appliance-3
+      slot: "0"
+      zone: us-east-1a
+      tier: bronze
+  - id: dpu-sim-06
+    endpoint: dash-sim-06:50051
+    labels:
+      rack: appliance-3
+      slot: "1"
+      zone: us-east-1a
+      tier: bronze
+  - id: dpu-sim-07
+    endpoint: dash-sim-07:50051
+    labels:
+      rack: appliance-4
+      slot: "0"
+      zone: us-east-1b
+      tier: gold
+  - id: dpu-sim-08
+    endpoint: dash-sim-08:50051
+    labels:
+      rack: appliance-4
+      slot: "1"
+      zone: us-east-1b
+      tier: gold
+  - id: dpu-sim-09
+    endpoint: dash-sim-09:50051
+    labels:
+      rack: appliance-5
+      slot: "0"
+      zone: eu-west-1a
+      tier: silver
+  - id: dpu-sim-10
+    endpoint: dash-sim-10:50051
+    labels:
+      rack: appliance-5
+      slot: "1"
+      zone: eu-west-1a
+      tier: silver
+  - id: dpu-sim-11
+    endpoint: dash-sim-11:50051
+    labels:
+      rack: appliance-6
+      slot: "0"
+      zone: us-west-2a
+      tier: bronze
+  - id: dpu-sim-12
+    endpoint: dash-sim-12:50051
+    labels:
+      rack: appliance-6
+      slot: "1"
+      zone: us-west-2a
+      tier: bronze
+  - id: dpu-sim-13
+    endpoint: dash-sim-13:50051
+    labels:
+      rack: appliance-7
+      slot: "0"
+      zone: us-west-2b
+      tier: gold
+  - id: dpu-sim-14
+    endpoint: dash-sim-14:50051
+    labels:
+      rack: appliance-7
+      slot: "1"
+      zone: us-west-2b
+      tier: gold
+  - id: dpu-sim-15
+    endpoint: dash-sim-15:50051
+    labels:
+      rack: appliance-8
+      slot: "0"
+      zone: us-east-1a
+      tier: silver
+  - id: dpu-sim-16
+    endpoint: dash-sim-16:50051
+    labels:
+      rack: appliance-8
+      slot: "1"
+      zone: us-east-1a
+      tier: silver
+  - id: dpu-sim-17
+    endpoint: dash-sim-17:50051
+    labels:
+      rack: appliance-9
+      slot: "0"
+      zone: us-east-1b
+      tier: bronze
+  - id: dpu-sim-18
+    endpoint: dash-sim-18:50051
+    labels:
+      rack: appliance-9
+      slot: "1"
+      zone: us-east-1b
+      tier: bronze
+  - id: dpu-sim-19
+    endpoint: dash-sim-19:50051
+    labels:
+      rack: appliance-10
+      slot: "0"
+      zone: eu-west-1a
+      tier: gold
+  - id: dpu-sim-20
+    endpoint: dash-sim-20:50051
+    labels:
+      rack: appliance-10
+      slot: "1"
+      zone: eu-west-1a
+      tier: gold
+  - id: dpu-sim-21
+    endpoint: dash-sim-21:50051
+    labels:
+      rack: appliance-11
+      slot: "0"
+      zone: us-west-2a
+      tier: silver
+  - id: dpu-sim-22
+    endpoint: dash-sim-22:50051
+    labels:
+      rack: appliance-11
+      slot: "1"
+      zone: us-west-2a
+      tier: silver
+  - id: dpu-sim-23
+    endpoint: dash-sim-23:50051
+    labels:
+      rack: appliance-12
+      slot: "0"
+      zone: us-west-2b
+      tier: bronze
+  - id: dpu-sim-24
+    endpoint: dash-sim-24:50051
+    labels:
+      rack: appliance-12
+      slot: "1"
+      zone: us-west-2b
+      tier: bronze
+  - id: dpu-sim-25
+    endpoint: dash-sim-25:50051
+    labels:
+      rack: appliance-13
+      slot: "0"
+      zone: us-east-1a
+      tier: gold
+  - id: dpu-sim-26
+    endpoint: dash-sim-26:50051
+    labels:
+      rack: appliance-13
+      slot: "1"
+      zone: us-east-1a
+      tier: gold
+  - id: dpu-sim-27
+    endpoint: dash-sim-27:50051
+    labels:
+      rack: appliance-14
+      slot: "0"
+      zone: us-east-1b
+      tier: silver
+  - id: dpu-sim-28
+    endpoint: dash-sim-28:50051
+    labels:
+      rack: appliance-14
+      slot: "1"
+      zone: us-east-1b
+      tier: silver
+  - id: dpu-sim-29
+    endpoint: dash-sim-29:50051
+    labels:
+      rack: appliance-15
+      slot: "0"
+      zone: eu-west-1a
+      tier: bronze
+  - id: dpu-sim-30
+    endpoint: dash-sim-30:50051
+    labels:
+      rack: appliance-15
+      slot: "1"
+      zone: eu-west-1a
+      tier: bronze
+  - id: dpu-sim-31
+    endpoint: dash-sim-31:50051
+    labels:
+      rack: appliance-16
+      slot: "0"
+      zone: us-west-2a
+      tier: gold
+  - id: dpu-sim-32
+    endpoint: dash-sim-32:50051
+    labels:
+      rack: appliance-16
+      slot: "1"
+      zone: us-west-2a
+      tier: gold
+  - id: dpu-sim-33
+    endpoint: dash-sim-33:50051
+    labels:
+      rack: appliance-17
+      slot: "0"
+      zone: us-west-2b
+      tier: silver
+  - id: dpu-sim-34
+    endpoint: dash-sim-34:50051
+    labels:
+      rack: appliance-17
+      slot: "1"
+      zone: us-west-2b
+      tier: silver
+  - id: dpu-sim-35
+    endpoint: dash-sim-35:50051
+    labels:
+      rack: appliance-18
+      slot: "0"
+      zone: us-east-1a
+      tier: bronze
+  - id: dpu-sim-36
+    endpoint: dash-sim-36:50051
+    labels:
+      rack: appliance-18
+      slot: "1"
+      zone: us-east-1a
+      tier: bronze
+  - id: dpu-sim-37
+    endpoint: dash-sim-37:50051
+    labels:
+      rack: appliance-19
+      slot: "0"
+      zone: us-east-1b
+      tier: gold
+  - id: dpu-sim-38
+    endpoint: dash-sim-38:50051
+    labels:
+      rack: appliance-19
+      slot: "1"
+      zone: us-east-1b
+      tier: gold
+  - id: dpu-sim-39
+    endpoint: dash-sim-39:50051
+    labels:
+      rack: appliance-20
+      slot: "0"
+      zone: eu-west-1a
+      tier: silver
+  - id: dpu-sim-40
+    endpoint: dash-sim-40:50051
+    labels:
+      rack: appliance-20
+      slot: "1"
+      zone: eu-west-1a
+      tier: silver
+  - id: dpu-sim-41
+    endpoint: dash-sim-41:50051
+    labels:
+      rack: appliance-21
+      slot: "0"
+      zone: us-west-2a
+      tier: bronze
+  - id: dpu-sim-42
+    endpoint: dash-sim-42:50051
+    labels:
+      rack: appliance-21
+      slot: "1"
+      zone: us-west-2a
+      tier: bronze
+  - id: dpu-sim-43
+    endpoint: dash-sim-43:50051
+    labels:
+      rack: appliance-22
+      slot: "0"
+      zone: us-west-2b
+      tier: gold
+  - id: dpu-sim-44
+    endpoint: dash-sim-44:50051
+    labels:
+      rack: appliance-22
+      slot: "1"
+      zone: us-west-2b
+      tier: gold
+  - id: dpu-sim-45
+    endpoint: dash-sim-45:50051
+    labels:
+      rack: appliance-23
+      slot: "0"
+      zone: us-east-1a
+      tier: silver
+  - id: dpu-sim-46
+    endpoint: dash-sim-46:50051
+    labels:
+      rack: appliance-23
+      slot: "1"
+      zone: us-east-1a
+      tier: silver
+  - id: dpu-sim-47
+    endpoint: dash-sim-47:50051
+    labels:
+      rack: appliance-24
+      slot: "0"
+      zone: us-east-1b
+      tier: bronze
+  - id: dpu-sim-48
+    endpoint: dash-sim-48:50051
+    labels:
+      rack: appliance-24
+      slot: "1"
+      zone: us-east-1b
+      tier: bronze
+  - id: dpu-sim-49
+    endpoint: dash-sim-49:50051
+    labels:
+      rack: appliance-25
+      slot: "0"
+      zone: eu-west-1a
+      tier: gold
+  - id: dpu-sim-50
+    endpoint: dash-sim-50:50051
+    labels:
+      rack: appliance-25
+      slot: "1"
+      zone: eu-west-1a
+      tier: gold
+

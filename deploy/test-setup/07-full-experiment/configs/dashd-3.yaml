@@ -1,0 +1,38 @@
+# dashd-3 config — controller mode with 2-node etcd cluster.
+mode: controller
+node_id: dashd-3
+
+listen:
+  rest_addr:  ":8443"
+  grpc_addr:  ":9443"
+  admin_addr: ":7443"
+
+storage:
+  backend: etcd
+  etcd:
+    endpoints: ["http://etcd-1:2379", "http://etcd-2:2379"]
+    key_prefix: /dashd/experiment/state/
+    dial_timeout: 5s
+
+inventory:
+  source: file
+  file:   /etc/dashd/inventory.yaml
+
+ha:
+  controller:
+    elector:
+      backend: etcd
+      endpoints: ["http://etcd-1:2379", "http://etcd-2:2379"]
+      leader_key: /dashd/experiment/leader
+      lease_ttl: 15s
+      dial_timeout: 5s
+
+reconcile:
+  tick_interval:        5s
+  per_dpu_inbox_size:   1
+  apply_rate_limit:     200
+  error_budget_per_min: 20
+
+log:
+  level:  info
+  format: json
