@@ -468,6 +468,45 @@ delete eni-bank-web-01  →  then delete vnet bank-prod-web
 Remove-Item .\bad-eni.yaml
 ```
 
+### Experiment D — EniBundle: full ENI from one file
+
+Bundle manifests define a complete DASH construct and its dependencies
+in a single YAML file:
+
+```powershell
+@"
+apiVersion: dashcenter.v1
+kind: EniBundle
+metadata: { name: eni-bundle-lab, labels: { lab: "10a" } }
+spec:
+  vnet: { name: vnet-bundle-lab, vni: 7777 }
+  eni:
+    mac_address: aa:bb:cc:77:00:01
+    underlay_ip: 10.0.77.1
+    admin_state: up
+  acl_policies:
+    - name: acl-bundle-lab
+      stage: inbound
+      eni_names: [eni-bundle-lab]
+      rules:
+        - { priority: 100, action: allow }
+"@ | Set-Content -Encoding ascii .\bundle-lab.yaml
+
+# Creates 3 objects in tier order (vnet → eni → acl_policy)
+./dashctl.exe apply -f .\bundle-lab.yaml
+# vnet/vnet-bundle-lab CREATE (generation 1)
+# eni/eni-bundle-lab CREATE (generation 1)
+# aclpolicy/acl-bundle-lab CREATE (generation 1)
+
+# Clean up
+./dashctl.exe delete acl-policy acl-bundle-lab
+./dashctl.exe delete eni eni-bundle-lab
+./dashctl.exe delete vnet vnet-bundle-lab
+Remove-Item .\bundle-lab.yaml
+```
+
+Other bundle kinds: `AclBundle`, `RouteBundle`, `HaBundle`.
+
 ---
 
 ## Step 11 · HA planned switchover (drains old, promotes new)

@@ -1011,6 +1011,47 @@ PS> & $bin validate -f deploy/dashctl-fleet/manifests
 > **Tip**: re-apply the manifests if you deleted objects:
 > `& $bin apply -f deploy/dashctl-fleet/manifests`
 
+### Step 38 — Bundle manifests (EniBundle)
+
+Bundle manifests define a complete DASH construct and its dependency
+chain in a single YAML file. The CLI auto-expands bundles into
+individual specs in the correct tier order.
+
+```powershell
+# Create an EniBundle — one file for VNet + ENI + ACL policy
+PS> @"
+apiVersion: dashcenter.v1
+kind: EniBundle
+metadata: { name: eni-bundle-demo }
+spec:
+  vnet: { name: vnet-bundle-demo, vni: 8888 }
+  eni:
+    mac_address: "aa:bb:cc:88:00:01"
+    underlay_ip: "10.0.88.1"
+    admin_state: up
+  acl_policies:
+    - name: acl-bundle-demo
+      stage: inbound
+      eni_names: [eni-bundle-demo]
+      rules: [{ priority: 100, action: allow }]
+"@ | Set-Content demo-bundle.yaml
+
+PS> & $bin apply -f demo-bundle.yaml --force
+# vnet/vnet-bundle-demo CREATE (generation 1)
+# eni/eni-bundle-demo CREATE (generation 1)
+# aclpolicy/acl-bundle-demo CREATE (generation 1)
+# Applied 3 object(s): 3 created, 0 modified, 0 blocked, 0 failed
+
+# Clean up
+PS> & $bin delete acl-policy acl-bundle-demo
+PS> & $bin delete eni eni-bundle-demo
+PS> & $bin delete vnet vnet-bundle-demo
+PS> Remove-Item demo-bundle.yaml
+```
+
+**Other bundle kinds**: `AclBundle`, `RouteBundle`, `HaBundle` — same
+pattern. See [CLI_GUIDE.md §6](../CLI_GUIDE.md) for full format specs.
+
 ---
 
 ## 9. Drive the fleet from inside a container
@@ -1558,6 +1599,8 @@ $bin = "C:\WorkSpace\PS\PublicRepo\DashCenter\src\impl-go\dashctl\bin\dashctl.ex
 & $bin config use-context  fleet
 & $bin config view
 & $bin validate -f manifest/
+& $bin apply -f eni-bundle.yaml                   # EniBundle: full ENI + deps
+& $bin apply -f eni-bundle.yaml --force           # overwrite existing
 
 # ── in-container one-shots ──────────────────────────────────────
 docker compose -f deploy/dashctl-fleet/docker-compose.yml run --rm dashctl version

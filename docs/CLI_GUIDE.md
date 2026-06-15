@@ -239,6 +239,75 @@ dashctl apply -f eni-bundle.yaml --insecure
 the vnet section, `vnet_mapping.vnet_name` from the vnet, and
 `route_policy.eni_names` / `acl_policy.eni_names` from the ENI name.
 
+### AclBundle — ACL policy + dependencies in one file
+
+The `AclBundle` kind creates an ACL policy and optionally its VNet
+and ENI dependencies:
+
+```yaml
+apiVersion: dashcenter.v1
+kind: AclBundle
+metadata:
+  name: acl-web-inbound
+  labels: { tenant: bank }
+spec:
+  vnet: { name: bank-prod-web, vni: 1001 }         # optional Tier 0 dep
+  eni: { name: eni-web-01, mac_address: "aa:bb:cc:01:00:01",
+         underlay_ip: "10.0.1.11", admin_state: up } # optional Tier 1 dep
+  acl_policy:                                        # the ACL policy
+    name: acl-bank-web-in
+    stage: inbound
+    eni_names: [eni-web-01]
+    rules:
+      - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+      - { priority: 1000, action: deny }
+```
+
+Expands to: Vnet → Eni (auto-wires `vnet_name`) → AclPolicy.
+
+### RouteBundle — route policy + dependencies in one file
+
+The `RouteBundle` kind creates a route policy and optionally its VNet,
+ServiceTunnel, and ENI dependencies:
+
+```yaml
+apiVersion: dashcenter.v1
+kind: RouteBundle
+metadata:
+  name: rp-bank-web
+  labels: { tenant: bank }
+spec:
+  vnet: { name: bank-prod-web, vni: 1001 }               # optional
+  service_tunnel: { name: st-egress, vni: 9000 }          # optional
+  eni: { name: eni-web-01, mac_address: "aa:bb:cc:01:00:01" } # optional
+  route_policy:
+    name: rp-bank-web-default
+    eni_names: [eni-web-01]
+    routes:
+      - { prefix: "192.168.11.0/24", next_hop_type: vnet, next_hop_target: bank-prod-web }
+      - { prefix: "0.0.0.0/0", next_hop_type: drop }
+```
+
+Expands to: Vnet → ServiceTunnel → Eni (auto-wires `vnet_name`) → RoutePolicy.
+
+### HaBundle — HA set in one file
+
+The `HaBundle` kind creates an HA set:
+
+```yaml
+apiVersion: dashcenter.v1
+kind: HaBundle
+metadata:
+  name: ha-bank-prod
+spec:
+  ha_set:
+    mode: active_standby
+    member_dpu_ids: [dpu-sim-01, dpu-sim-02]
+    virtual_ip: "10.0.100.1"
+```
+
+Expands to: HaSet.
+
 ### Standard manifests
 
 Apply is idempotent — first call CREATEs, subsequent calls UPDATE.

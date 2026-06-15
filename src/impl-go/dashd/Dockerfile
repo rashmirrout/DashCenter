@@ -10,6 +10,7 @@ FROM golang:1.22-alpine AS build
 WORKDIR /workspace
 COPY . .
 WORKDIR /workspace/src/impl-go
+RUN go work sync
 RUN go build -trimpath -ldflags="-s -w" -o /out/dashd   ./dashd/cmd/dashd
 RUN go build -trimpath -ldflags="-s -w" -o /out/dashctl ./dashctl/cmd/dashctl
 

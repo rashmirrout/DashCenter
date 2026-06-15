@@ -66,8 +66,21 @@ in a single YAML document. It auto-expands into individual specs in
 the correct tier order (vnet → eni → mappings → policies) and
 auto-wires FK references (`eni.vnet_name`, `route_policy.eni_names`).
 
-See [CLI_GUIDE.md §6](../../CLI_GUIDE.md) for the full EniBundle spec
-format and examples.
+### Other bundle kinds
+
+| Bundle | Expands to | Use case |
+|---|---|---|
+| `EniBundle` | Vnet → ENI → VnetMappings → RoutePolicy → AclPolicies | Full ENI pipeline |
+| `AclBundle` | Vnet → ENI → AclPolicy (with inline rules) | ACL policy + deps |
+| `RouteBundle` | Vnet → ServiceTunnel → ENI → RoutePolicy (with inline routes) | Route policy + deps |
+| `HaBundle` | HaSet | HA set config |
+
+All bundles auto-wire FK references and expand in correct tier order.
+Optional sections (vnet, eni, service_tunnel) can be omitted if the
+dependency already exists.
+
+See [CLI_GUIDE.md §6](../../CLI_GUIDE.md) for full bundle spec formats
+and examples.
 
 ### Create vs. modify detection
 
