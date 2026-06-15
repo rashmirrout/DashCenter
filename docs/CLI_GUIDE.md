@@ -882,3 +882,41 @@ dashctl counters clear                                 # wipe dashd cache (auto-
 dashctl counters clear --reset-sim                     # wipe cache + zero sim accumulators
 dashctl counters clear --dpu=<id> --reset-sim          # single DPU: cache + sim reset
 ```
+
+### Running CLIs from inside Docker containers
+
+Both CLIs are shipped inside their respective Docker images — no need to install anything on the host.
+
+**dash-sim-client inside dash-sim containers:**
+
+```powershell
+# Enter a sim container shell:
+docker exec -it dc-console-sim-01 sh
+
+# Inside the shell — all commands work against localhost:50051:
+dash-sim-client ping --target localhost:50051
+dash-sim-client dpu-counters --target localhost:50051 -o table
+dash-sim-client reset-counters --target localhost:50051
+dash-sim-client kinds --target localhost:50051 -o table
+
+# Or run without entering the shell:
+docker exec dc-console-sim-01 dash-sim-client reset-counters --target localhost:50051
+docker exec dc-console-sim-01 dash-sim-client dpu-counters --include-enis --target localhost:50051
+```
+
+**dashctl inside dashd containers:**
+
+```powershell
+# Enter a dashd container shell:
+docker exec -it dc-console-dashd-1 sh
+
+# Inside the shell — all commands work against localhost:8443:
+dashctl version --endpoint http://localhost:8443 --insecure
+dashctl counters --endpoint http://localhost:8443 --insecure
+dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
+dashctl counters details --dpu=dpu-sim-01 --endpoint http://localhost:8443 --insecure
+
+# Or run without entering the shell:
+docker exec dc-console-dashd-1 dashctl counters --endpoint http://localhost:8443 --insecure
+docker exec dc-console-dashd-1 dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
+```

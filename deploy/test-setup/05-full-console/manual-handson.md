@@ -1051,3 +1051,83 @@ dashw BFF (Go, embeds React SPA)
 - [`04-ha-fleet/`](../04-ha-fleet/) — same controllers, no console
 - [`specs/HLD/dashw-web-hld.md`](../../../specs/HLD/dashw-web-hld.md)
 - [`specs/LLD/dashw-web-lld.md`](../../../specs/LLD/dashw-web-lld.md)
+
+---
+
+## Lab 13: In-container diagnostics (docker exec)
+
+Both `dash-sim` and `dashd` images ship their operator CLIs inside the
+container. You can exec into any running container for direct debugging.
+
+### 13.1 — dash-sim-client inside a sim container
+
+**Objective**: run counter diagnostics directly against a sim's gRPC
+endpoint from inside the container.
+
+**Run**:
+
+```bash
+# Enter the sim container:
+docker exec -it dc-console-sim-01 sh
+
+# Ping:
+dash-sim-client ping --target localhost:50051
+
+# View counters:
+dash-sim-client dpu-counters --target localhost:50051 -o table
+dash-sim-client dpu-counters --include-enis --target localhost:50051
+
+# Reset counters to zero:
+dash-sim-client reset-counters --target localhost:50051
+
+# Verify reset — values near zero:
+dash-sim-client dpu-counters --target localhost:50051 -o table
+
+# List supported object kinds:
+dash-sim-client kinds --target localhost:50051 -o table
+
+# Exit:
+exit
+```
+
+**One-liner** (no shell entry):
+
+```bash
+docker exec dc-console-sim-01 dash-sim-client reset-counters --target localhost:50051
+```
+
+### 13.2 — dashctl inside a dashd container
+
+**Objective**: query dashd's REST API from inside the controller
+container — useful when the host network can't reach dashd directly.
+
+**Run**:
+
+```bash
+# Enter the dashd container:
+docker exec -it dc-console-dashd-1 sh
+
+# Server version:
+dashctl version --endpoint http://localhost:8443 --insecure
+
+# Counter snapshot:
+dashctl counters --endpoint http://localhost:8443 --insecure
+
+# Per-ENI details:
+dashctl counters details --dpu=dpu-sim-01 --endpoint http://localhost:8443 --insecure
+
+# Reset counters (cache + sim accumulators):
+dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
+
+# Topology:
+dashctl topology --endpoint http://localhost:8443 --insecure
+
+# Exit:
+exit
+```
+
+**One-liner**:
+
+```bash
+docker exec dc-console-dashd-1 dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
+```

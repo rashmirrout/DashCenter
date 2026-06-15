@@ -1624,3 +1624,83 @@ python manifest/bootstrap.py http://127.0.0.1:38443
 - [`proto/dashcenter/v1/diagnostics.proto`](../../../proto/dashcenter/v1/diagnostics.proto) — source-of-truth for every field name and verdict integer
 - [`05-full-console/manual-handson.md` Lab 12.6](../05-full-console/manual-handson.md) — verbatim live captures against the 05 fleet (use side-by-side)
 - [`src/impl-go/dashd/internal/flow/`](../../../src/impl-go/dashd/internal/flow) — the diagnostic engine (~1050 LOC, 91.2% unit-test coverage)
+
+---
+
+## Lab 14: In-container diagnostics (docker exec)
+
+Both `dash-sim` and `dashd` images ship their operator CLIs inside the
+container. You can exec into any running container for direct debugging.
+
+### 14.1 — dash-sim-client inside a sim container
+
+**Objective**: run counter diagnostics directly against a sim's gRPC
+endpoint from inside the container.
+
+**Run**:
+
+```bash
+# Enter the sim container:
+docker exec -it dc-diag-sim-01 sh
+
+# Ping:
+dash-sim-client ping --target localhost:50051
+
+# View counters:
+dash-sim-client dpu-counters --target localhost:50051 -o table
+dash-sim-client dpu-counters --include-enis --target localhost:50051
+
+# Reset counters to zero:
+dash-sim-client reset-counters --target localhost:50051
+
+# Verify reset — values near zero:
+dash-sim-client dpu-counters --target localhost:50051 -o table
+
+# List supported object kinds:
+dash-sim-client kinds --target localhost:50051 -o table
+
+# Exit:
+exit
+```
+
+**One-liner** (no shell entry):
+
+```bash
+docker exec dc-diag-sim-01 dash-sim-client reset-counters --target localhost:50051
+```
+
+### 14.2 — dashctl inside a dashd container
+
+**Objective**: query dashd's REST API from inside the controller
+container — useful when the host network can't reach dashd directly.
+
+**Run**:
+
+```bash
+# Enter the dashd container:
+docker exec -it dc-diag-dashd-1 sh
+
+# Server version:
+dashctl version --endpoint http://localhost:8443 --insecure
+
+# Counter snapshot:
+dashctl counters --endpoint http://localhost:8443 --insecure
+
+# Per-ENI details:
+dashctl counters details --dpu=dpu-sim-01 --endpoint http://localhost:8443 --insecure
+
+# Reset counters (cache + sim accumulators):
+dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
+
+# Topology:
+dashctl topology --endpoint http://localhost:8443 --insecure
+
+# Exit:
+exit
+```
+
+**One-liner**:
+
+```bash
+docker exec dc-diag-dashd-1 dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
+```

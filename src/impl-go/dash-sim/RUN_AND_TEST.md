@@ -114,6 +114,27 @@ Optional preload:
 .\bin\dash-sim.exe --scenario .\dash-sim\testdata\scenarios\small.yaml
 ```
 
+### 5a. Docker: in-container diagnostics
+
+The dash-sim Docker image ships both `dash-sim` and `dash-sim-client`
+(Alpine-based runtime with shell). Operators can exec into any running
+sim container for direct diagnostics:
+
+```bash
+# Enter the container:
+docker exec -it dc-console-sim-01 sh
+
+# All dash-sim-client commands work against localhost:
+dash-sim-client ping --target localhost:50051
+dash-sim-client dpu-counters --target localhost:50051 -o table
+dash-sim-client dpu-counters --include-enis --target localhost:50051
+dash-sim-client reset-counters --target localhost:50051
+dash-sim-client kinds --target localhost:50051 -o table
+
+# One-liner (no shell entry):
+docker exec dc-console-sim-01 dash-sim-client reset-counters --target localhost:50051
+```
+
 ## 6. Run dash-redis-adapter (Redis APP_DB backend)
 
 Self-contained demo (no Redis required — uses embedded miniredis):
