@@ -1,0 +1,49 @@
+# ha-set-experiments.yaml — Hands-on experiments with HaSet specs
+#
+# HaSet depends on DPU IDs being in the inventory (not on other spec kinds).
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: WRONG — HaSet with DPU not in inventory (FAIL)
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f - <<< '<paste>'
+# Expect: FAILED — ha_set.member_dpu_ids[0]="dpu-fake" not found in inventory
+#
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata:
+  name: ha-exp-bad
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-fake-01, dpu-fake-02]   # ← not in inventory → REJECTED
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: RIGHT — HaSet with valid DPU IDs (PASS)
+# ═══════════════════════════════════════════════════════════════
+#
+# Prerequisites: fleet running with dpu-sim-01 and dpu-sim-02 in inventory
+# Run:    dashctl apply -f - <<< '<paste>'
+# Expect: CREATE (generation 1)
+#
+# HaSet fields:
+#   mode            — "active_standby" (one active, one standby)
+#                     or "active_active" (both serve traffic)
+#   member_dpu_ids  — FK[] → DPU IDs that must exist in inventory
+#   virtual_ip      — shared IP that floats between members
+#   flow_sync_endpoints — addresses for flow-state replication (optional)
+#
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata:
+  name: ha-exp-ok
+  labels: { experiment: ha }
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-sim-01, dpu-sim-02]
+  virtual_ip: "10.0.99.100"
+---
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete ha-set ha-exp-ok --ignore-not-found
+#   dashctl delete ha-set ha-exp-bad --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

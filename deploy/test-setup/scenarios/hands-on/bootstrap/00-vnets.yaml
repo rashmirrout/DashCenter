@@ -1,0 +1,24 @@
+# 00-vnets.yaml — Tier 0: VNets (no dependencies)
+#
+# Create these FIRST. Every other object depends on at least one VNet.
+# VNets are the virtual network identity — they carry a VNI (VXLAN
+# Network Identifier) that the DPU uses for packet encapsulation.
+#
+# Apply:  dashctl apply -f deploy/test-setup/scenarios/hands-on/bootstrap/00-vnets.yaml
+# Verify: dashctl get vnet -o table
+
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata:
+  name: lab-web
+  labels: { tenant: lab, tier: web }
+spec:
+  vni: 5001            # VXLAN Network Identifier — must be unique per VNet
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata:
+  name: lab-db
+  labels: { tenant: lab, tier: db }
+spec:
+  vni: 5002

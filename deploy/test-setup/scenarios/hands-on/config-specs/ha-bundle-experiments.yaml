@@ -1,0 +1,29 @@
+# ha-bundle-experiments.yaml — Hands-on experiments with HaBundle
+#
+# HaBundle creates an HA set. At the dashd level, only HaSet exists.
+# HA scope/config kinds are managed internally by the HA orchestrator.
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment: HaBundle — creates 1 HaSet
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f deploy/test-setup/scenarios/hands-on/config-specs/ha-bundle-experiments.yaml
+# Expect: 1 CREATE — ha_set/ha-bundle-exp
+#
+# Prerequisites: dpu-sim-01 and dpu-sim-02 must be in inventory
+#
+apiVersion: dashcenter.v1
+kind: HaBundle
+metadata:
+  name: ha-bundle-exp
+  labels: { experiment: bundle, type: ha }
+spec:
+  ha_set:
+    mode: active_standby
+    member_dpu_ids: [dpu-sim-01, dpu-sim-02]
+    virtual_ip: "10.0.98.200"
+---
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete ha-set ha-bundle-exp --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

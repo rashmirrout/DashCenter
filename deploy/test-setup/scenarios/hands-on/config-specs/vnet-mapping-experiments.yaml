@@ -1,0 +1,55 @@
+# vnet-mapping-experiments.yaml — Hands-on experiments with VnetMapping specs
+#
+# VnetMapping is Tier 1 — depends on a VNet (vnet_name field).
+# It tells the DPU: "overlay IP X in VNet Y → encap to underlay IP Z".
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: WRONG — Mapping for a VNet that doesn't exist (FAIL)
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f - <<< '<paste>'
+# Expect: FAILED — vnet_mapping.vnet_name="vnet-ghost": not found
+#
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: vnet-ghost-10.0.0.1
+spec:
+  vnet_name: vnet-ghost                  # ← doesn't exist → REJECTED
+  ip_address: "10.0.0.1"
+  underlay_ip: "10.0.99.1"
+  mac_address: "aa:bb:cc:00:00:01"
+  action: vnet_encap
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: RIGHT — Create VNet first, then mapping (PASS)
+# ═══════════════════════════════════════════════════════════════
+#
+# Prerequisites: vnet-exp-1 from vnet-experiments.yaml
+# Run:    dashctl apply -f - <<< '<paste>'
+# Expect: CREATE (generation 1)
+#
+# VnetMapping fields:
+#   vnet_name   — FK to the VNet (REQUIRED)
+#   ip_address  — overlay IP this mapping covers (e.g., VM's IP in the VNet)
+#   underlay_ip — physical IP where packets should be sent
+#   mac_address — destination MAC for the encapsulated packet
+#   action      — vnet_encap (VXLAN wrap) | service_tunnel | drop
+#
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: vnet-exp-1-192.168.99.1
+  labels: { experiment: mapping }
+spec:
+  vnet_name: vnet-exp-1
+  ip_address: "192.168.99.1"
+  underlay_ip: "10.0.99.1"
+  mac_address: "aa:bb:cc:99:00:01"
+  action: vnet_encap
+---
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete vnet-mapping vnet-exp-1-192.168.99.1 --ignore-not-found
+#   dashctl delete vnet-mapping vnet-ghost-10.0.0.1 --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

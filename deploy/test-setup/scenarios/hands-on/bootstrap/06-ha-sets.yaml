@@ -1,0 +1,18 @@
+# 06-ha-sets.yaml — HA Sets (depend on DPU inventory)
+#
+# HA sets define which DPUs form a high-availability group.
+# member_dpu_ids must be DPUs that exist in the inventory.
+#
+# Apply:  dashctl apply -f deploy/test-setup/scenarios/hands-on/bootstrap/06-ha-sets.yaml
+# Verify: dashctl get ha-set -o table
+# Error:  If dpu-sim-01 not in inventory → "dangling reference: ... not found in inventory"
+
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata:
+  name: ha-lab-web
+  labels: { tenant: lab }
+spec:
+  mode: active_standby                    # active_standby | active_active
+  member_dpu_ids: [dpu-sim-01, dpu-sim-02]  # FK → DPU IDs in inventory
+  virtual_ip: "10.0.50.100"

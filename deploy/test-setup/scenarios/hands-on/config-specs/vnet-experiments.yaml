@@ -1,0 +1,61 @@
+# vnet-experiments.yaml — Hands-on experiments with VNet specs
+#
+# VNet is a Tier 0 object (no dependencies). It always succeeds on create.
+# The interesting experiments are around delete orphan protection.
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: Create a VNet (always succeeds — Tier 0)
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f deploy/test-setup/scenarios/hands-on/config-specs/vnet-experiments.yaml
+# Expect: vnet/vnet-exp-1 CREATE (generation 1)
+#
+# VNet fields:
+#   name  — unique identifier within the namespace
+#   vni   — VXLAN Network Identifier (1–16777215); must be unique per VNet
+#   labels — operator-defined key-value tags for filtering
+#
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata:
+  name: vnet-exp-1
+  labels: { experiment: vnet, purpose: "learn vnet basics" }
+spec:
+  vni: 9901
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: Re-apply without --force (BLOCKED)
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f <this file>       (second time, without --force)
+# Expect: vnet/vnet-exp-1 BLOCKED — already exists (generation 1)
+#         WARNING: use --force to overwrite
+#
+# Run:    dashctl apply -f <this file> --force
+# Expect: vnet/vnet-exp-1 MODIFY (generation 2)
+#
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 3: Delete protection — create an ENI that depends on this VNet
+# ═══════════════════════════════════════════════════════════════
+#
+# Step 1 — create a dependent ENI:
+#   dashctl apply -f - <<< 'apiVersion: dashcenter.v1
+#   kind: Eni
+#   metadata: { name: eni-exp-dep }
+#   spec: { vnet_name: vnet-exp-1, mac_address: "00:00:00:00:00:01", underlay_ip: "10.0.99.1", admin_state: up }'
+#
+# Step 2 — try to delete the VNet:
+#   dashctl delete vnet vnet-exp-1
+#   Expect: ERROR — referential integrity: cannot delete vnet "vnet-exp-1"
+#           — eni "eni-exp-dep" still references it
+#
+# Step 3 — delete the dependent first, then retry:
+#   dashctl delete eni eni-exp-dep
+#   dashctl delete vnet vnet-exp-1
+#   Expect: both succeed
+#
+# ═══════════════════════════════════════════════════════════════
+# Clean up:
+#   dashctl delete vnet vnet-exp-1 --ignore-not-found
+# ═══════════════════════════════════════════════════════════════

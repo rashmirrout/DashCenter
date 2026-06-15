@@ -1,0 +1,84 @@
+# eni-bundle-experiments.yaml — Hands-on experiments with EniBundle
+#
+# EniBundle defines a complete ENI pipeline in one file.
+# It auto-expands to: Vnet → ENI → VnetMappings → RoutePolicy → AclPolicies
+# (in correct tier order, with auto-wired FK references).
+#
+# ═══════════════════════════════════════════════════════════════
+# Experiment 1: Full EniBundle — creates 5 objects from 1 file
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f deploy/test-setup/scenarios/hands-on/config-specs/eni-bundle-experiments.yaml
+# Expect: 5 CREATE — vnet → eni → vnet_mapping → route_policy → acl_policy
+#
+# What auto-wiring does:
+#   - eni.vnet_name ← spec.vnet.name ("vnet-bundle-exp")
+#   - vnet_mapping.vnet_name ← spec.vnet.name
+#   - route_policy.eni_names ← [metadata.name] ("eni-bundle-exp")
+#   - acl_policy.eni_names ← [metadata.name]
+#
+apiVersion: dashcenter.v1
+kind: EniBundle
+metadata:
+  name: eni-bundle-exp
+  namespace: default
+  labels: { experiment: bundle, type: eni }
+spec:
+  # ── Tier 0: VNet (created first) ────────────────────────
+  vnet:
+    name: vnet-bundle-exp
+    vni: 9801
+
+  # ── Tier 1: ENI (auto-wires vnet_name) ──────────────────
+  eni:
+    mac_address: "aa:bb:cc:98:00:01"
+    underlay_ip: "10.0.98.1"
+    admin_state: up
+    placement_hint_dpu_ids: [dpu-sim-01]
+
+  # ── Tier 1: VNet Mappings (auto-wires vnet_name) ────────
+  vnet_mappings:
+    - ip_address: "192.168.98.1"
+      underlay_ip: "10.0.98.1"
+      mac_address: "aa:bb:cc:98:00:01"
+      action: vnet_encap
+
+  # ── RoutePolicy (auto-wires eni_names) ──────────────────
+  route_policy:
+    name: rp-bundle-exp
+    routes:
+      - prefix: "192.168.98.0/24"
+        next_hop_type: vnet
+        next_hop_target: vnet-bundle-exp    # must match spec.vnet.name
+        metric: 10
+      - prefix: "0.0.0.0/0"
+        next_hop_type: drop
+        metric: 1000
+
+  # ── AclPolicies (auto-wires eni_names) ──────────────────
+  acl_policies:
+    - name: acl-bundle-exp-in
+      stage: inbound
+      priority: 100
+      rules:
+        - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+        - { priority: 1000, action: deny }
+---
+# ═══════════════════════════════════════════════════════════════
+# Experiment 2: Re-apply without --force → BLOCKED
+# ═══════════════════════════════════════════════════════════════
+#
+# Run:    dashctl apply -f <this file>       (second time)
+# Expect: 5 objects BLOCKED + WARNING
+#
+# Run:    dashctl apply -f <this file> --force
+# Expect: 5 objects MODIFY (generation 2)
+#
+# ═══════════════════════════════════════════════════════════════
+# Clean up (delete in reverse tier order):
+#   dashctl delete acl-policy acl-bundle-exp-in --ignore-not-found
+#   dashctl delete route-policy rp-bundle-exp --ignore-not-found
+#   dashctl delete vnet-mapping vnet-bundle-exp-192.168.98.1 --ignore-not-found
+#   dashctl delete eni eni-bundle-exp --ignore-not-found
+#   dashctl delete vnet vnet-bundle-exp --ignore-not-found
+# ═══════════════════════════════════════════════════════════════
