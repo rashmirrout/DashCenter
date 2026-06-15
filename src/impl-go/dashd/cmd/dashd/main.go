@@ -218,12 +218,23 @@ if err != nil {
 	os.Exit(1)
 }
 
+// Wrap the elector in a proxy so leaderLoop can hot-swap the
+// inner elector on re-campaign while admin/cluster consumers
+// observe a stable reference.
+electorProxy := leader.NewProxy(elector)
+
+// Factory for creating fresh electors after leadership loss.
+// Each call returns a new EtcdElector with a fresh session + lease.
+newElectorFn := func(ctx context.Context) (leader.Elector, error) {
+	return newElector(ctx, cfg)
+}
+
 clusterReg := openClusterRegistry(rootCtx, cfg)
 clusterAgg, err := cluster.NewAggregator(cluster.AggregatorConfig{
 	Registry:  clusterReg,
 	Inventory: inv,
 	Store:     st,
-	Elector:   elector,
+	Elector:   electorProxy,
 	Version:   version,
 	NodeID:    cfg.NodeID,
 	Namespaces: knownNamespaces(cfg),
@@ -244,7 +255,7 @@ clusterService := service.NewCluster(clusterAgg, clusterBcast)
 clusterReg.Subscribe(func(kind cluster.ChangeKind, peer cluster.PeerInfo) {
 	cluster.ObserveRegistryChange(kind)
 	cluster.ObservePeerCount(clusterReg.PeerCount())
-	clusterBcast.Publish(cluster.RegistryEvent(kind, peer, elector.LeaderID()))
+	clusterBcast.Publish(cluster.RegistryEvent(kind, peer, electorProxy.LeaderID()))
 })
 cluster.ObservePeerCount(clusterReg.PeerCount())
 
@@ -335,7 +346,7 @@ grpcSrv.SetCounterWiring(cntBcast, &grpcCounterReader{store: cntStore})
 // PA-0 always-true stub).
 // (elector already built in step 8c above.)
 
-adminSrv := adminserver.NewWithElector(inv, st, obs, rec, elector)
+adminSrv := adminserver.NewWithElector(inv, st, obs, rec, electorProxy)
 adminSrv.SetClusterService(clusterService)
 adminSrv.SetCountersWiring(cntStore, cntPoller)
 
@@ -416,14 +427,14 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		leaderLoop(rootCtx, elector, inv, pumpSet, mgr, rec)
+		leaderLoop(rootCtx, electorProxy, newElectorFn, inv, pumpSet, mgr, rec)
 	}()
 
 	slog.Info("dashd ready",
 		"rest", cfg.Listen.RESTAddr,
 		"grpc", grpcAddr,
 		"admin", cfg.Listen.AdminAddr,
-		"leader_id", elector.LeaderID(),
+		"leader_id", electorProxy.LeaderID(),
 	)
 
 	// 14. Wait for shutdown signal.
@@ -438,7 +449,7 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 	cntBcast.Stop()
 	pumpSet.StopAll()
 	mgr.Stop()
-	_ = elector.Close()
+	_ = electorProxy.Inner().Close()
 	_ = clusterReg.Close()
 	_ = st.Close()
 
@@ -446,39 +457,76 @@ pumpSet := subscribe.NewSet(obs, mgr.DirtyC(), dpuclient.DefaultFactory)
 	slog.Info("dashd stopped")
 }
 
+// electorFactory creates a fresh Elector. leaderLoop calls this on
+// every re-campaign so that a dead etcd session is replaced with a
+// live one.
+type electorFactory func(ctx context.Context) (leader.Elector, error)
+
 // leaderLoop runs the leader-only subsystems for as long as this process
-// holds leadership. It is structured as an outer loop so that PA-3's
-// EtcdElector can lose and re-acquire leadership without leaking
-// goroutines or losing wiring.
+// holds leadership. On leadership loss (etcd lease expiry, network
+// partition, etc.) it tears down leader tasks, closes the dead elector,
+// creates a fresh one via the factory, and re-campaigns. This guarantees
+// the node can always recover without a process restart.
 //
 // For NoneElector (Phase 1 / single-node), AwaitLeadership returns
 // immediately, LostLeadership never fires, and the function runs exactly
-// once until rootCtx is cancelled by the signal handler. That matches the
-// pre-PA-0 behaviour exactly.
+// once until rootCtx is cancelled by the signal handler.
 //
 // For EtcdElector (Phase 2 PA-3+), losing the lease will close the
 // LostLeadership channel, leaderLoop cancels leaderCtx (tearing down all
-// per-DPU workers and pumps), then loops back to re-campaign.
+// per-DPU workers and pumps), closes the dead elector, creates a fresh
+// one via newElectorFn, swaps it into the proxy, and loops back.
 func leaderLoop(
 	rootCtx context.Context,
-	elector leader.Elector,
+	proxy *leader.LeaderProxy,
+	newElectorFn electorFactory,
 	inv *inventory.Inventory,
 	pumpSet *subscribe.PumpSet,
 	mgr *dispatch.Manager,
 	rec *reconciler.Reconciler,
 ) {
+	const maxBackoff = 30 * time.Second
+	backoff := 2 * time.Second
+
 	for {
+		el := proxy.Inner()
+
 		// Campaign for leadership. Returns nil immediately for NoneElector;
 		// blocks until elected (or shutdown) for EtcdElector.
-		if err := elector.AwaitLeadership(rootCtx); err != nil {
-			// Cancelled — shutting down. Don't log at error since rootCtx
-			// cancel is the expected exit path.
-			slog.Info("leaderLoop: campaign ended", "reason", err)
-			return
+		if err := el.AwaitLeadership(rootCtx); err != nil {
+			if rootCtx.Err() != nil {
+				slog.Info("leaderLoop: shutdown during campaign")
+				return
+			}
+			// Campaign failed (dead session, etcd unreachable, etc.).
+			// Close the broken elector, back off, create a fresh one.
+			slog.Warn("leaderLoop: campaign failed, will retry",
+				"error", err, "backoff", backoff)
+			_ = el.Close()
+
+			select {
+			case <-rootCtx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if backoff < maxBackoff {
+				backoff = min(backoff*2, maxBackoff)
+			}
+
+			fresh, err := newElectorFn(rootCtx)
+			if err != nil {
+				slog.Error("leaderLoop: failed to create elector, will retry",
+					"error", err, "backoff", backoff)
+				continue
+			}
+			proxy.Swap(fresh)
+			continue
 		}
 
+		// Successfully elected.
+		backoff = 2 * time.Second // reset on success
 		slog.Info("leaderLoop: assumed leadership, starting leader-only subsystems",
-			"leader_id", elector.LeaderID())
+			"leader_id", el.LeaderID())
 
 		// leaderCtx scopes every leader-only goroutine so we can tear them
 		// all down deterministically on lost leadership without affecting
@@ -493,12 +541,27 @@ func leaderLoop(
 			slog.Info("leaderLoop: shutdown signal — tearing down leader tasks")
 			leaderCancel()
 			return
-		case <-elector.LostLeadership():
-			slog.Warn("leaderLoop: lost leadership — tearing down and re-campaigning")
+		case <-el.LostLeadership():
+			slog.Warn("leaderLoop: lost leadership — tearing down and re-creating elector")
 			leaderCancel()
-			// Loop back. NoneElector never reaches this branch (its
-			// LostLeadership only closes on Close, which fires during
-			// shutdown — and shutdown wins the race via rootCtx.Done above).
+
+			// Close the dead elector and create a fresh one with a new
+			// etcd session + lease. This is the critical recovery step:
+			// without it, re-campaign on the dead session always fails
+			// and the node becomes a zombie.
+			_ = el.Close()
+
+			fresh, err := newElectorFn(rootCtx)
+			if err != nil {
+				slog.Error("leaderLoop: failed to re-create elector after loss, will retry",
+					"error", err)
+				// Don't give up — loop will retry with exponential backoff
+				// at the top via the campaign-failed path.
+				proxy.Swap(&leader.NoneElector{}) // temporary placeholder
+				continue
+			}
+			proxy.Swap(fresh)
+			// Loop back to campaign on the fresh elector.
 		}
 	}
 }

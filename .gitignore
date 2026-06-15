@@ -68,6 +68,9 @@ cov
 coverage.out
 coverage.html
 *.coverprofile
+*_cov
+*_cov.out
+*_cover.out
 $
 
 # Translations

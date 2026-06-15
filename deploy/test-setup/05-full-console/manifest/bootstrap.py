@@ -51,6 +51,9 @@ def put(path, body):
 
 
 def banner(title):
+    # Brief pause between sections to avoid overwhelming etcd with
+    # sustained rapid writes — protects leader election lease keepalive.
+    time.sleep(0.3)
     print(f"\n{'═'*60}\n  {title}\n{'═'*60}")
 
 

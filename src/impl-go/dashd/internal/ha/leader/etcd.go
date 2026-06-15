@@ -140,6 +140,18 @@ func NewEtcdElector(ctx context.Context, cfg EtcdConfig) (*EtcdElector, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = 15 * time.Second
 	}
+	// Enforce a minimum TTL floor. Under heavy write bursts the etcd
+	// server's Raft commit latency can spike, causing keepalive
+	// responses to arrive late. A TTL below 10s makes leadership
+	// fragile on resource-constrained hosts (single-node etcd, small
+	// VMs). We silently clamp rather than reject so existing configs
+	// don't break — but log a warning so operators know.
+	const minLeaseTTL = 10 * time.Second
+	if leaseTTL < minLeaseTTL {
+		slog.Warn("leader.etcd: lease_ttl below minimum, clamping",
+			"configured", leaseTTL, "minimum", minLeaseTTL)
+		leaseTTL = minLeaseTTL
+	}
 
 	clientCfg := clientv3.Config{
 		Endpoints:   cfg.Endpoints,

@@ -51,6 +51,7 @@ def put(path, body):
 
 
 def banner(title):
+    time.sleep(0.3)
     print(f"\n{'═'*60}\n  {title}\n{'═'*60}")
 
 
