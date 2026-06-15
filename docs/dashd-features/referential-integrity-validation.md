@@ -500,10 +500,11 @@ error in `Ack.error` naming the missing referenced object.
 in arbitrary order.
 
 **dash-sim-client additions**:
-- `apply` gains `--validate` flag (default on) so operators see the
-  error before it hits the wire.
-- New `dash-sim-client validate <file>` subcommand that dry-runs FK
-  checks against the sim's current store without actually applying.
+- `apply` reports FK rejections via `Ack{Accepted: false, Error: ...}`.
+- New `dash-sim-client validate -f <file>` subcommand — loads a scenario
+  file, applies each object to the target sim, reports all FK validation
+  results (does not stop at first failure). Outputs table/json/yaml.
+  Exit code = number of rejected objects.
 
 **Tests**: ~20 UTs covering each FK family + the `--strict-refs=false`
 escape + existing integration tests updated to create objects in
@@ -520,6 +521,8 @@ correct order.
 | `dash-sim/internal/sim/model/store.go` | `strictRefs` field, `SetStrictRefs()`, FK check in `Apply()` |
 | `dash-sim/cmd/dash-sim/main.go` | `--strict-refs` CLI flag (default `true`) |
 | `dash-sim/test/integration/refs_test.go` (new) | 9 gRPC integration tests (reject, accept, error quality, fix-retry) |
+| `dash-sim-client/internal/cmd/validate.go` (new) | `dash-sim-client validate -f <file>` subcommand |
+| `dash-sim-client/internal/cmd/root.go` | Registered `validate` subcommand |
 | `dash-sim/internal/sim/server/dpu_counters_test.go` | `SetStrictRefs(false)` in counter test helpers |
 | `dash-sim/test/integration/dpu_counters_test.go` | `SetStrictRefs(false)` in counter integration harness |
 

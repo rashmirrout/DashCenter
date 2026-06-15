@@ -10,6 +10,7 @@
 //	counters    — read synthetic counters for --kind --key
 //	kinds       — list supported ObjectKind names
 //	ping        — connectivity check
+//	validate    — pre-flight FK validation of a scenario file
 package cmd
 
 import (
@@ -62,6 +63,7 @@ schema, so the same command line works against both.`,
 	root.AddCommand(newResetCountersCmd())
 	root.AddCommand(newKindsCmd())
 	root.AddCommand(newSimulateCmd())
+	root.AddCommand(newValidateCmd())
 	root.AddCommand(newPingCmd())
 
 	return root

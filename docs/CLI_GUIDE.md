@@ -720,6 +720,38 @@ Invoke-RestMethod -Method POST `
 
 ---
 
+## 12c. validate — pre-flight FK validation of a scenario file
+
+Loads a JSON/YAML scenario file and applies each object to the target
+sim, reporting which objects pass referential integrity checks and
+which are rejected. Unlike `apply`, it continues past failures and
+prints a summary.
+
+The sim must be running with `--strict-refs` (the default).
+
+```powershell
+# Table output (default):
+& $c validate -f scenario.yaml --target localhost:50051
+# INDEX  STATUS  KIND                       KEY                             ERROR
+# -----  ------  -------------------------  ------------------------------  -----
+# 0      ✅ OK   vnet                       vnet-prod
+# 1      ✅ OK   eni                        eni-001
+# 2      ❌ FAIL eni_route                  eni-ghost                       referential integrity: ...
+#
+# Total: 3  Accepted: 2  Rejected: 1
+
+# JSON output:
+& $c validate -f scenario.yaml -o json
+# {"total":3,"accepted":2,"rejected":1,"results":[...]}
+
+# YAML output:
+& $c validate -f scenario.yaml -o yaml
+```
+
+Exit code = number of rejected objects (0 = all valid).
+
+---
+
 ## 13. SimulatePacket (dash-sim only)
 
 Walks the full DASH pipeline:
@@ -866,6 +898,7 @@ $c = ".\bin\dash-sim-client.exe"
 & $c counters --kind <k> --key <a:b:...>          [-o json|yaml|table]
 & $c dpu-counters [--include-enis] [--include-vnets] [--watch] [-o table|json|yaml|csv]
 & $c reset-counters                                [-o table|json|yaml]
+& $c validate -f <file.yaml|file.json>             [-o table|json|yaml]
 & $c simulate --direction outbound|inbound --eni <e> \
               [--vni <n>] [--src-mac ...] [--dst-mac ...] \
               [--src-ip ...] [--dst-ip ...] [--protocol ...] \
