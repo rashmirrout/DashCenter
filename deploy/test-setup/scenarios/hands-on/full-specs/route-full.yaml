@@ -1,0 +1,110 @@
+# route-full.yaml — RoutePolicy exercising every next_hop_type + ECMP.
+#
+# WHAT THIS CREATES (8 objects):
+#   Tier 0   : 1 Vnet, 2 ServiceTunnels (NAT egress + PrivateLink to DB)
+#   Tier 1   : 1 ENI, 2 VnetMappings
+#   Policies : 1 RoutePolicy (vnet, service_tunnel, direct, drop, ECMP)
+#              1 AclPolicy (basic inbound)
+#
+# next_hop_type values exercised:
+#   - vnet           → encap to overlay address inside the named VNet
+#   - service_tunnel → traffic leaves via the named ServiceTunnel
+#   - direct         → no encap, host-routed
+#   - drop           → blackhole
+#   - ECMP           → multi next-hop with weights
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/route-full.yaml --force
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+
+# ─── Tier 0: VNet ────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: full-route-vnet, labels: { demo: route-full } }
+spec:
+  vni: 60003
+---
+# ─── Tier 0: ServiceTunnels ──────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-route-st-nat, labels: { demo: route-full, class: nat } }
+spec:
+  local_underlay_ip: "10.60.0.30"
+  remote_underlay_ip: "198.51.100.30"
+  vni: 60301
+  params: { action: nat, nat_pool: "203.0.113.64/26" }
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-route-st-pl, labels: { demo: route-full, class: privatelink } }
+spec:
+  local_underlay_ip: "10.60.0.31"
+  remote_underlay_ip: "10.60.255.50"
+  vni: 60302
+  params: { action: privatelink, target_fqdn: "route-full.privatelink.example.com" }
+---
+# ─── Tier 1: ENI ─────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-route-eni, labels: { demo: route-full } }
+spec:
+  vnet_name: full-route-vnet
+  mac_address: "aa:bb:cc:60:03:01"
+  underlay_ip: "10.60.3.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-04]
+---
+# ─── Tier 1: VnetMappings (so vnet next_hop has somewhere to send) ───────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-route-map-a, labels: { demo: route-full } }
+spec:
+  vnet_name: full-route-vnet
+  ip_address: "192.168.63.11"
+  underlay_ip: "10.60.3.11"
+  mac_address: "aa:bb:cc:60:03:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-route-map-b, labels: { demo: route-full } }
+spec:
+  vnet_name: full-route-vnet
+  ip_address: "192.168.63.12"
+  underlay_ip: "10.60.3.12"
+  mac_address: "aa:bb:cc:60:03:12"
+  action: vnet_encap
+---
+# ─── Policy: RoutePolicy — every next_hop variant ────────────────────────
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-route-rp, labels: { demo: route-full } }
+spec:
+  eni_names: [full-route-eni]
+  routes:
+    # 1) vnet next-hop (overlay encap inside full-route-vnet)
+    - { prefix: "192.168.63.0/24", next_hop_type: vnet,           next_hop_target: full-route-vnet, metric: 10 }
+    # 2) service_tunnel next-hop (privatelink to managed DB)
+    - { prefix: "10.60.255.50/32", next_hop_type: service_tunnel, next_hop_target: full-route-st-pl, metric: 20 }
+    # 3) direct next-hop (host-routed, no encap)
+    - { prefix: "169.254.169.0/24", next_hop_type: direct,                                            metric: 30 }
+    # 4) drop next-hop (link-local martians)
+    - { prefix: "127.0.0.0/8",     next_hop_type: drop,                                               metric: 40 }
+    # 5) ECMP fan-out — load-balance default across NAT egress + privatelink
+    - prefix: "0.0.0.0/0"
+      ecmp_members:
+        - { next_hop_type: service_tunnel, next_hop_target: full-route-st-nat, weight: 70 }
+        - { next_hop_type: service_tunnel, next_hop_target: full-route-st-pl,  weight: 30 }
+      metric: 100
+---
+# ─── Policy: AclPolicy — minimal so the ENI is not wide-open ─────────────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: full-route-acl-in, labels: { demo: route-full } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [full-route-eni]
+  rules:
+    - { priority: 100,  action: allow, protocol: tcp, dst_port: "443" }
+    - { priority: 1000, action: deny }

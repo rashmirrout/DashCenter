@@ -1,0 +1,109 @@
+# ha-full.yaml — HA-protected service tier with every dependency inline.
+#
+# WHAT THIS CREATES (8 objects):
+#   Tier 0   : 1 Vnet, 1 ServiceTunnel (NAT egress)
+#   Tier 1   : 2 ENIs placed on the HA pair, 2 VnetMappings
+#   Policies : 1 RoutePolicy, 1 AclPolicy
+#   HA       : 1 HaSet (active_standby across dpu-sim-01 + dpu-sim-02)
+#
+# Requires the running fleet to have dpu-sim-01 and dpu-sim-02 in inventory.
+# Override the member_dpu_ids below if your fleet uses different IDs:
+#   dashctl admin inventory dpus     # to list available DPUs
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/ha-full.yaml --force
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+
+# ─── Tier 0: VNet ────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: full-ha-vnet, labels: { demo: ha-full } }
+spec:
+  vni: 60008
+---
+# ─── Tier 0: ServiceTunnel — internet egress ─────────────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-ha-st-nat, labels: { demo: ha-full, class: nat } }
+spec:
+  local_underlay_ip: "10.60.0.80"
+  remote_underlay_ip: "198.51.100.80"
+  vni: 60801
+  params:
+    action: nat
+    nat_pool: "203.0.113.192/26"
+    snat_persist_seconds: "300"
+---
+# ─── HA: HaSet — active/standby across 2 DPUs ────────────────────────────
+apiVersion: dashcenter.v1
+kind: HaSet
+metadata: { name: full-ha-set, labels: { demo: ha-full } }
+spec:
+  mode: active_standby
+  member_dpu_ids: [dpu-sim-01, dpu-sim-02]
+  virtual_ip: "10.60.100.1"
+---
+# ─── Tier 1: ENIs placed on the HA pair ──────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-ha-eni-01, labels: { demo: ha-full, ha-role: active } }
+spec:
+  vnet_name: full-ha-vnet
+  mac_address: "aa:bb:cc:60:08:01"
+  underlay_ip: "10.60.8.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-01]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-ha-eni-02, labels: { demo: ha-full, ha-role: standby } }
+spec:
+  vnet_name: full-ha-vnet
+  mac_address: "aa:bb:cc:60:08:02"
+  underlay_ip: "10.60.8.12"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-02]
+---
+# ─── Tier 1: VnetMappings ────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-ha-map-01, labels: { demo: ha-full } }
+spec:
+  vnet_name: full-ha-vnet
+  ip_address: "192.168.68.11"
+  underlay_ip: "10.60.8.11"
+  mac_address: "aa:bb:cc:60:08:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-ha-map-02, labels: { demo: ha-full } }
+spec:
+  vnet_name: full-ha-vnet
+  ip_address: "192.168.68.12"
+  underlay_ip: "10.60.8.12"
+  mac_address: "aa:bb:cc:60:08:02"
+  action: vnet_encap
+---
+# ─── Policy: RoutePolicy ─────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-ha-rp, labels: { demo: ha-full } }
+spec:
+  eni_names: [full-ha-eni-01, full-ha-eni-02]
+  routes:
+    - { prefix: "192.168.68.0/24", next_hop_type: vnet,           next_hop_target: full-ha-vnet,  metric: 10 }
+    - { prefix: "0.0.0.0/0",       next_hop_type: service_tunnel, next_hop_target: full-ha-st-nat, metric: 100 }
+---
+# ─── Policy: AclPolicy ───────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: full-ha-acl-in, labels: { demo: ha-full, stage: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [full-ha-eni-01, full-ha-eni-02]
+  rules:
+    - { priority: 100,  action: allow, protocol: tcp, dst_port: "443" }
+    - { priority: 200,  action: allow, protocol: tcp, dst_port: "22", src_prefix: "10.0.0.0/8" }
+    - { priority: 1000, action: deny }

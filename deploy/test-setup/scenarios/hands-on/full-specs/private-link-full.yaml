@@ -1,0 +1,113 @@
+# private-link-full.yaml — Production-style PrivateLink consumer pattern.
+#
+# Scenario: A 2-server app tier that must reach a managed SQL service
+# *only* via a PrivateLink tunnel (no direct internet egress). The ACL
+# locks outbound destinations down to the privatelink /32 + intra-VNet.
+#
+# WHAT THIS CREATES (8 objects):
+#   Tier 0   : 1 Vnet, 1 ServiceTunnel (action=privatelink)
+#   Tier 1   : 2 ENIs (app-01, app-02), 2 VnetMappings
+#   Policies : 1 RoutePolicy (steers DB /32 to privatelink, default→drop)
+#              1 AclPolicy (outbound: only privatelink + intra-VNet)
+#
+# Why this is "private link" without a dedicated kind:
+#   In DASH today, PrivateLink is modelled as a ServiceTunnel with
+#   params.action="privatelink" and a target_fqdn. The DPU enforces
+#   the policy via the route-policy + acl-policy combination below —
+#   no separate PrivateLink resource kind is required.
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/private-link-full.yaml --force
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+
+# ─── Tier 0: VNet ────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: full-pl-vnet, labels: { demo: pl-full, tier: app } }
+spec:
+  vni: 60007
+---
+# ─── Tier 0: ServiceTunnel — PrivateLink to managed SQL ──────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata:
+  name: full-pl-st-sql
+  labels: { demo: pl-full, class: privatelink, target: sql }
+spec:
+  local_underlay_ip: "10.60.0.70"
+  remote_underlay_ip: "10.60.255.70"
+  vni: 60701
+  params:
+    action: privatelink
+    target_fqdn: "full-pl-sql.privatelink.example.com"
+---
+# ─── Tier 1: ENIs — 2 app servers ────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-pl-app-01, labels: { demo: pl-full, role: app } }
+spec:
+  vnet_name: full-pl-vnet
+  mac_address: "aa:bb:cc:60:07:01"
+  underlay_ip: "10.60.7.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-08]
+---
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-pl-app-02, labels: { demo: pl-full, role: app } }
+spec:
+  vnet_name: full-pl-vnet
+  mac_address: "aa:bb:cc:60:07:02"
+  underlay_ip: "10.60.7.12"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-09]
+---
+# ─── Tier 1: VnetMappings — peers in the app VNet ────────────────────────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-pl-map-app-01, labels: { demo: pl-full } }
+spec:
+  vnet_name: full-pl-vnet
+  ip_address: "192.168.67.11"
+  underlay_ip: "10.60.7.11"
+  mac_address: "aa:bb:cc:60:07:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-pl-map-app-02, labels: { demo: pl-full } }
+spec:
+  vnet_name: full-pl-vnet
+  ip_address: "192.168.67.12"
+  underlay_ip: "10.60.7.12"
+  mac_address: "aa:bb:cc:60:07:02"
+  action: vnet_encap
+---
+# ─── Policy: RoutePolicy — DB /32 to PrivateLink, default→drop ───────────
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-pl-rp, labels: { demo: pl-full } }
+spec:
+  eni_names: [full-pl-app-01, full-pl-app-02]
+  routes:
+    - { prefix: "192.168.67.0/24",  next_hop_type: vnet,           next_hop_target: full-pl-vnet,  metric: 10 }
+    - { prefix: "10.60.255.70/32",  next_hop_type: service_tunnel, next_hop_target: full-pl-st-sql, metric: 5  }
+    - { prefix: "0.0.0.0/0",        next_hop_type: drop,                                             metric: 1000 }
+---
+# ─── Policy: AclPolicy — outbound lockdown ───────────────────────────────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: full-pl-acl-out, labels: { demo: pl-full, stage: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [full-pl-app-01, full-pl-app-02]
+  rules:
+    # — Allowed: SQL Server TCP to the privatelink /32
+    - { priority: 100,  action: allow, protocol: tcp, dst_port: "1433", dst_prefix: "10.60.255.70/32" }
+    # — Allowed: intra-VNet east-west
+    - { priority: 200,  action: allow,                 dst_prefix: "192.168.67.0/24" }
+    # — Allowed: DNS replies
+    - { priority: 300,  action: allow, protocol: udp,  dst_port: "53" }
+    # — Default deny (no direct internet egress, no other PrivateLink targets)
+    - { priority: 1000, action: deny }

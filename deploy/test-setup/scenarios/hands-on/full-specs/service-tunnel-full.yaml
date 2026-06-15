@@ -1,0 +1,138 @@
+# service-tunnel-full.yaml — All 6 ServiceTunnel actions in one spec.
+#
+# WHAT THIS CREATES (10 objects):
+#   Tier 0   : 1 Vnet, 6 ServiceTunnels (nat, inspect, privatelink, ipsec,
+#                                        scrub, vxlan_peer)
+#   Tier 1   : 1 ENI, 1 VnetMapping
+#   Policies : 1 RoutePolicy using all 6 tunnels as next-hops
+#
+# ServiceTunnel.params.action values exercised:
+#   - nat          → SNAT pool, persist seconds
+#   - inspect      → in-line NSG / firewall chain
+#   - privatelink  → Azure-style PrivateLink to managed service
+#   - ipsec        → site-to-site VPN
+#   - scrub        → DDoS scrubbing center
+#   - vxlan_peer   → cross-region VXLAN peering
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/service-tunnel-full.yaml --force
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+
+# ─── Tier 0: VNet ────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: full-st-vnet, labels: { demo: st-full } }
+spec:
+  vni: 60006
+---
+# ─── Tier 0: ServiceTunnel — NAT egress ──────────────────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-st-nat, labels: { demo: st-full, class: nat } }
+spec:
+  local_underlay_ip: "10.60.6.10"
+  remote_underlay_ip: "198.51.100.60"
+  vni: 60601
+  params:
+    action: nat
+    nat_pool: "203.0.113.128/26"
+    snat_persist_seconds: "300"
+---
+# ─── Tier 0: ServiceTunnel — inline inspect (NSG chain) ──────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-st-inspect, labels: { demo: st-full, class: nsg } }
+spec:
+  local_underlay_ip: "10.60.6.20"
+  remote_underlay_ip: "10.60.6.21"
+  vni: 60602
+  params:
+    action: inspect
+    chain: "full-st-nsg-default"
+---
+# ─── Tier 0: ServiceTunnel — PrivateLink ─────────────────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-st-pl, labels: { demo: st-full, class: privatelink } }
+spec:
+  local_underlay_ip: "10.60.6.30"
+  remote_underlay_ip: "10.60.255.30"
+  vni: 60603
+  params:
+    action: privatelink
+    target_fqdn: "full-st.privatelink.example.com"
+---
+# ─── Tier 0: ServiceTunnel — IPsec VPN ───────────────────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-st-vpn, labels: { demo: st-full, class: vpn } }
+spec:
+  local_underlay_ip: "10.60.6.40"
+  remote_underlay_ip: "192.0.2.60"
+  vni: 60604
+  params:
+    action: ipsec
+    ike_group: "14"
+---
+# ─── Tier 0: ServiceTunnel — DDoS scrub ──────────────────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-st-scrub, labels: { demo: st-full, class: ddos } }
+spec:
+  local_underlay_ip: "10.60.6.50"
+  remote_underlay_ip: "198.51.100.50"
+  vni: 60605
+  params:
+    action: scrub
+    provider: "cloudflare-sim"
+    scrub_threshold_mbps: "500"
+---
+# ─── Tier 0: ServiceTunnel — cross-region VXLAN peer ─────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-st-peer, labels: { demo: st-full, class: peering } }
+spec:
+  local_underlay_ip: "10.60.6.60"
+  remote_underlay_ip: "10.128.6.60"
+  vni: 60606
+  params:
+    action: vxlan_peer
+    remote_region: "us-west-2"
+    mtu: "8950"
+---
+# ─── Tier 1: ENI ─────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-st-eni, labels: { demo: st-full } }
+spec:
+  vnet_name: full-st-vnet
+  mac_address: "aa:bb:cc:60:06:01"
+  underlay_ip: "10.60.6.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-07]
+---
+# ─── Tier 1: VnetMapping ─────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-st-map-self, labels: { demo: st-full } }
+spec:
+  vnet_name: full-st-vnet
+  ip_address: "192.168.66.11"
+  underlay_ip: "10.60.6.11"
+  mac_address: "aa:bb:cc:60:06:01"
+  action: vnet_encap
+---
+# ─── Policy: RoutePolicy — every tunnel referenced as next-hop ───────────
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-st-rp, labels: { demo: st-full } }
+spec:
+  eni_names: [full-st-eni]
+  routes:
+    - { prefix: "192.168.66.0/24", next_hop_type: vnet,           next_hop_target: full-st-vnet,    metric: 10  }
+    - { prefix: "10.60.255.30/32", next_hop_type: service_tunnel, next_hop_target: full-st-pl,      metric: 20  }
+    - { prefix: "10.60.6.21/32",   next_hop_type: service_tunnel, next_hop_target: full-st-inspect, metric: 30  }
+    - { prefix: "192.0.2.0/24",    next_hop_type: service_tunnel, next_hop_target: full-st-vpn,     metric: 40  }
+    - { prefix: "198.51.100.50/32", next_hop_type: service_tunnel, next_hop_target: full-st-scrub,  metric: 50  }
+    - { prefix: "10.128.0.0/16",   next_hop_type: service_tunnel, next_hop_target: full-st-peer,    metric: 60  }
+    - { prefix: "0.0.0.0/0",       next_hop_type: service_tunnel, next_hop_target: full-st-nat,     metric: 100 }

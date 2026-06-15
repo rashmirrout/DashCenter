@@ -1,0 +1,121 @@
+# mapping-full.yaml — Every VnetMapping action variant in one file.
+#
+# WHAT THIS CREATES (10 objects):
+#   Tier 0   : 1 Vnet, 1 ServiceTunnel (privatelink)
+#   Tier 1   : 1 ENI, 5 VnetMappings (3× vnet_encap, 1× service_tunnel, 1× drop)
+#   Policies : 1 RoutePolicy, 1 AclPolicy
+#
+# VnetMapping.action values exercised:
+#   - vnet_encap     → VXLAN-encap to the underlay endpoint
+#   - service_tunnel → divert this overlay IP through a ServiceTunnel
+#   - drop           → blackhole this overlay IP
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/mapping-full.yaml --force
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+
+# ─── Tier 0: VNet + tunnel ───────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: full-map-vnet, labels: { demo: mapping-full } }
+spec:
+  vni: 60004
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: full-map-st-pl, labels: { demo: mapping-full, class: privatelink } }
+spec:
+  local_underlay_ip: "10.60.0.40"
+  remote_underlay_ip: "10.60.255.60"
+  vni: 60401
+  params: { action: privatelink, target_fqdn: "mapping-full.privatelink.example.com" }
+---
+# ─── Tier 1: ENI ─────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-map-eni, labels: { demo: mapping-full } }
+spec:
+  vnet_name: full-map-vnet
+  mac_address: "aa:bb:cc:60:04:01"
+  underlay_ip: "10.60.4.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-05]
+---
+# ─── Tier 1: VnetMappings — vnet_encap peers (3 VMs in the overlay) ──────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-map-self, labels: { demo: mapping-full, action: vnet_encap } }
+spec:
+  vnet_name: full-map-vnet
+  ip_address: "192.168.64.11"
+  underlay_ip: "10.60.4.11"
+  mac_address: "aa:bb:cc:60:04:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-map-peer-12, labels: { demo: mapping-full, action: vnet_encap } }
+spec:
+  vnet_name: full-map-vnet
+  ip_address: "192.168.64.12"
+  underlay_ip: "10.60.4.12"
+  mac_address: "aa:bb:cc:60:04:12"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-map-peer-13, labels: { demo: mapping-full, action: vnet_encap } }
+spec:
+  vnet_name: full-map-vnet
+  ip_address: "192.168.64.13"
+  underlay_ip: "10.60.4.13"
+  mac_address: "aa:bb:cc:60:04:13"
+  action: vnet_encap
+---
+# ─── Tier 1: VnetMapping — service_tunnel diversion ──────────────────────
+# Overlay 192.168.64.200 is the "virtual DB" address — packets get diverted
+# via the privatelink tunnel rather than vnet-encap'd.
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-map-db-shim, labels: { demo: mapping-full, action: service_tunnel } }
+spec:
+  vnet_name: full-map-vnet
+  ip_address: "192.168.64.200"
+  underlay_ip: "10.60.0.40"
+  mac_address: "aa:bb:cc:60:04:99"
+  action: service_tunnel
+---
+# ─── Tier 1: VnetMapping — drop ──────────────────────────────────────────
+# Overlay 192.168.64.250 is a known-bad address — silently blackhole.
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-map-blackhole, labels: { demo: mapping-full, action: drop } }
+spec:
+  vnet_name: full-map-vnet
+  ip_address: "192.168.64.250"
+  underlay_ip: "0.0.0.0"
+  mac_address: "00:00:00:00:00:00"
+  action: drop
+---
+# ─── Policy: RoutePolicy (minimal, so vnet has an active routing table) ──
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-map-rp, labels: { demo: mapping-full } }
+spec:
+  eni_names: [full-map-eni]
+  routes:
+    - { prefix: "192.168.64.0/24", next_hop_type: vnet,           next_hop_target: full-map-vnet, metric: 10 }
+    - { prefix: "10.60.255.60/32", next_hop_type: service_tunnel, next_hop_target: full-map-st-pl, metric: 20 }
+    - { prefix: "0.0.0.0/0",       next_hop_type: drop,                                             metric: 1000 }
+---
+# ─── Policy: AclPolicy ───────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: full-map-acl-in, labels: { demo: mapping-full } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [full-map-eni]
+  rules:
+    - { priority: 100,  action: allow, protocol: tcp, dst_port: "443" }
+    - { priority: 1000, action: deny }

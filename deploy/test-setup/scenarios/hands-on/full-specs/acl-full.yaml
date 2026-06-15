@@ -1,0 +1,104 @@
+# acl-full.yaml — AclPolicies exercising every match field + both stages.
+#
+# WHAT THIS CREATES (6 objects):
+#   Tier 0   : 1 Vnet
+#   Tier 1   : 1 ENI, 1 VnetMapping
+#   Policies : 1 RoutePolicy (basic)
+#              2 AclPolicies (inbound + outbound) covering all rule fields
+#
+# AclRule fields exercised:
+#   priority, action (allow|deny)
+#   src_prefix / dst_prefix      (CIDR)
+#   src_port   / dst_port        (single port, port-list "80,8080", range "1024-65535")
+#   protocol                     (tcp|udp|icmp|6|17 — both name and number)
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/acl-full.yaml --force
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+
+# ─── Tier 0: VNet ────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: full-acl-vnet, labels: { demo: acl-full } }
+spec:
+  vni: 60005
+---
+# ─── Tier 1: ENI ─────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: full-acl-eni, labels: { demo: acl-full, role: web-server } }
+spec:
+  vnet_name: full-acl-vnet
+  mac_address: "aa:bb:cc:60:05:01"
+  underlay_ip: "10.60.5.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-06]
+---
+# ─── Tier 1: VnetMapping ─────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: full-acl-map-self, labels: { demo: acl-full } }
+spec:
+  vnet_name: full-acl-vnet
+  ip_address: "192.168.65.11"
+  underlay_ip: "10.60.5.11"
+  mac_address: "aa:bb:cc:60:05:01"
+  action: vnet_encap
+---
+# ─── Policy: RoutePolicy ─────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: full-acl-rp, labels: { demo: acl-full } }
+spec:
+  eni_names: [full-acl-eni]
+  routes:
+    - { prefix: "192.168.65.0/24", next_hop_type: vnet, next_hop_target: full-acl-vnet, metric: 10 }
+    - { prefix: "0.0.0.0/0",       next_hop_type: drop,                                  metric: 1000 }
+---
+# ─── Policy: AclPolicy — INBOUND, every rule shape ───────────────────────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: full-acl-in, labels: { demo: acl-full, stage: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [full-acl-eni]
+  rules:
+    # — HTTPS from anywhere
+    - { priority: 100,  action: allow, protocol: tcp,  dst_port: "443" }
+    # — HTTP from anywhere
+    - { priority: 110,  action: allow, protocol: tcp,  dst_port: "80" }
+    # — SSH only from mgmt CIDR
+    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "22",  src_prefix: "10.0.0.0/8" }
+    # — ICMP echo from corp range only
+    - { priority: 300,  action: allow, protocol: icmp,                  src_prefix: "192.168.0.0/16" }
+    # — DNS replies (UDP src=53)
+    - { priority: 400,  action: allow, protocol: udp,  src_port: "53" }
+    # — High-port ephemerals for response traffic (port range)
+    - { priority: 500,  action: allow, protocol: tcp,  dst_port: "1024-65535", src_prefix: "10.0.0.0/8" }
+    # — Protocol-number form (6 = TCP) plus dst CIDR
+    - { priority: 600,  action: allow, protocol: "6",  dst_port: "9090", dst_prefix: "192.168.65.0/24" }
+    # — Explicit deny of legacy telnet (defense-in-depth)
+    - { priority: 700,  action: deny,  protocol: tcp,  dst_port: "23" }
+    # — Default deny
+    - { priority: 1000, action: deny }
+---
+# ─── Policy: AclPolicy — OUTBOUND, lock egress destinations ──────────────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: full-acl-out, labels: { demo: acl-full, stage: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [full-acl-eni]
+  rules:
+    # — DNS lookups (UDP/53) anywhere
+    - { priority: 100,  action: allow, protocol: udp,  dst_port: "53" }
+    # — NTP
+    - { priority: 110,  action: allow, protocol: udp,  dst_port: "123" }
+    # — DB connection to fixed /32
+    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "1433", dst_prefix: "10.60.255.40/32" }
+    # — Intra-VNet anything
+    - { priority: 300,  action: allow, dst_prefix: "192.168.65.0/24" }
+    # — Block direct internet egress
+    - { priority: 1000, action: deny }

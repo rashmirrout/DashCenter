@@ -1,0 +1,153 @@
+# eni-full.yaml — Production-style ENI with every dependency inline.
+#
+# WHAT THIS CREATES (10 objects, tier-ordered):
+#   Tier 0   : 1 Vnet, 2 ServiceTunnels (internet NAT + DB PrivateLink)
+#   Tier 1   : 1 ENI, 3 VnetMappings (peers in the same VNet)
+#   Policies : 1 RoutePolicy (vnet + privatelink + nat + drop)
+#              2 AclPolicies (inbound + outbound)
+#
+# USAGE
+#   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/eni-full.yaml --force
+#   verify: dashctl get vnet,service-tunnel,eni,vnet-mapping,route-policy,acl-policy -l demo=eni-full -o wide
+#   delete: pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action delete
+#           (dashctl delete is kind/name; the helper script tears every resource
+#            down by label in correct reverse-tier order)
+#
+# Tier order is critical — `dashctl apply -f <file>` parses top-to-bottom and
+# the dashd referential-integrity validator rejects forward references, so
+# Tier 0 must come first.
+
+# ─── Tier 0: VNet ────────────────────────────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata:
+  name: full-eni-vnet
+  labels: { demo: eni-full, tier: "0" }
+spec:
+  vni: 60001
+---
+# ─── Tier 0: ServiceTunnel — internet egress via NAT ─────────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata:
+  name: full-eni-st-nat
+  labels: { demo: eni-full, class: nat }
+spec:
+  local_underlay_ip: "10.60.0.1"
+  remote_underlay_ip: "198.51.100.10"
+  vni: 60101
+  params:
+    action: nat
+    nat_pool: "203.0.113.0/26"
+    snat_persist_seconds: "300"
+---
+# ─── Tier 0: ServiceTunnel — PrivateLink to a managed DB ─────────────────
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata:
+  name: full-eni-st-pl-db
+  labels: { demo: eni-full, class: privatelink, target: azuredb }
+spec:
+  local_underlay_ip: "10.60.0.2"
+  remote_underlay_ip: "10.60.255.30"
+  vni: 60102
+  params:
+    action: privatelink
+    target_fqdn: "db.privatelink.example.com"
+---
+# ─── Tier 1: ENI — the focus of this spec ────────────────────────────────
+apiVersion: dashcenter.v1
+kind: Eni
+metadata:
+  name: full-eni-app-01
+  labels: { demo: eni-full, role: app }
+spec:
+  vnet_name: full-eni-vnet
+  mac_address: "aa:bb:cc:60:00:01"
+  underlay_ip: "10.60.0.11"
+  admin_state: up
+  placement_hint_dpu_ids: [dpu-sim-01]
+---
+# ─── Tier 1: VnetMappings — overlay→underlay peers in the same VNet ──────
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: full-eni-map-app-self
+  labels: { demo: eni-full }
+spec:
+  vnet_name: full-eni-vnet
+  ip_address: "192.168.60.11"
+  underlay_ip: "10.60.0.11"
+  mac_address: "aa:bb:cc:60:00:01"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: full-eni-map-app-peer-12
+  labels: { demo: eni-full }
+spec:
+  vnet_name: full-eni-vnet
+  ip_address: "192.168.60.12"
+  underlay_ip: "10.60.0.12"
+  mac_address: "aa:bb:cc:60:00:12"
+  action: vnet_encap
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata:
+  name: full-eni-map-app-peer-13
+  labels: { demo: eni-full }
+spec:
+  vnet_name: full-eni-vnet
+  ip_address: "192.168.60.13"
+  underlay_ip: "10.60.0.13"
+  mac_address: "aa:bb:cc:60:00:13"
+  action: vnet_encap
+---
+# ─── Policy: RoutePolicy — covers vnet, privatelink, NAT, drop ───────────
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: full-eni-rp
+  labels: { demo: eni-full }
+spec:
+  eni_names: [full-eni-app-01]
+  routes:
+    - { prefix: "192.168.60.0/24",  next_hop_type: vnet,           next_hop_target: full-eni-vnet,     metric: 10 }
+    - { prefix: "10.60.255.30/32",  next_hop_type: service_tunnel, next_hop_target: full-eni-st-pl-db, metric: 20 }
+    - { prefix: "0.0.0.0/0",        next_hop_type: service_tunnel, next_hop_target: full-eni-st-nat,   metric: 100 }
+    - { prefix: "169.254.0.0/16",   next_hop_type: drop,                                                metric: 1000 }
+---
+# ─── Policy: AclPolicy — inbound (web from anywhere, SSH from mgmt) ──────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: full-eni-acl-in
+  labels: { demo: eni-full, stage: inbound }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [full-eni-app-01]
+  rules:
+    - { priority: 100,  action: allow, protocol: tcp,  dst_port: "443" }
+    - { priority: 110,  action: allow, protocol: tcp,  dst_port: "80" }
+    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "22", src_prefix: "10.0.0.0/8" }
+    - { priority: 300,  action: allow, protocol: icmp }
+    - { priority: 1000, action: deny }
+---
+# ─── Policy: AclPolicy — outbound (DB privatelink + corp + deny rest) ────
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: full-eni-acl-out
+  labels: { demo: eni-full, stage: outbound }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [full-eni-app-01]
+  rules:
+    - { priority: 100,  action: allow, protocol: tcp, dst_prefix: "10.60.255.30/32", dst_port: "1433" }
+    - { priority: 200,  action: allow, protocol: tcp, dst_prefix: "192.168.60.0/24" }
+    - { priority: 300,  action: allow, protocol: udp, dst_port: "53" }
+    - { priority: 1000, action: deny }
