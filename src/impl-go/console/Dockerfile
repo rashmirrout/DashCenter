@@ -9,11 +9,10 @@ FROM node:20-alpine AS web-builder
 
 WORKDIR /app/web
 COPY src/impl-web/console/package*.json ./
-RUN npm ci --ignore-scripts 2>/dev/null || echo "No SPA package.json yet — skipping npm install"
+RUN npm ci 2>/dev/null || echo "No SPA package.json yet — skipping npm install"
 COPY src/impl-web/console/ ./
-RUN chmod -R +x node_modules/.bin 2>/dev/null || true && \
-if [ -f package.json ] && grep -q '"build"' package.json; then \
-npx --yes tsc && npx --yes vite build; \
+RUN if [ -f package.json ] && grep -q '"build"' package.json; then \
+npx vite build; \
 else \
 mkdir -p dist && echo '<!DOCTYPE html><html><head><title>dashw</title></head><body><h1>dashw</h1><p>SPA not built</p></body></html>' > dist/index.html; \
 fi
