@@ -170,11 +170,13 @@ export default function DashboardView() {
               right (which is ~488px tall naturally). The
               `<FleetConnectivityViz fill maxFillSize={720} />` then
               measures the card's interior width AND height and renders
-              the SVG as the largest square that fits — so the animation
-              actually OCCUPIES the box's available space instead of
-              sitting tiny in the middle, while the box itself doesn't
-              grow oversized. On mobile (< lg breakpoint) both sections
-              stack full-width. */}
+              the SVG as a RECTANGLE of that exact size, with the DPU ring
+              laid out as an ELLIPSE that stretches horizontally on wide
+              panels — so the animation actually FILLS the box instead of
+              leaving big empty bands on either side of a centred circle.
+              `maxFillSize` caps each axis at 720 px on ultra-wide monitors.
+              On mobile (< lg breakpoint) both sections stack full-width
+              and the oval becomes nearly circular on more-square cards. */}
           <GlassCard className="flex flex-col h-[520px]">
             <div className="w-full flex items-center justify-between mb-2 flex-shrink-0">
               <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-secondary)]">

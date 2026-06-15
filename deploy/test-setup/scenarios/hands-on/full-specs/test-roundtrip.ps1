@@ -82,7 +82,7 @@ $kinds = @('vnet','service-tunnel','eni','vnet-mapping','route-policy','acl-poli
 function Run-Dashctl {
     param([Parameter(ValueFromRemainingArguments)] [string[]]$args)
     & $Dashctl @args
-    return $LASTEXITCODE
+    $script:LastDashctlExit = $LASTEXITCODE
 }
 
 function Apply-Specs {
@@ -90,7 +90,8 @@ function Apply-Specs {
     foreach ($file in $specs.Keys) {
         $path = Join-Path $scriptDir $file
         Write-Host "    apply $file" -ForegroundColor Gray
-        $code = Run-Dashctl 'apply' '-f' $path '--force'
+        & $Dashctl 'apply' '-f' $path '--force'
+        $code = $LASTEXITCODE
         if ($code -ne 0) {
             Write-Host "    ! apply $file exited $code" -ForegroundColor Yellow
         }
