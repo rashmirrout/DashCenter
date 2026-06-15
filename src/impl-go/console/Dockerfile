@@ -9,14 +9,13 @@ FROM node:20-alpine AS web-builder
 
 WORKDIR /app/web
 COPY src/impl-web/console/package*.json ./
-RUN npm ci 2>/dev/null || echo "No SPA package.json yet — skipping npm install"
+RUN npm ci --ignore-scripts 2>/dev/null || echo "No SPA package.json yet — skipping npm install"
 COPY src/impl-web/console/ ./
-RUN mkdir -p dist && \
+RUN chmod -R +x node_modules/.bin 2>/dev/null || true && \
 if [ -f package.json ] && grep -q '"build"' package.json; then \
-npx vite build 2>&1 || echo "WARN: vite build failed, using placeholder SPA"; \
-fi && \
-if [ ! -f dist/index.html ]; then \
-echo '<!DOCTYPE html><html><head><title>dashw</title></head><body><h1>dashw</h1><p>SPA placeholder</p></body></html>' > dist/index.html; \
+npx --yes tsc && npx --yes vite build; \
+else \
+mkdir -p dist && echo '<!DOCTYPE html><html><head><title>dashw</title></head><body><h1>dashw</h1><p>SPA not built</p></body></html>' > dist/index.html; \
 fi
 
 # ── Stage 2: Build BFF ──────────────────────────────────────────
