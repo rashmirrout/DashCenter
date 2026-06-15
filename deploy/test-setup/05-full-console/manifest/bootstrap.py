@@ -428,7 +428,7 @@ ha_sets = [
     ("ha-gaming-crossrack","active_standby", ["dpu-sim-09","dpu-sim-10"], "10.5.0.100"),
 ]
 for name, mode, dpus, vip in ha_sets:
-    put(f"/v1/default/ha/{name}", {
+    put(f"/v1/default/ha-sets/{name}", {
         "metadata": {"namespace": "default", "name": name},
         "mode": mode, "member_dpu_ids": dpus, "virtual_ip": vip,
         "flow_sync_endpoints": [f"udp://{d}:4789" for d in dpus],

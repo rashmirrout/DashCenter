@@ -24,7 +24,7 @@ ha:
       backend: etcd
       endpoints: ["http://etcd:2379"]
       leader_key: /dashd/console/leader
-      lease_ttl: 8s
+      lease_ttl: 15s
       dial_timeout: 5s
 
 reconcile:
