@@ -13,7 +13,8 @@
 > (sim parity roadmap),
 > [features.md §5](features.md) (CRUD reference),
 > [CLI_GUIDE.md](../CLI_GUIDE.md) (dashctl command reference).
-> **Status**: 📋 Proposed — under discussion.
+> **Status**: ⏳ Phase 1 (dash-sim southbound) **implemented**.
+> Phases 2–3 (dashd northbound, delete-side, tooling) are proposed.
 
 ---
 
@@ -89,35 +90,39 @@ dropping all traffic with no warning.
 
 ### 2.2 dash-sim southbound (`model.Store.Apply`)
 
-| Object kind | FK field | Referenced kind | Validated? |
-|---|---|---|---|
-| `acl_rule` | Key `group_id` | `acl_group` | ❌ No |
-| `acl_rule` | `src_tag[]`, `dst_tag[]` | `prefix_tag` | ❌ No |
-| `route` | Key `group_id` | `route_group` | ❌ No |
-| `route` | `vnet` / `vnet_direct.vnet` | `vnet` | ❌ No |
-| `route` | `appliance` | `routing_appliance` | ❌ No |
-| `route` | `tunnel` | `tunnel` | ❌ No |
-| `vnet_mapping` | Key `vnet` | `vnet` | ❌ No |
-| `vnet_mapping` | `tunnel` | `tunnel` | ❌ No |
-| `vnet_mapping` | `port_map` | `outbound_port_map` | ❌ No |
-| `eni` | `vnet` | `vnet` | ❌ No |
-| `eni` | `qos` | `qos` | ❌ No |
-| `eni_route` | Key `eni` | `eni` | ❌ No |
-| `eni_route` | `group_id` | `route_group` | ❌ No |
-| `acl_in` | Key `eni` | `eni` | ❌ No |
-| `acl_in` | `v4/v6_acl_group_id` | `acl_group` | ❌ No |
-| `acl_out` | Key `eni` | `eni` | ❌ No |
-| `acl_out` | `v4/v6_acl_group_id` | `acl_group` | ❌ No |
-| `route_rule` | Key `eni` | `eni` | ❌ No |
-| `route_rule` | `vnet` | `vnet` | ❌ No |
-| `meter_rule` | Key `meter_policy_id` | `meter_policy` | ❌ No |
-| `meter` | Key `eni` | `eni` | ❌ No |
-| `opm_range` | Key `map_id` | `outbound_port_map` | ❌ No |
-| `ha_scope` | `ha_set_id` | `ha_set` | ❌ No |
-| `ha_scope_config` | Key `ha_scope_id` + `ha_set_id` | `ha_scope` + `ha_set` | ❌ No |
-| `ha_scope_state` | Key `ha_scope_id` | `ha_scope` | ❌ No |
+| Object kind | FK field | Referenced kind | Validated? | Location |
+|---|---|---|---|---|
+| `acl_rule` | Key `group_id` | `acl_group` | ✅ Yes | `refs.go` fkRules |
+| `acl_rule` | `src_tag[]`, `dst_tag[]` | `prefix_tag` | ✅ Yes | `refs.go` fkRules |
+| `route` | Key `group_id` | `route_group` | ✅ Yes | `refs.go` fkRules |
+| `route` | `vnet` / `vnet_direct.vnet` | `vnet` | ✅ Yes | `refs.go` fkRules |
+| `route` | `appliance` | `routing_appliance` | ✅ Yes | `refs.go` fkRules |
+| `route` | `tunnel` | `tunnel` | ✅ Yes | `refs.go` fkRules |
+| `vnet_mapping` | Key `vnet` | `vnet` | ✅ Yes | `refs.go` fkRules |
+| `vnet_mapping` | `tunnel` | `tunnel` | ✅ Yes | `refs.go` fkRules |
+| `vnet_mapping` | `port_map` | `outbound_port_map` | ✅ Yes | `refs.go` fkRules |
+| `eni` | `vnet` | `vnet` | ✅ Yes | `refs.go` fkRules |
+| `eni` | `qos` | `qos` | ✅ Yes | `refs.go` fkRules |
+| `eni_route` | Key `eni` | `eni` | ✅ Yes | `refs.go` fkRules |
+| `eni_route` | `group_id` | `route_group` | ✅ Yes | `refs.go` fkRules |
+| `acl_in` | Key `eni` | `eni` | ✅ Yes | `refs.go` fkRules |
+| `acl_in` | `v4/v6_acl_group_id` | `acl_group` | ✅ Yes | `refs.go` fkRules |
+| `acl_out` | Key `eni` | `eni` | ✅ Yes | `refs.go` fkRules |
+| `acl_out` | `v4/v6_acl_group_id` | `acl_group` | ✅ Yes | `refs.go` fkRules |
+| `route_rule` | Key `eni` | `eni` | ✅ Yes | `refs.go` fkRules |
+| `route_rule` | `vnet` | `vnet` | ✅ Yes | `refs.go` fkRules |
+| `meter_rule` | Key `meter_policy_id` | `meter_policy` | ✅ Yes | `refs.go` fkRules |
+| `meter` | Key `eni` | `eni` | ✅ Yes | `refs.go` fkRules |
+| `opm_range` | Key `map_id` | `outbound_port_map` | ✅ Yes | `refs.go` fkRules |
+| `ha_scope` | `ha_set_id` | `ha_set` | ✅ Yes | `refs.go` fkRules |
+| `ha_scope_config` | Key `ha_scope_id` + `ha_set_id` | `ha_scope` + `ha_set` | ✅ Yes | `refs.go` fkRules |
+| `ha_scope_state` | Key `ha_scope_id` | `ha_scope` | ✅ Yes | `refs.go` fkRules |
 
-**Score: 0 / 25 southbound FK relationships validated (0%).**
+**Score: 25 / 25 southbound FK relationships validated (100%).** ✅
+
+> Implemented in `model/refs.go` via a declarative `fkRules` table.
+> `Store.Apply()` calls `checkRefs()` under the write lock before
+> persisting. Controlled by `--strict-refs` CLI flag (default `true`).
 
 ### 2.3 Delete-side orphan protection
 
@@ -143,9 +148,9 @@ dropping all traffic with no warning.
 | Surface | Validated | Total | Coverage |
 |---|---|---|---|
 | dashd northbound (Put) | 5 | 12 | **42%** |
-| dash-sim southbound (Apply) | 0 | 25 | **0%** |
+| dash-sim southbound (Apply) | **25** | 25 | **100%** ✅ |
 | Delete orphan protection | 0 | 12 | **0%** |
-| **Overall** | **5** | **~49** | **~10%** |
+| **Overall** | **30** | **~49** | **~61%** |
 
 ---
 
@@ -503,6 +508,108 @@ in arbitrary order.
 **Tests**: ~20 UTs covering each FK family + the `--strict-refs=false`
 escape + existing integration tests updated to create objects in
 correct order.
+
+#### Phase 1 — Implementation status: ✅ DONE
+
+**Files added/modified:**
+
+| File | Change |
+|---|---|
+| `dash-sim/internal/sim/model/refs.go` (new) | Declarative `fkRules` table (25 rules) + `checkRefs()` + helpers |
+| `dash-sim/internal/sim/model/refs_test.go` (new) | 51 unit tests — 100% coverage on `checkRefs`, `nonEmpty`, `kindNameOf` |
+| `dash-sim/internal/sim/model/store.go` | `strictRefs` field, `SetStrictRefs()`, FK check in `Apply()` |
+| `dash-sim/cmd/dash-sim/main.go` | `--strict-refs` CLI flag (default `true`) |
+| `dash-sim/test/integration/refs_test.go` (new) | 9 gRPC integration tests (reject, accept, error quality, fix-retry) |
+| `dash-sim/internal/sim/server/dpu_counters_test.go` | `SetStrictRefs(false)` in counter test helpers |
+| `dash-sim/test/integration/dpu_counters_test.go` | `SetStrictRefs(false)` in counter integration harness |
+
+**Test results:**
+
+```
+dash-sim model:       51 tests PASS   (checkRefs 100%, nonEmpty 100%, kindNameOf 100%)
+dash-sim integration: 13 tests PASS   (4 counter + 9 FK validation)
+dash-sim total:        5 packages green
+dashd total:          28 packages green (no regressions)
+dashctl total:         9 packages green (no regressions)
+```
+
+**How it works — walkthrough with examples:**
+
+Example 1 — **Wrong config: ENI references a typo'd vnet name**
+
+```bash
+# Start dash-sim with strict-refs (default)
+dash-sim --strict-refs
+
+# Try to create an ENI that references "vnet-bllue" (typo)
+dash-sim-client --target localhost:50051 apply --kind eni --key eni-001 \
+  --value '{"vnet": "vnet-bllue"}'
+```
+
+**Result: REJECTED**
+```
+Apply rejected: referential integrity: eni references vnet "vnet-bllue"
+(field vnet) which does not exist; create it first
+```
+
+The error names the exact missing object, the field that references
+it, and tells the operator what to do. The ENI is NOT stored — no
+silent corruption.
+
+Example 2 — **Right config: create objects in correct order**
+
+```bash
+# Step 1: Create the vnet first (Tier 0 — no dependencies)
+dash-sim-client --target localhost:50051 apply --kind vnet --key vnet-blue \
+  --value '{}'
+
+# Step 2: Create the ENI (Tier 1 — references vnet)
+dash-sim-client --target localhost:50051 apply --kind eni --key eni-001 \
+  --value '{"vnet": "vnet-blue"}'
+```
+
+**Result: ACCEPTED** — the ENI is stored because `vnet-blue` exists.
+
+Example 3 — **Wrong config: Tier 2 before Tier 1**
+
+```bash
+# vnet exists, but ENI does not
+dash-sim-client --target localhost:50051 apply --kind eni_route --key eni-missing \
+  --value '{"group_id": "rg-prod"}'
+```
+
+**Result: REJECTED**
+```
+Apply rejected: referential integrity: eni_route references eni "eni-missing"
+(field key.eni) which does not exist; create it first
+```
+
+Example 4 — **Fix-then-retry workflow**
+
+```bash
+# Step 1: Attempt fails (vnet-prod doesn't exist yet)
+dash-sim-client apply --kind eni --key eni-001 --value '{"vnet":"vnet-prod"}'
+# → rejected: vnet "vnet-prod" does not exist
+
+# Step 2: Create the missing vnet
+dash-sim-client apply --kind vnet --key vnet-prod --value '{"vni":1001}'
+# → accepted
+
+# Step 3: Retry the ENI — now succeeds
+dash-sim-client apply --kind eni --key eni-001 --value '{"vnet":"vnet-prod"}'
+# → accepted
+```
+
+Example 5 — **Backward compatibility: disable strict refs**
+
+```bash
+# For legacy pipelines that create objects in arbitrary order:
+dash-sim --strict-refs=false
+
+# Now any Apply succeeds regardless of FK order
+dash-sim-client apply --kind eni --key eni-001 --value '{"vnet":"nonexistent"}'
+# → accepted (no FK check)
+```
 
 ### Phase 2a: dashd Put-side FK validation (~2 days)
 

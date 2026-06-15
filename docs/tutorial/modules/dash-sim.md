@@ -69,9 +69,22 @@ A single `Store` value holds every object kind. Keyed by
 `(dashapi.ObjectKind, joined-key-string)`. Mutations:
 
 1. Validate kind + key parts (number of parts must match `kinds.Lookup(k).KeyParts`)
-2. `proto.Clone` the payload (defensive copy)
-3. Stamp `created_ts_ns` / `updated_ts_ns` in a sidecar map
-4. Publish an `*dashapi.Event` onto the `events.Bus`
+2. **FK validation** — when `strictRefs` is `true` (default), check that
+   every foreign-key reference in the object already exists in the store.
+   25 southbound FK relationships are validated via a declarative
+   `fkRules` table in `model/refs.go`. If a reference is missing,
+   `Apply()` returns an error naming the missing object and the field:
+   ```
+   referential integrity: eni references vnet "vnet-bllue" (field vnet)
+   which does not exist; create it first
+   ```
+   See [referential-integrity-validation.md](../../dashd-features/referential-integrity-validation.md)
+   for the full FK map and tier ordering.
+3. `proto.Clone` the payload (defensive copy)
+4. Stamp `created_ts_ns` / `updated_ts_ns` in a sidecar map
+5. Publish an `*dashapi.Event` onto the `events.Bus`
+
+`SetStrictRefs(false)` disables FK checks (for tests or legacy pipelines).
 
 API:
 
@@ -286,3 +299,23 @@ go test ./dash-sim/internal/sim/pipeline/...
 The 8 conformance cases pin the exact pipeline semantics. Read them like
 contract tests — any behavioural change in the pipeline must update these
 tests.
+
+### 10a. Referential integrity tests
+
+```bash
+# Unit tests — 51 tests, 100% coverage on checkRefs/nonEmpty/kindNameOf
+go test -v ./dash-sim/internal/sim/model/ -run TestRefs
+
+# Integration tests — 9 tests exercising FK validation over gRPC
+go test -v ./dash-sim/test/integration/ -run TestIntegration_Refs
+```
+
+The unit tests cover all 25 FK families (missing ref → error, valid ref →
+accepted), the `StrictRefs` toggle, Tier 0 roots (no FK check), error
+message quality, and edge cases (empty optional refs, defensive skip
+branches).
+
+The integration tests exercise the full client → gRPC → server → store
+stack: rejected applies return `Ack{Accepted: false, Error: ...}` with
+the FK violation message; correct creation order succeeds; fix-then-retry
+workflow works.

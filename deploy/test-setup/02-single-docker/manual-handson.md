@@ -283,6 +283,32 @@ network you use the **host port** (50051). Both work.
 
 ---
 
+## Step 10a — Referential integrity (FK validation)
+
+`dash-sim` validates foreign-key references at apply time. Wrong refs
+are rejected instantly.
+
+```powershell
+# Wrong: ENI references a vnet that doesn't exist
+& $c --target $sim apply --kind eni --key eni-bad --value '{"vnet":"no-such-vnet"}'
+# → rejected: referential integrity: eni references vnet "no-such-vnet"
+#   (field vnet) which does not exist; create it first
+
+# Right: create vnet first, then ENI
+& $c --target $sim apply --kind vnet --key vnet-ri --value '{"vni":42}'
+& $c --target $sim apply --kind eni  --key eni-ri  --value '{"vnet":"vnet-ri"}'
+# → accepted
+
+# Clean up
+& $c --target $sim delete --kind eni  --key eni-ri
+& $c --target $sim delete --kind vnet --key vnet-ri
+```
+
+> See [referential-integrity-validation.md](../../../docs/dashd-features/referential-integrity-validation.md)
+> for the full FK map and tier ordering.
+
+---
+
 ## Step 11 — Admin HTTP (dash-sim only)
 
 The host port mapping is `8081 → container 8080`:

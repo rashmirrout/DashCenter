@@ -1,6 +1,6 @@
 # DashCenter Web Console — Manual Hands-On Lab
 
-> **Duration:** ~45 minutes (12 labs)
+> **Duration:** ~50 minutes (14 labs)
 > **Prerequisites:** Docker Desktop (or Docker Engine + Compose v2),
 > Python 3.9+, a web browser, ~4GB free RAM, ~2GB free disk.
 > **Result:** A fully operational DashCenter fleet (10 DPUs + 3 HA
@@ -26,6 +26,8 @@
 | 10 | Multi-namespace | namespace switcher, cross-ns isolation |
 | 11 | Command catalog | CommandView + CLI preview |
 | 12 | Flow trace + Debug + Audit | FlowTraceView, DebugView, AuditView |
+| 13 | In-container diagnostics | `docker exec` + bundled CLIs |
+| 14 | Referential integrity | FK validation: wrong vs right config |
 
 ---
 
@@ -1131,3 +1133,199 @@ exit
 ```bash
 docker exec dc-console-dashd-1 dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
 ```
+
+---
+
+## Lab 14: Referential Integrity Validation (FK checks)
+
+> **Duration**: ~10 minutes
+> **Prerequisite**: Lab 0 completed (fleet running, sim containers up)
+> **Feature**: `dash-sim --strict-refs` (default `true`)
+> **What you'll learn**: how FK validation catches wrong configs at
+> apply-time, the error messages you'll see, and the correct creation
+> order to follow.
+
+### Background
+
+The DASH pipeline is a deeply interconnected object graph. An ENI
+depends on a VNet; an ACL rule depends on its ACL group; a route
+depends on its route group and the target VNet. If any of these
+references are wrong (typo, missing parent, wrong creation order),
+the pipeline silently drops traffic — the operator discovers the
+problem minutes later through counter spikes.
+
+With `--strict-refs` (enabled by default), dash-sim validates all
+25 southbound FK relationships **at apply time**. A bad reference
+gets an immediate error naming the missing object and the field
+that references it.
+
+### 14.1 — Wrong config: ENI with typo'd vnet name (FAIL)
+
+**Objective**: prove that applying an ENI that references a
+non-existent vnet is rejected immediately.
+
+```bash
+# Enter a sim container
+docker exec -it dc-console-sim-01 sh
+
+# Try to create an ENI referencing a vnet that doesn't exist
+dash-sim-client --target localhost:50051 apply \
+  --kind eni --key eni-lab14-bad \
+  --value '{"vnet":"vnet-bllue"}'
+```
+
+**Expected output** — the Apply is **rejected**:
+
+```
+Apply rejected: referential integrity: eni references vnet "vnet-bllue"
+(field vnet) which does not exist; create it first
+```
+
+**What happened**: the sim checked whether `vnet-bllue` exists as a
+`vnet` object in its store. It doesn't (the actual vnet name in the
+fleet is something like `bank-prod-web`, not `vnet-bllue`). The error
+message names:
+- the **kind** being applied (`eni`)
+- the **referenced kind** that's missing (`vnet`)
+- the **exact ref value** (`"vnet-bllue"`)
+- the **field** that carries the reference (`vnet`)
+- the **fix** ("create it first")
+
+### 14.2 — Wrong config: Tier 2 before Tier 1 (FAIL)
+
+**Objective**: prove that creating a Tier 2 object (eni_route) without
+its parent ENI is rejected.
+
+```bash
+# Still inside the sim container from 14.1
+
+# Try to create an eni_route for a non-existent ENI
+dash-sim-client --target localhost:50051 apply \
+  --kind eni_route --key eni-ghost \
+  --value '{"group_id":"rg-prod"}'
+```
+
+**Expected output** — **rejected** because `eni-ghost` doesn't exist:
+
+```
+Apply rejected: referential integrity: eni_route references eni "eni-ghost"
+(field key.eni) which does not exist; create it first
+```
+
+### 14.3 — Right config: correct creation order (PASS)
+
+**Objective**: create a complete ENI pipeline in the right order:
+Tier 0 → Tier 1 → Tier 2. Every Apply succeeds.
+
+```bash
+# Step 1: Create a vnet (Tier 0 — no FK dependencies)
+dash-sim-client --target localhost:50051 apply \
+  --kind vnet --key vnet-lab14 \
+  --value '{"vni":9999}'
+# → accepted ✅
+
+# Step 2: Create a route_group (Tier 0 — no FK dependencies)
+dash-sim-client --target localhost:50051 apply \
+  --kind route_group --key rg-lab14 \
+  --value '{}'
+# → accepted ✅
+
+# Step 3: Create the ENI (Tier 1 — references vnet)
+dash-sim-client --target localhost:50051 apply \
+  --kind eni --key eni-lab14-ok \
+  --value '{"vnet":"vnet-lab14"}'
+# → accepted ✅  (vnet-lab14 exists from step 1)
+
+# Step 4: Create a route (Tier 1 — references route_group + vnet)
+dash-sim-client --target localhost:50051 apply \
+  --kind route --key rg-lab14 --key 10.0.0.0/8 \
+  --value '{"vnet":"vnet-lab14"}'
+# → accepted ✅  (both rg-lab14 and vnet-lab14 exist)
+
+# Step 5: Create an eni_route (Tier 2 — references ENI + route_group)
+dash-sim-client --target localhost:50051 apply \
+  --kind eni_route --key eni-lab14-ok \
+  --value '{"group_id":"rg-lab14"}'
+# → accepted ✅  (eni-lab14-ok and rg-lab14 both exist)
+
+# Verify everything was created
+dash-sim-client --target localhost:50051 list --kind eni -o table
+```
+
+### 14.4 — Fix-then-retry workflow
+
+**Objective**: demonstrate the operator workflow when an Apply fails —
+create the missing parent, then retry.
+
+```bash
+# Step 1: Try to create an ACL rule in a group that doesn't exist
+dash-sim-client --target localhost:50051 apply \
+  --kind acl_rule --key acl-lab14-grp --key 100 \
+  --value '{}'
+# → rejected: acl_group "acl-lab14-grp" does not exist
+
+# Step 2: Create the missing ACL group
+dash-sim-client --target localhost:50051 apply \
+  --kind acl_group --key acl-lab14-grp \
+  --value '{}'
+# → accepted ✅
+
+# Step 3: Retry the ACL rule — now succeeds
+dash-sim-client --target localhost:50051 apply \
+  --kind acl_rule --key acl-lab14-grp --key 100 \
+  --value '{}'
+# → accepted ✅
+
+exit
+```
+
+### 14.5 — Clean up lab objects
+
+```bash
+docker exec dc-console-sim-01 sh -c '
+  dash-sim-client --target localhost:50051 delete --kind eni_route --key eni-lab14-ok
+  dash-sim-client --target localhost:50051 delete --kind acl_rule --key acl-lab14-grp --key 100
+  dash-sim-client --target localhost:50051 delete --kind eni --key eni-lab14-ok
+  dash-sim-client --target localhost:50051 delete --kind route --key rg-lab14 --key 10.0.0.0/8
+  dash-sim-client --target localhost:50051 delete --kind route_group --key rg-lab14
+  dash-sim-client --target localhost:50051 delete --kind acl_group --key acl-lab14-grp
+  dash-sim-client --target localhost:50051 delete --kind vnet --key vnet-lab14
+'
+```
+
+### Lab 14 success criteria
+
+| # | Check | How to verify |
+|---|---|---|
+| 1 | ENI with missing vnet is rejected | 14.1 shows error naming `vnet-bllue` |
+| 2 | Tier 2 without Tier 1 is rejected | 14.2 shows error naming `eni-ghost` |
+| 3 | Correct order succeeds | 14.3 all 5 applies accepted |
+| 4 | Fix-then-retry works | 14.4 rejected → create parent → retry succeeds |
+| 5 | Error messages are actionable | Every error names kind, field, ref value, and says "create it first" |
+
+### Object dependency tiers (reference)
+
+```
+Tier 0 — Roots (no FK dependencies, create first):
+  vnet, qos, acl_group, route_group, routing_appliance,
+  prefix_tag, tunnel, meter_policy, outbound_port_map, ha_set
+
+Tier 1 — References Tier 0 only:
+  eni (→ vnet, qos)
+  acl_rule (→ acl_group, prefix_tag)
+  route (→ route_group, vnet, routing_appliance, tunnel)
+  vnet_mapping (→ vnet, tunnel, outbound_port_map)
+  meter_rule (→ meter_policy)
+  ha_scope (→ ha_set)
+
+Tier 2 — References Tier 0 + Tier 1:
+  eni_route (→ eni, route_group)
+  acl_in/out (→ eni, acl_group)
+  route_rule (→ eni, vnet)
+  meter (→ eni)
+  ha_scope_config (→ ha_scope, ha_set)
+  ha_scope_state (→ ha_scope)
+```
+
+> **See also**: [`docs/dashd-features/referential-integrity-validation.md`](../../../docs/dashd-features/referential-integrity-validation.md)
+> for the full FK map, design rationale, and future phases.

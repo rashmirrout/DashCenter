@@ -202,6 +202,30 @@ func main() {
 
 ---
 
+## 7a. Referential integrity errors
+
+When `dash-sim` runs with `--strict-refs` (the default), `apply`
+commands that reference missing objects are **rejected**. The error
+message names the missing ref, the field, and suggests the fix:
+
+```bash
+# ENI references a vnet that doesn't exist → rejected
+dash-sim-client apply --kind eni --key eni-001 --value '{"vnet":"vnet-bllue"}'
+# → referential integrity: eni references vnet "vnet-bllue" (field vnet)
+#   which does not exist; create it first
+
+# Fix: create the vnet first, then retry
+dash-sim-client apply --kind vnet --key vnet-bllue --value '{"vni":100}'
+dash-sim-client apply --kind eni --key eni-001 --value '{"vnet":"vnet-bllue"}'
+# → accepted
+```
+
+The 29 object kinds follow a tiered dependency order:
+Tier 0 (roots) → Tier 1 (refs T0) → Tier 2 (refs T0+T1).
+See [referential-integrity-validation.md](../../dashd-features/referential-integrity-validation.md).
+
+---
+
 ## 8. Adding a new subcommand
 
 1. Create `internal/cmd/<name>.go` with a `newXxxCmd() *cobra.Command` that

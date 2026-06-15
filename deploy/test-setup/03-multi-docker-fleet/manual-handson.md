@@ -332,6 +332,33 @@ per-step pipeline trace. `simulate` against `$ada` returns
 
 ---
 
+## Step 14a — Referential integrity (FK validation)
+
+`dash-sim` validates foreign-key references at apply time. Wrong refs
+are rejected instantly with a clear error message.
+
+```powershell
+# Wrong: ENI references a vnet that doesn't exist on dpu-sim-01
+& $c --target $sim1 apply --kind eni --key eni-bad --value '{"vnet":"no-such-vnet"}'
+# → rejected: referential integrity: eni references vnet "no-such-vnet"
+#   (field vnet) which does not exist; create it first
+
+# Right: create vnet first, then ENI
+& $c --target $sim1 apply --kind vnet --key vnet-ri --value '{"vni":42}'
+& $c --target $sim1 apply --kind eni  --key eni-ri  --value '{"vnet":"vnet-ri"}'
+# → accepted
+
+# dpu-sim-02 is independent — its own store, own FK checks
+& $c --target $sim2 apply --kind eni --key eni-ri --value '{"vnet":"vnet-ri"}'
+# → rejected (vnet-ri doesn't exist on sim2)
+
+# Clean up
+& $c --target $sim1 delete --kind eni  --key eni-ri
+& $c --target $sim1 delete --kind vnet --key vnet-ri
+```
+
+---
+
 ## Step 15 — Subscribe to live changes across DPUs
 
 Open a second window and watch `dpu-sim-02`:

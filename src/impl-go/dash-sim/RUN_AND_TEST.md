@@ -375,6 +375,77 @@ dashctl counters --endpoint http://localhost:28443 --insecure
 ```
 
 
+## 9c. Referential integrity — FK validation
+
+dash-sim validates all 25 southbound FK relationships **at apply time**
+when `--strict-refs` is `true` (the default). Objects that reference a
+missing parent are immediately rejected with a clear error message.
+
+**Launch with FK validation (default):**
+
+```powershell
+.\bin\dash-sim.exe --grpc-listen :50051 --admin-listen :8080 --device-id dpu-sim-01
+```
+
+**Disable for legacy/test pipelines:**
+
+```powershell
+.\bin\dash-sim.exe --strict-refs=false --grpc-listen :50051 --admin-listen :8080
+```
+
+### Quick lab — wrong config vs right config
+
+**Wrong: ENI with typo'd vnet (FAIL):**
+
+```powershell
+# No vnet called "vnet-bllue" exists in the store
+.\bin\dash-sim-client.exe --target localhost:50051 apply --kind eni --key eni-bad `
+  --value '{"vnet":"vnet-bllue"}'
+```
+
+Output:
+```
+Apply rejected: referential integrity: eni references vnet "vnet-bllue"
+(field vnet) which does not exist; create it first
+```
+
+**Right: create objects in tier order (PASS):**
+
+```powershell
+# Tier 0: vnet (no dependencies)
+.\bin\dash-sim-client.exe --target localhost:50051 apply --kind vnet --key vnet-lab `
+  --value '{"vni":9999}'
+
+# Tier 1: eni (references vnet)
+.\bin\dash-sim-client.exe --target localhost:50051 apply --kind eni --key eni-lab `
+  --value '{"vnet":"vnet-lab"}'
+# → accepted
+```
+
+**Object dependency tiers:**
+
+```
+Tier 0 (roots):  vnet, qos, acl_group, route_group, routing_appliance,
+                 prefix_tag, tunnel, meter_policy, outbound_port_map, ha_set
+Tier 1 (→ T0):   eni, acl_rule, route, vnet_mapping, meter_rule, ha_scope
+Tier 2 (→ T0+1): eni_route, acl_in/out, route_rule, meter, ha_scope_config/state
+```
+
+### Tests
+
+```powershell
+# 51 unit tests covering all 25 FK families (100% coverage on core functions)
+& $go test -v -count=1 ./internal/sim/model/ -run TestRefs
+
+# 9 integration tests over gRPC (reject, accept, error quality, fix-then-retry)
+& $go test -v -count=1 ./test/integration/ -run TestIntegration_Refs
+```
+
+See [referential-integrity-validation.md](../../../docs/dashd-features/referential-integrity-validation.md)
+for the full FK map and design.
+
+---
+
 ## 10. Object kinds
 
 ```powershell

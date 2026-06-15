@@ -38,18 +38,30 @@ type row struct {
 
 // Store is the simulator's authoritative in-memory state.
 type Store struct {
-	mu     sync.RWMutex
-	tables map[dashapi.ObjectKind]map[string]*row
-	bus    *events.Bus
-	nextTx atomic.Uint64
+	mu         sync.RWMutex
+	tables     map[dashapi.ObjectKind]map[string]*row
+	bus        *events.Bus
+	nextTx     atomic.Uint64
+	strictRefs bool // when true, Apply checks FK references exist
 }
 
 // New constructs an empty store wired to the provided event bus.
 func New(bus *events.Bus) *Store {
 	return &Store{
-		tables: make(map[dashapi.ObjectKind]map[string]*row),
-		bus:    bus,
+		tables:     make(map[dashapi.ObjectKind]map[string]*row),
+		bus:        bus,
+		strictRefs: true, // default: validate FK references
 	}
+}
+
+// SetStrictRefs controls whether Apply checks FK references before
+// writing. Default is true. Set to false for backward-compat in tests
+// that create objects in arbitrary order, or via --strict-refs=false
+// on the dash-sim CLI.
+func (s *Store) SetStrictRefs(v bool) {
+	s.mu.Lock()
+	s.strictRefs = v
+	s.mu.Unlock()
 }
 
 // TxID returns a fresh monotonic transaction id.
@@ -111,6 +123,15 @@ func (s *Store) Apply(obj *dashapi.Object) (string, dashapi.EventType, error) {
 	clone := proto.Clone(payload)
 
 	s.mu.Lock()
+
+	// FK validation: check that every referenced object exists before writing.
+	if s.strictRefs {
+		if err := s.checkRefs(obj.GetKind(), clone, obj.GetKey()); err != nil {
+			s.mu.Unlock()
+			return "", dashapi.EventType_EVENT_TYPE_UNSPECIFIED, err
+		}
+	}
+
 	tbl, ok := s.tables[obj.GetKind()]
 	if !ok {
 		tbl = make(map[string]*row)

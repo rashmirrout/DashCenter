@@ -404,6 +404,45 @@ Full design + Future Scopes:
 
 ---
 
+## Step 14b — Referential integrity validation
+
+`dash-sim` validates all 25 foreign-key relationships at apply time
+(enabled by default via `--strict-refs`). Wrong references are rejected
+immediately with an actionable error message.
+
+**Wrong config — ENI with a typo'd vnet name:**
+
+```powershell
+# "vnet-bllue" doesn't exist in the store
+& $c --target $sim1 apply --kind eni --key eni-bad --value '{"vnet":"vnet-bllue"}'
+```
+
+The Ack comes back with `Accepted: false` and the error:
+```
+referential integrity: eni references vnet "vnet-bllue" (field vnet)
+which does not exist; create it first
+```
+
+**Right config — create objects in tier order:**
+
+```powershell
+# Tier 0: vnet first (no dependencies)
+& $c --target $sim1 apply --kind vnet --key vnet-lab --value '{"vni":9999}'
+
+# Tier 1: eni references vnet (now exists)
+& $c --target $sim1 apply --kind eni --key eni-lab --value '{"vnet":"vnet-lab"}'
+# → accepted
+
+# Clean up
+& $c --target $sim1 delete --kind eni --key eni-lab
+& $c --target $sim1 delete --kind vnet --key vnet-lab
+```
+
+> See [referential-integrity-validation.md](../../../docs/dashd-features/referential-integrity-validation.md)
+> for the full FK map and tier ordering.
+
+---
+
 ## Step 15 — Use the admin HTTP endpoints (dash-sim only)
 
 ```powershell

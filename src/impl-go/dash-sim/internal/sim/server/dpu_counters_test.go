@@ -39,6 +39,10 @@ func newTestServer(t *testing.T, deviceID string) (*Server, *model.Store, *count
 	t.Helper()
 	bus := events.New()
 	store := model.New(bus)
+	// Disable strict FK refs for counter tests — they create objects in
+	// arbitrary order to exercise counter logic, not FK validation.
+	// FK validation is covered by model/refs_test.go.
+	store.SetStrictRefs(false)
 	reg := counters.New()
 	fi := faults.New()
 	srv := New(store, bus, fi, reg).WithDeviceID(deviceID)

@@ -35,10 +35,12 @@ func main() {
 	deviceID := flag.String("device-id", "dpu-sim-01", "synthetic device identifier")
 	scenarioPath := flag.String("scenario", "", "optional path to a YAML scenario to preload")
 	tickInterval := flag.Duration("tick-interval", time.Second, "counter tick interval")
+	strictRefs := flag.Bool("strict-refs", true, "validate FK references on Apply (set false for legacy compatibility)")
 	flag.Parse()
 
 	bus := events.New()
 	store := model.New(bus)
+	store.SetStrictRefs(*strictRefs)
 	faultInjector := faults.New()
 	counterRegistry := counters.New()
 	svc := server.New(store, bus, faultInjector, counterRegistry).WithDeviceID(*deviceID)
