@@ -1,0 +1,128 @@
+# 00-vnets.yaml - 30 VNets
+# 10 tenant-prod + 10 tenant-staging + 5 shared
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: bank-prod, labels: { tenant: bank, env: prod } }
+spec: { vni: 1001 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: bank-staging, labels: { tenant: bank, env: staging } }
+spec: { vni: 1002 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: retail-prod, labels: { tenant: retail, env: prod } }
+spec: { vni: 1003 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: retail-staging, labels: { tenant: retail, env: staging } }
+spec: { vni: 1004 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: media-prod, labels: { tenant: media, env: prod } }
+spec: { vni: 1005 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: media-staging, labels: { tenant: media, env: staging } }
+spec: { vni: 1006 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: iot-prod, labels: { tenant: iot, env: prod } }
+spec: { vni: 1007 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: iot-staging, labels: { tenant: iot, env: staging } }
+spec: { vni: 1008 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: analytics-prod, labels: { tenant: analytics, env: prod } }
+spec: { vni: 1009 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: analytics-staging, labels: { tenant: analytics, env: staging } }
+spec: { vni: 1010 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: telecom-prod, labels: { tenant: telecom, env: prod } }
+spec: { vni: 1011 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: telecom-staging, labels: { tenant: telecom, env: staging } }
+spec: { vni: 1012 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: health-prod, labels: { tenant: health, env: prod } }
+spec: { vni: 1013 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: health-staging, labels: { tenant: health, env: staging } }
+spec: { vni: 1014 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: fintech-prod, labels: { tenant: fintech, env: prod } }
+spec: { vni: 1015 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: fintech-staging, labels: { tenant: fintech, env: staging } }
+spec: { vni: 1016 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: gaming-prod, labels: { tenant: gaming, env: prod } }
+spec: { vni: 1017 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: gaming-staging, labels: { tenant: gaming, env: staging } }
+spec: { vni: 1018 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: logistics-prod, labels: { tenant: logistics, env: prod } }
+spec: { vni: 1019 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: logistics-staging, labels: { tenant: logistics, env: staging } }
+spec: { vni: 1020 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: vnet-mgmt, labels: { shared: "true", role: mgmt } }
+spec: { vni: 2001 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: vnet-monitoring, labels: { shared: "true", role: monitoring } }
+spec: { vni: 2002 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: vnet-backup, labels: { shared: "true", role: backup } }
+spec: { vni: 2003 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: vnet-shared-svc, labels: { shared: "true", role: shared-svc } }
+spec: { vni: 2004 }
+---
+apiVersion: dashcenter.v1
+kind: Vnet
+metadata: { name: vnet-dmz, labels: { shared: "true", role: dmz } }
+spec: { vni: 2005 }
+

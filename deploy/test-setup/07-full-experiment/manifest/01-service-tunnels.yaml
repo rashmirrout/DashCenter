@@ -1,0 +1,27 @@
+# 01-service-tunnels.yaml - 5 service tunnels
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-internet-egress, labels: { type: tunnel } }
+spec: { local_underlay_ip: "10.0.0.1", remote_underlay_ip: "10.0.0.2", vni: 9001 }
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-dc-west-east, labels: { type: tunnel } }
+spec: { local_underlay_ip: "10.0.0.3", remote_underlay_ip: "10.0.0.4", vni: 9002 }
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-backup-link, labels: { type: tunnel } }
+spec: { local_underlay_ip: "10.0.0.5", remote_underlay_ip: "10.0.0.6", vni: 9003 }
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-monitoring, labels: { type: tunnel } }
+spec: { local_underlay_ip: "10.0.0.7", remote_underlay_ip: "10.0.0.8", vni: 9004 }
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-mgmt-vpn, labels: { type: tunnel } }
+spec: { local_underlay_ip: "10.0.0.9", remote_underlay_ip: "10.0.0.10", vni: 9005 }
+

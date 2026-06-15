@@ -1,0 +1,30 @@
+{
+  "_comment": "JSON equivalent of fleet.example.yaml. Use this form if you do not want a YAML parser dependency (PowerShell-Yaml on PS 5.1, or yq on bash). Resolution order: see fleet.example.yaml.",
+  "apiVersion": "dashcenter.io/test-setup/v1",
+  "kind": "FleetConfig",
+  "metadata": { "name": "dev-fleet" },
+
+  "defaults": {
+    "scenario":     "scenarios/dpu-base.yaml",
+    "imageTag":     "dev",
+    "bindHost":     "127.0.0.1",
+    "network":      "dashcenter-fleet",
+    "tickInterval": "1s"
+  },
+
+  "dpus": [
+    { "deviceId": "dpu-sim-01", "grpcPort": 50051, "adminPort": 8081 },
+    { "deviceId": "dpu-sim-02", "grpcPort": 50052, "adminPort": 8082 },
+    { "deviceId": "dpu-sim-03", "grpcPort": 50053, "adminPort": 8083 }
+  ],
+
+  "adapter": {
+    "enabled":  true,
+    "grpcPort": 52051,
+    "redis": {
+      "mode":     "embedded",
+      "hostPort": 6379,
+      "address":  "localhost:6379"
+    }
+  }
+}

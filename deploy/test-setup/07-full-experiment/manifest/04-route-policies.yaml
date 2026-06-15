@@ -1,0 +1,172 @@
+# 04-route-policies.yaml - 18 RoutePolicies
+# 10 tenant + 1 shared-mgmt + 1 shared-dmz + 5 per-tier + 1 platform-default
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-bank-prod, labels: { tenant: bank, scope: tenant } }
+spec:
+  eni_names: [eni-bank-web-01, eni-bank-api-01, eni-bank-db-01, eni-bank-cache-01, eni-bank-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: bank-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: bank-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-retail-prod, labels: { tenant: retail, scope: tenant } }
+spec:
+  eni_names: [eni-retail-web-01, eni-retail-api-01, eni-retail-db-01, eni-retail-cache-01, eni-retail-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: retail-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: retail-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-media-prod, labels: { tenant: media, scope: tenant } }
+spec:
+  eni_names: [eni-media-web-01, eni-media-api-01, eni-media-db-01, eni-media-cache-01, eni-media-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: media-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: media-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-iot-prod, labels: { tenant: iot, scope: tenant } }
+spec:
+  eni_names: [eni-iot-web-01, eni-iot-api-01, eni-iot-db-01, eni-iot-cache-01, eni-iot-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: iot-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: iot-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-analytics-prod, labels: { tenant: analytics, scope: tenant } }
+spec:
+  eni_names: [eni-analytics-web-01, eni-analytics-api-01, eni-analytics-db-01, eni-analytics-cache-01, eni-analytics-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: analytics-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: analytics-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-telecom-prod, labels: { tenant: telecom, scope: tenant } }
+spec:
+  eni_names: [eni-telecom-web-01, eni-telecom-api-01, eni-telecom-db-01, eni-telecom-cache-01, eni-telecom-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: telecom-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: telecom-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-health-prod, labels: { tenant: health, scope: tenant } }
+spec:
+  eni_names: [eni-health-web-01, eni-health-api-01, eni-health-db-01, eni-health-cache-01, eni-health-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: health-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: health-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-fintech-prod, labels: { tenant: fintech, scope: tenant } }
+spec:
+  eni_names: [eni-fintech-web-01, eni-fintech-api-01, eni-fintech-db-01, eni-fintech-cache-01, eni-fintech-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: fintech-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: fintech-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-gaming-prod, labels: { tenant: gaming, scope: tenant } }
+spec:
+  eni_names: [eni-gaming-web-01, eni-gaming-api-01, eni-gaming-db-01, eni-gaming-cache-01, eni-gaming-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: gaming-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: gaming-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-logistics-prod, labels: { tenant: logistics, scope: tenant } }
+spec:
+  eni_names: [eni-logistics-web-01, eni-logistics-api-01, eni-logistics-db-01, eni-logistics-cache-01, eni-logistics-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: vnet, next_hop_target: logistics-prod, metric: 10 }
+    - { prefix: "172.16.0.0/12", next_hop_type: service_tunnel, next_hop_target: st-dc-west-east, metric: 50 }
+    - { prefix: "192.168.0.0/16", next_hop_type: vnet, next_hop_target: logistics-prod, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-platform-mgmt, labels: { shared: "true", scope: platform } }
+spec:
+  eni_names: [eni-mgmt-01, eni-mgmt-02, eni-mgmt-03, eni-mgmt-04, eni-mgmt-05, eni-mgmt-06, eni-mgmt-07, eni-mgmt-08, eni-mgmt-09, eni-mgmt-10, eni-mgmt-11, eni-mgmt-12, eni-mgmt-13, eni-mgmt-14, eni-mgmt-15, eni-mgmt-16, eni-mgmt-17, eni-mgmt-18, eni-mgmt-19, eni-mgmt-20, eni-mgmt-21, eni-mgmt-22, eni-mgmt-23, eni-mgmt-24, eni-mgmt-25, eni-mgmt-26, eni-mgmt-27, eni-mgmt-28, eni-mgmt-29, eni-mgmt-30, eni-mgmt-31, eni-mgmt-32, eni-mgmt-33, eni-mgmt-34, eni-mgmt-35, eni-mgmt-36, eni-mgmt-37, eni-mgmt-38, eni-mgmt-39, eni-mgmt-40, eni-mgmt-41, eni-mgmt-42, eni-mgmt-43, eni-mgmt-44, eni-mgmt-45, eni-mgmt-46, eni-mgmt-47, eni-mgmt-48, eni-mgmt-49, eni-mgmt-50]
+  routes:
+    - { prefix: "10.10.0.0/16", next_hop_type: vnet, next_hop_target: vnet-mgmt, metric: 10 }
+    - { prefix: "10.20.0.0/16", next_hop_type: vnet, next_hop_target: vnet-monitoring, metric: 20 }
+    - { prefix: "0.0.0.0/0", next_hop_type: drop, metric: 1000 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-platform-dmz, labels: { shared: "true", scope: platform } }
+spec:
+  eni_names: [eni-dmz-01, eni-dmz-02, eni-dmz-03, eni-dmz-04, eni-dmz-05, eni-dmz-06, eni-dmz-07, eni-dmz-08, eni-dmz-09, eni-dmz-10, eni-dmz-11, eni-dmz-12, eni-dmz-13, eni-dmz-14, eni-dmz-15, eni-dmz-16, eni-dmz-17, eni-dmz-18, eni-dmz-19, eni-dmz-20]
+  routes:
+    - { prefix: "172.16.0.0/12", next_hop_type: vnet, next_hop_target: vnet-dmz, metric: 10 }
+    - { prefix: "0.0.0.0/0", next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 100 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-tier-web, labels: { tier: web, scope: tier } }
+spec:
+  eni_names: [eni-bank-web-01, eni-retail-web-01, eni-media-web-01, eni-iot-web-01, eni-analytics-web-01, eni-telecom-web-01, eni-health-web-01, eni-fintech-web-01, eni-gaming-web-01, eni-logistics-web-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: direct, metric: 5 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-tier-api, labels: { tier: api, scope: tier } }
+spec:
+  eni_names: [eni-bank-api-01, eni-retail-api-01, eni-media-api-01, eni-iot-api-01, eni-analytics-api-01, eni-telecom-api-01, eni-health-api-01, eni-fintech-api-01, eni-gaming-api-01, eni-logistics-api-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: direct, metric: 5 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-tier-db, labels: { tier: db, scope: tier } }
+spec:
+  eni_names: [eni-bank-db-01, eni-retail-db-01, eni-media-db-01, eni-iot-db-01, eni-analytics-db-01, eni-telecom-db-01, eni-health-db-01, eni-fintech-db-01, eni-gaming-db-01, eni-logistics-db-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: direct, metric: 5 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-tier-cache, labels: { tier: cache, scope: tier } }
+spec:
+  eni_names: [eni-bank-cache-01, eni-retail-cache-01, eni-media-cache-01, eni-iot-cache-01, eni-analytics-cache-01, eni-telecom-cache-01, eni-health-cache-01, eni-fintech-cache-01, eni-gaming-cache-01, eni-logistics-cache-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: direct, metric: 5 }
+---
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-tier-worker, labels: { tier: worker, scope: tier } }
+spec:
+  eni_names: [eni-bank-worker-01, eni-retail-worker-01, eni-media-worker-01, eni-iot-worker-01, eni-analytics-worker-01, eni-telecom-worker-01, eni-health-worker-01, eni-fintech-worker-01, eni-gaming-worker-01, eni-logistics-worker-01]
+  routes:
+    - { prefix: "10.0.0.0/8", next_hop_type: direct, metric: 5 }
+

@@ -1,0 +1,396 @@
+# 05-acl-policies.yaml - 32 AclPolicies
+# 10 tenant-in + 10 tenant-out + 2 platform + 5 tier-specific + 5 staging-restricted
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-bank-inbound, labels: { tenant: bank, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-bank-web-01, eni-bank-api-01, eni-bank-db-01, eni-bank-cache-01, eni-bank-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-bank-outbound, labels: { tenant: bank, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-bank-web-01, eni-bank-api-01, eni-bank-db-01, eni-bank-cache-01, eni-bank-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-retail-inbound, labels: { tenant: retail, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-retail-web-01, eni-retail-api-01, eni-retail-db-01, eni-retail-cache-01, eni-retail-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-retail-outbound, labels: { tenant: retail, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-retail-web-01, eni-retail-api-01, eni-retail-db-01, eni-retail-cache-01, eni-retail-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-media-inbound, labels: { tenant: media, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-media-web-01, eni-media-api-01, eni-media-db-01, eni-media-cache-01, eni-media-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-media-outbound, labels: { tenant: media, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-media-web-01, eni-media-api-01, eni-media-db-01, eni-media-cache-01, eni-media-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-iot-inbound, labels: { tenant: iot, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-iot-web-01, eni-iot-api-01, eni-iot-db-01, eni-iot-cache-01, eni-iot-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-iot-outbound, labels: { tenant: iot, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-iot-web-01, eni-iot-api-01, eni-iot-db-01, eni-iot-cache-01, eni-iot-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-analytics-inbound, labels: { tenant: analytics, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-analytics-web-01, eni-analytics-api-01, eni-analytics-db-01, eni-analytics-cache-01, eni-analytics-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-analytics-outbound, labels: { tenant: analytics, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-analytics-web-01, eni-analytics-api-01, eni-analytics-db-01, eni-analytics-cache-01, eni-analytics-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-telecom-inbound, labels: { tenant: telecom, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-telecom-web-01, eni-telecom-api-01, eni-telecom-db-01, eni-telecom-cache-01, eni-telecom-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-telecom-outbound, labels: { tenant: telecom, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-telecom-web-01, eni-telecom-api-01, eni-telecom-db-01, eni-telecom-cache-01, eni-telecom-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-health-inbound, labels: { tenant: health, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-health-web-01, eni-health-api-01, eni-health-db-01, eni-health-cache-01, eni-health-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-health-outbound, labels: { tenant: health, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-health-web-01, eni-health-api-01, eni-health-db-01, eni-health-cache-01, eni-health-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-fintech-inbound, labels: { tenant: fintech, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-fintech-web-01, eni-fintech-api-01, eni-fintech-db-01, eni-fintech-cache-01, eni-fintech-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-fintech-outbound, labels: { tenant: fintech, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-fintech-web-01, eni-fintech-api-01, eni-fintech-db-01, eni-fintech-cache-01, eni-fintech-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-gaming-inbound, labels: { tenant: gaming, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-gaming-web-01, eni-gaming-api-01, eni-gaming-db-01, eni-gaming-cache-01, eni-gaming-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-gaming-outbound, labels: { tenant: gaming, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-gaming-web-01, eni-gaming-api-01, eni-gaming-db-01, eni-gaming-cache-01, eni-gaming-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-logistics-inbound, labels: { tenant: logistics, direction: inbound } }
+spec:
+  stage: inbound
+  priority: 100
+  eni_names: [eni-logistics-web-01, eni-logistics-api-01, eni-logistics-db-01, eni-logistics-cache-01, eni-logistics-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
+    - { priority: 300, action: allow, protocol: icmp }
+    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-logistics-outbound, labels: { tenant: logistics, direction: outbound } }
+spec:
+  stage: outbound
+  priority: 100
+  eni_names: [eni-logistics-web-01, eni-logistics-api-01, eni-logistics-db-01, eni-logistics-cache-01, eni-logistics-worker-01]
+  rules:
+    - { priority: 100, action: allow }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-platform-ssh, labels: { shared: "true", scope: platform } }
+spec:
+  stage: inbound
+  priority: 50
+  eni_names: [eni-mgmt-01, eni-mgmt-02, eni-mgmt-03, eni-mgmt-04, eni-mgmt-05, eni-mgmt-06, eni-mgmt-07, eni-mgmt-08, eni-mgmt-09, eni-mgmt-10, eni-mgmt-11, eni-mgmt-12, eni-mgmt-13, eni-mgmt-14, eni-mgmt-15, eni-mgmt-16, eni-mgmt-17, eni-mgmt-18, eni-mgmt-19, eni-mgmt-20, eni-mgmt-21, eni-mgmt-22, eni-mgmt-23, eni-mgmt-24, eni-mgmt-25, eni-mgmt-26, eni-mgmt-27, eni-mgmt-28, eni-mgmt-29, eni-mgmt-30, eni-mgmt-31, eni-mgmt-32, eni-mgmt-33, eni-mgmt-34, eni-mgmt-35, eni-mgmt-36, eni-mgmt-37, eni-mgmt-38, eni-mgmt-39, eni-mgmt-40, eni-mgmt-41, eni-mgmt-42, eni-mgmt-43, eni-mgmt-44, eni-mgmt-45, eni-mgmt-46, eni-mgmt-47, eni-mgmt-48, eni-mgmt-49, eni-mgmt-50]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.10.0.0/16", dst_port: "22", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.10.0.0/16", dst_port: "2222", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-platform-monitor, labels: { shared: "true", scope: platform } }
+spec:
+  stage: inbound
+  priority: 60
+  eni_names: [eni-mgmt-01, eni-mgmt-02, eni-mgmt-03, eni-mgmt-04, eni-mgmt-05, eni-mgmt-06, eni-mgmt-07, eni-mgmt-08, eni-mgmt-09, eni-mgmt-10, eni-mgmt-11, eni-mgmt-12, eni-mgmt-13, eni-mgmt-14, eni-mgmt-15, eni-mgmt-16, eni-mgmt-17, eni-mgmt-18, eni-mgmt-19, eni-mgmt-20, eni-mgmt-21, eni-mgmt-22, eni-mgmt-23, eni-mgmt-24, eni-mgmt-25, eni-mgmt-26, eni-mgmt-27, eni-mgmt-28, eni-mgmt-29, eni-mgmt-30, eni-mgmt-31, eni-mgmt-32, eni-mgmt-33, eni-mgmt-34, eni-mgmt-35, eni-mgmt-36, eni-mgmt-37, eni-mgmt-38, eni-mgmt-39, eni-mgmt-40, eni-mgmt-41, eni-mgmt-42, eni-mgmt-43, eni-mgmt-44, eni-mgmt-45, eni-mgmt-46, eni-mgmt-47, eni-mgmt-48, eni-mgmt-49, eni-mgmt-50]
+  rules:
+    - { priority: 100, action: allow, dst_port: "161", protocol: udp }
+    - { priority: 200, action: allow, protocol: icmp }
+    - { priority: 300, action: allow, src_prefix: "10.20.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 400, action: allow, src_prefix: "10.20.0.0/16", dst_port: "9100", protocol: tcp }
+
+
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-tier-web, labels: { tier: web, scope: tier } }
+spec:
+  stage: inbound
+  priority: 200
+  eni_names: [eni-bank-web-01, eni-retail-web-01, eni-media-web-01, eni-iot-web-01, eni-analytics-web-01, eni-telecom-web-01, eni-health-web-01, eni-fintech-web-01, eni-gaming-web-01, eni-logistics-web-01]
+  rules:
+    - { priority: 100, action: allow, dst_port: "80", protocol: tcp }
+    - { priority: 110, action: allow, dst_port: "443", protocol: tcp }
+    - { priority: 120, action: allow, dst_port: "8080-8089", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-tier-api, labels: { tier: api, scope: tier } }
+spec:
+  stage: inbound
+  priority: 200
+  eni_names: [eni-bank-api-01, eni-retail-api-01, eni-media-api-01, eni-iot-api-01, eni-analytics-api-01, eni-telecom-api-01, eni-health-api-01, eni-fintech-api-01, eni-gaming-api-01, eni-logistics-api-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "192.168.0.0/16", dst_port: "8443", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "9443", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-tier-db, labels: { tier: db, scope: tier } }
+spec:
+  stage: inbound
+  priority: 200
+  eni_names: [eni-bank-db-01, eni-retail-db-01, eni-media-db-01, eni-iot-db-01, eni-analytics-db-01, eni-telecom-db-01, eni-health-db-01, eni-fintech-db-01, eni-gaming-db-01, eni-logistics-db-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "192.168.0.0/16", dst_port: "5432", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "192.168.0.0/16", dst_port: "3306", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-tier-cache, labels: { tier: cache, scope: tier } }
+spec:
+  stage: inbound
+  priority: 200
+  eni_names: [eni-bank-cache-01, eni-retail-cache-01, eni-media-cache-01, eni-iot-cache-01, eni-analytics-cache-01, eni-telecom-cache-01, eni-health-cache-01, eni-fintech-cache-01, eni-gaming-cache-01, eni-logistics-cache-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "192.168.0.0/16", dst_port: "6379", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "192.168.0.0/16", dst_port: "11211", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-tier-worker, labels: { tier: worker, scope: tier } }
+spec:
+  stage: inbound
+  priority: 200
+  eni_names: [eni-bank-worker-01, eni-retail-worker-01, eni-media-worker-01, eni-iot-worker-01, eni-analytics-worker-01, eni-telecom-worker-01, eni-health-worker-01, eni-fintech-worker-01, eni-gaming-worker-01, eni-logistics-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "9092", protocol: tcp }
+    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "5672", protocol: tcp }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-bank-staging-restricted, labels: { tenant: bank, env: staging, scope: staging } }
+spec:
+  stage: inbound
+  priority: 300
+  eni_names: [eni-bank-web-01, eni-bank-api-01, eni-bank-db-01, eni-bank-cache-01, eni-bank-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-retail-staging-restricted, labels: { tenant: retail, env: staging, scope: staging } }
+spec:
+  stage: inbound
+  priority: 300
+  eni_names: [eni-retail-web-01, eni-retail-api-01, eni-retail-db-01, eni-retail-cache-01, eni-retail-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-media-staging-restricted, labels: { tenant: media, env: staging, scope: staging } }
+spec:
+  stage: inbound
+  priority: 300
+  eni_names: [eni-media-web-01, eni-media-api-01, eni-media-db-01, eni-media-cache-01, eni-media-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-iot-staging-restricted, labels: { tenant: iot, env: staging, scope: staging } }
+spec:
+  stage: inbound
+  priority: 300
+  eni_names: [eni-iot-web-01, eni-iot-api-01, eni-iot-db-01, eni-iot-cache-01, eni-iot-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 1000, action: deny }
+---
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-analytics-staging-restricted, labels: { tenant: analytics, env: staging, scope: staging } }
+spec:
+  stage: inbound
+  priority: 300
+  eni_names: [eni-analytics-web-01, eni-analytics-api-01, eni-analytics-db-01, eni-analytics-cache-01, eni-analytics-worker-01]
+  rules:
+    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 1000, action: deny }
+

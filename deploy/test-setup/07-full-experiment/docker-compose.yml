@@ -1,0 +1,577 @@
+# DashCenter — Full Experiment: 50 DPU sims + 3 HA dashd + 2-node etcd cluster + Web Console
+#
+# This is the at-scale topology for experiments and stress testing.
+# 50 simulated DPUs across 25 appliances (2 DPUs per appliance),
+# 3 HA controllers with etcd-elected leadership, 2-node etcd cluster
+# for redundancy, and the dashw web console.
+#
+# ONE COMMAND:
+#   docker compose up -d --build
+#
+# THEN OPEN:
+#   http://localhost:3000
+#
+# TEAR DOWN:
+#   docker compose down -v
+
+name: dashcenter-experiment
+
+networks:
+  dc-exp-net:
+    driver: bridge
+
+volumes:
+  etcd-data-1:
+  etcd-data-2:
+
+services:
+
+  # ── 2-node etcd cluster (redundant state store) ────────────────
+  etcd-1:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: dc-exp-etcd-1
+    command:
+      - etcd
+      - --name=etcd-1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd-1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd-1:2380
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd-data-1:/etcd-data
+    networks: [dc-exp-net]
+    ports: ["12379:2379"]
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  etcd-2:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: dc-exp-etcd-2
+    command:
+      - etcd
+      - --name=etcd-2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd-2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd-2:2380
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd-data-2:/etcd-data
+    networks: [dc-exp-net]
+    ports: ["12380:2379"]
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── 50 DPU Simulators ──────────────────────────────────────────
+  dash-sim-01:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-01
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-01"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-02:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-02
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-02"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-03:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-03
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-03"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-04:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-04
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-04"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-05:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-05
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-05"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-06:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-06
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-06"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-07:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-07
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-07"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-08:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-08
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-08"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-09:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-09
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-09"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-10:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-10
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-10"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-11:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-11
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-11"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-12:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-12
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-12"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-13:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-13
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-13"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-14:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-14
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-14"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-15:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-15
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-15"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-16:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-16
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-16"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-17:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-17
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-17"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-18:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-18
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-18"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-19:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-19
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-19"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-20:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-20
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-20"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-21:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-21
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-21"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-22:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-22
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-22"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-23:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-23
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-23"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-24:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-24
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-24"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-25:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-25
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-25"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-26:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-26
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-26"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-27:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-27
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-27"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-28:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-28
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-28"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-29:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-29
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-29"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-30:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-30
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-30"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-31:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-31
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-31"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-32:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-32
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-32"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-33:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-33
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-33"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-34:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-34
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-34"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-35:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-35
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-35"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-36:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-36
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-36"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-37:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-37
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-37"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-38:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-38
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-38"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-39:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-39
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-39"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-40:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-40
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-40"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-41:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-41
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-41"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-42:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-42
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-42"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-43:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-43
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-43"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-44:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-44
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-44"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-45:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-45
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-45"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-46:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-46
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-46"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-47:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-47
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-47"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-48:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-48
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-48"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-49:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-49
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-49"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+  dash-sim-50:
+    build: { context: ../../.., dockerfile: src/impl-go/dash-sim/Dockerfile }
+    image: dashcenter/dash-sim:dev
+    container_name: dc-exp-sim-50
+    command: ["--grpc-listen", ":50051", "--admin-listen", ":8080", "--device-id", "dpu-sim-50"]
+    networks: [dc-exp-net]
+    restart: unless-stopped
+
+
+  # ── 3 dashd Controllers (HA, etcd-elected) ─────────────────────
+  dashd-1:
+    build: { context: ../../.., dockerfile: src/impl-go/dashd/Dockerfile }
+    image: dashcenter/dashd:dev
+    container_name: dc-exp-dashd-1
+    depends_on:
+      etcd-1: { condition: service_healthy }
+      etcd-2: { condition: service_healthy }
+      dash-sim-01: { condition: service_started }
+      dash-sim-02: { condition: service_started }
+      dash-sim-03: { condition: service_started }
+      dash-sim-04: { condition: service_started }
+      dash-sim-05: { condition: service_started }
+      dash-sim-06: { condition: service_started }
+      dash-sim-07: { condition: service_started }
+      dash-sim-08: { condition: service_started }
+      dash-sim-09: { condition: service_started }
+      dash-sim-10: { condition: service_started }
+      dash-sim-11: { condition: service_started }
+      dash-sim-12: { condition: service_started }
+      dash-sim-13: { condition: service_started }
+      dash-sim-14: { condition: service_started }
+      dash-sim-15: { condition: service_started }
+      dash-sim-16: { condition: service_started }
+      dash-sim-17: { condition: service_started }
+      dash-sim-18: { condition: service_started }
+      dash-sim-19: { condition: service_started }
+      dash-sim-20: { condition: service_started }
+      dash-sim-21: { condition: service_started }
+      dash-sim-22: { condition: service_started }
+      dash-sim-23: { condition: service_started }
+      dash-sim-24: { condition: service_started }
+      dash-sim-25: { condition: service_started }
+      dash-sim-26: { condition: service_started }
+      dash-sim-27: { condition: service_started }
+      dash-sim-28: { condition: service_started }
+      dash-sim-29: { condition: service_started }
+      dash-sim-30: { condition: service_started }
+      dash-sim-31: { condition: service_started }
+      dash-sim-32: { condition: service_started }
+      dash-sim-33: { condition: service_started }
+      dash-sim-34: { condition: service_started }
+      dash-sim-35: { condition: service_started }
+      dash-sim-36: { condition: service_started }
+      dash-sim-37: { condition: service_started }
+      dash-sim-38: { condition: service_started }
+      dash-sim-39: { condition: service_started }
+      dash-sim-40: { condition: service_started }
+      dash-sim-41: { condition: service_started }
+      dash-sim-42: { condition: service_started }
+      dash-sim-43: { condition: service_started }
+      dash-sim-44: { condition: service_started }
+      dash-sim-45: { condition: service_started }
+      dash-sim-46: { condition: service_started }
+      dash-sim-47: { condition: service_started }
+      dash-sim-48: { condition: service_started }
+      dash-sim-49: { condition: service_started }
+      dash-sim-50: { condition: service_started }
+    volumes:
+      - ./configs/dashd-1.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+    networks: [dc-exp-net]
+    ports:
+      - "28443:8443"
+      - "29443:9443"
+      - "27443:7443"
+    restart: unless-stopped
+
+  dashd-2:
+    build: { context: ../../.., dockerfile: src/impl-go/dashd/Dockerfile }
+    image: dashcenter/dashd:dev
+    container_name: dc-exp-dashd-2
+    depends_on:
+      etcd-1: { condition: service_healthy }
+      etcd-2: { condition: service_healthy }
+      dash-sim-01: { condition: service_started }
+      dash-sim-50: { condition: service_started }
+    volumes:
+      - ./configs/dashd-2.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+    networks: [dc-exp-net]
+    ports:
+      - "28453:8443"
+      - "29453:9443"
+      - "27453:7443"
+    restart: unless-stopped
+
+  dashd-3:
+    build: { context: ../../.., dockerfile: src/impl-go/dashd/Dockerfile }
+    image: dashcenter/dashd:dev
+    container_name: dc-exp-dashd-3
+    depends_on:
+      etcd-1: { condition: service_healthy }
+      etcd-2: { condition: service_healthy }
+      dash-sim-01: { condition: service_started }
+      dash-sim-50: { condition: service_started }
+    volumes:
+      - ./configs/dashd-3.yaml:/etc/dashd/dashd.yaml:ro
+      - ./configs/inventory.yaml:/etc/dashd/inventory.yaml:ro
+    networks: [dc-exp-net]
+    ports:
+      - "28463:8443"
+      - "29463:9443"
+      - "27463:7443"
+    restart: unless-stopped
+
+  # ── Web Console (BFF + SPA) ─────────────────────────────────────
+  dashw:
+    build: { context: ../../.., dockerfile: src/impl-go/console/Dockerfile }
+    image: dashcenter/dashw:dev
+    container_name: dc-exp-dashw
+    depends_on:
+      dashd-1: { condition: service_started }
+      dashd-2: { condition: service_started }
+      dashd-3: { condition: service_started }
+    environment:
+      DASHD_REST_ADDR: http://dashd-1:8443
+      DASHD_GRPC_ADDR: dashd-1:9443
+      DASHD_ADMIN_ADDR: http://dashd-1:7443
+      DASHD_CLUSTER_ADDRS: "http://dashd-1:7443,http://dashd-2:7443,http://dashd-3:7443"
+      DASHW_LISTEN: ":3000"
+      DASHW_CORS: "true"
+      DASHW_LOG_LEVEL: info
+    networks: [dc-exp-net]
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # ── One-shot CLI (optional) ─────────────────────────────────────
+  dashctl:
+    build: { context: ../../.., dockerfile: src/impl-go/dashctl/Dockerfile }
+    image: dashcenter/dashctl:dev
+    profiles: [cli]
+    networks: [dc-exp-net]
+    volumes:
+      - ./manifest:/etc/dashd/manifest:ro
+    entrypoint:
+      - dashctl
+      - --endpoint
+      - http://dashd-1:8443
+      - --admin-endpoint
+      - http://dashd-1:7443
+      - --insecure
+    environment:
+      DASHCTL_ENDPOINT: http://dashd-1:8443
+      DASHCTL_ADMIN_ENDPOINT: http://dashd-1:7443
+      DASHCTL_INSECURE: "true"
