@@ -125,7 +125,7 @@ apiVersion: dashcenter.v1
 kind: RoutePolicy
 metadata: { name: rp-platform-dmz, labels: { shared: "true", scope: platform } }
 spec:
-  eni_names: [eni-dmz-01, eni-dmz-02, eni-dmz-03, eni-dmz-04, eni-dmz-05, eni-dmz-06, eni-dmz-07, eni-dmz-08, eni-dmz-09, eni-dmz-10, eni-dmz-11, eni-dmz-12, eni-dmz-13, eni-dmz-14, eni-dmz-15, eni-dmz-16, eni-dmz-17, eni-dmz-18, eni-dmz-19, eni-dmz-20]
+  eni_names: [eni-dmz-01, eni-dmz-02, eni-dmz-06, eni-dmz-07, eni-dmz-11, eni-dmz-12, eni-dmz-16, eni-dmz-17, eni-dmz-21, eni-dmz-22, eni-dmz-26, eni-dmz-27, eni-dmz-31, eni-dmz-32, eni-dmz-36, eni-dmz-37, eni-dmz-41, eni-dmz-42, eni-dmz-46, eni-dmz-47]
   routes:
     - { prefix: "172.16.0.0/12", next_hop_type: vnet, next_hop_target: vnet-dmz, metric: 10 }
     - { prefix: "0.0.0.0/0", next_hop_type: service_tunnel, next_hop_target: st-internet-egress, metric: 100 }
