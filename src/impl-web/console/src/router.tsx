@@ -4,6 +4,7 @@ import App from './App';
 import { ErrorBoundary } from '@/components/feedback/ErrorBoundary';
 
 /* ── Lazy-loaded views ─────────────────────────────────────── */
+const HomeView = lazy(() => import('./views/home/HomeView'));
 const DashboardView = lazy(() => import('./views/dashboard/DashboardView'));
 const FleetView = lazy(() => import('./views/fleet/FleetView'));
 const DpuView = lazy(() => import('./views/dpu/DpuView'));
@@ -68,7 +69,8 @@ export const router = createBrowserRouter([
     path: '/',
     element: <App />,
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
+      { index: true, element: <Navigate to="/home" replace /> },
+      { path: 'home', element: <ViewLoader name="Home"><HomeView /></ViewLoader> },
       { path: 'dashboard', element: <ViewLoader name="Dashboard"><DashboardView /></ViewLoader> },
       { path: 'fleet', element: <ViewLoader name="Fleet"><FleetView /></ViewLoader> },
       { path: 'topology', element: <ViewLoader name="Topology"><TopologyDashboardView /></ViewLoader> },
@@ -102,7 +104,7 @@ export const router = createBrowserRouter([
       { path: 'admin-ops', element: <Navigate to="/admin" replace /> },
       { path: 'command', element: <Navigate to="/commands" replace /> },
       /* 404 fallback */
-      { path: '*', element: <Navigate to="/dashboard" replace /> },
+      { path: '*', element: <Navigate to="/home" replace /> },
     ],
   },
 ]);

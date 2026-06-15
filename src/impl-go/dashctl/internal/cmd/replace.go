@@ -25,7 +25,7 @@ func (a *Application) newReplaceCmd() *cobra.Command {
 					return errors.Newf(errors.CodeInvalidArgument, "replace: %s/%s missing metadata.generation (use `dashctl apply` for create)", e.Kind, e.Metadata.Name)
 				}
 			}
-			return a.runApply(cmd.Context(), envs, "none")
+			return a.runApply(cmd.Context(), envs, "none", true) // replace always forces
 		},
 	}
 	c.Flags().StringArrayVarP(&files, "filename", "f", nil, "manifest file or '-' for stdin")

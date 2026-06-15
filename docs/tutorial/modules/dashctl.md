@@ -37,7 +37,7 @@ configurations.
 
 ```
 dashctl
-├── apply -f <manifest>         create or replace specs
+├── apply -f <manifest>         create or replace specs (--force to overwrite)
 ├── get <kind> [name]           read one or all specs
 ├── describe <kind> <name>      human-readable detail view
 ├── delete <kind> <name>        remove (with orphan protection)
@@ -58,6 +58,23 @@ dashctl
 ├── topology                    cluster topology view
 └── <kind> put|list|delete      typed-kind subgroups (vnet put, eni list, ...)
 ```
+
+### EniBundle — full ENI config in one file
+
+The `EniBundle` kind defines an ENI and its complete dependency chain
+in a single YAML document. It auto-expands into individual specs in
+the correct tier order (vnet → eni → mappings → policies) and
+auto-wires FK references (`eni.vnet_name`, `route_policy.eni_names`).
+
+See [CLI_GUIDE.md §6](../../CLI_GUIDE.md) for the full EniBundle spec
+format and examples.
+
+### Create vs. modify detection
+
+`dashctl apply` checks whether objects already exist:
+- **New** → applied normally (`CREATE`)
+- **Existing** without `--force` → `BLOCKED` with warning
+- **Existing** with `--force` → overwritten (`MODIFY`)
 
 ---
 

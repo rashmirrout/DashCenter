@@ -81,7 +81,13 @@ func TestInventoryDpusFromSpecMalformed(t *testing.T) {
 }
 
 func TestApplyMultiDoc(t *testing.T) {
-	a, _, _ := testApp(t, &fakeClient{})
+	fc := &fakeClient{
+		// Return NotFound so apply treats them as new objects.
+		getFn: func(_ context.Context, _, _, _ string) (*client.StoredItem, error) {
+			return nil, dashErrors.New(dashErrors.CodeNotFound, "not found")
+		},
+	}
+	a, _, _ := testApp(t, fc)
 	a.In = strings.NewReader(`apiVersion: dashcenter.v1
 kind: Vnet
 metadata: { name: v1 }

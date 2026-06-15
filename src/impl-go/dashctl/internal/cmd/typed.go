@@ -69,7 +69,7 @@ func (a *Application) newTypedPutCmd(kindArg string) *cobra.Command {
 					return errors.Newf(errors.CodeInvalidArgument, "%s put: manifest kind %q does not match command", kindArg, e.Kind)
 				}
 			}
-			return a.runApply(cmd.Context(), envs, "none")
+				return a.runApply(cmd.Context(), envs, "none", true) // typed put always forces
 		},
 	}
 	c.Flags().StringArrayVarP(&files, "filename", "f", nil, "manifest file or '-' for stdin")

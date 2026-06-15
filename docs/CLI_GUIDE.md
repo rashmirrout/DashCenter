@@ -155,6 +155,92 @@ ok: target=localhost:50051 vnets=0
 
 ## 6. Apply (create or replace)
 
+### Create vs. modify detection
+
+`dashctl apply` checks whether each object already exists before writing:
+
+- **New objects** → `CREATE` (always applied)
+- **Existing objects** → `BLOCKED` with a warning (not applied)
+- **With `--force`** → `MODIFY` (existing objects overwritten)
+
+```powershell
+# First apply — all new:
+dashctl apply -f manifest/ --insecure
+# vnet/vnet-prod CREATE in namespace default (generation 1)
+# eni/eni-001 CREATE in namespace default (generation 1)
+# Applied 2 object(s): 2 created, 0 modified, 0 blocked, 0 failed
+
+# Second apply — blocked:
+dashctl apply -f manifest/ --insecure
+# vnet/vnet-prod BLOCKED — already exists (generation 1); use --force to overwrite
+# eni/eni-001 BLOCKED — already exists (generation 1); use --force to overwrite
+# WARNING: 2 object(s) already exist and were NOT modified.
+#   To overwrite:  dashctl apply -f <file> --force
+#   To see diff:   dashctl diff -f <file>
+#   To update one: dashctl replace <kind> <name> -f <file>
+
+# With --force — overwrites:
+dashctl apply -f manifest/ --insecure --force
+# vnet/vnet-prod MODIFY in namespace default (generation 2)
+# eni/eni-001 MODIFY in namespace default (generation 2)
+# Applied 2 object(s): 0 created, 2 modified, 0 blocked, 0 failed
+```
+
+### EniBundle — full ENI config in one file
+
+The `EniBundle` kind lets you define an ENI and its entire dependency
+chain in a single YAML document. It auto-expands into individual specs
+in the correct tier order:
+
+```yaml
+apiVersion: dashcenter.v1
+kind: EniBundle
+metadata:
+  name: eni-web-01
+  namespace: default
+  labels: { tenant: bank, tier: web }
+spec:
+  vnet:                              # Tier 0
+    name: bank-prod-web
+    vni: 1001
+  eni:                               # Tier 1 (auto-wires vnet_name)
+    mac_address: aa:bb:cc:01:00:01
+    underlay_ip: 10.0.1.11
+    admin_state: up
+    placement_hint_dpu_ids: [dpu-sim-01]
+  vnet_mappings:                     # Tier 1 (auto-wires vnet_name)
+    - ip_address: "192.168.11.1"
+      underlay_ip: "10.0.1.11"
+      action: vnet_encap
+  route_policy:                      # auto-wires eni_names
+    name: rp-bank-web
+    routes:
+      - prefix: 192.168.11.0/24
+        next_hop_type: vnet
+        next_hop_target: bank-prod-web
+  acl_policies:                      # auto-wires eni_names
+    - name: acl-bank-web-in
+      stage: inbound
+      rules:
+        - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+```
+
+```powershell
+dashctl apply -f eni-bundle.yaml --insecure
+# vnet/bank-prod-web CREATE in namespace default (generation 1)
+# eni/eni-web-01 CREATE in namespace default (generation 1)
+# vnetmapping/bank-prod-web-192.168.11.1 CREATE in namespace default (generation 1)
+# routepolicy/rp-bank-web CREATE in namespace default (generation 1)
+# aclpolicy/acl-bank-web-in CREATE in namespace default (generation 1)
+# Applied 5 object(s): 5 created, 0 modified, 0 blocked, 0 failed
+```
+
+**Auto-wiring**: the bundle automatically sets `eni.vnet_name` from
+the vnet section, `vnet_mapping.vnet_name` from the vnet, and
+`route_policy.eni_names` / `acl_policy.eni_names` from the ENI name.
+
+### Standard manifests
+
 Apply is idempotent — first call CREATEs, subsequent calls UPDATE.
 
 ### 6.1 Create a VNET
@@ -968,6 +1054,17 @@ $c = ".\bin\dash-sim-client.exe"
               [--vni <n>] [--src-mac ...] [--dst-mac ...] \
               [--src-ip ...] [--dst-ip ...] [--protocol ...] \
               [--src-port ...] [--dst-port ...] [--trace]
+```
+
+### dashctl apply + EniBundle commands
+
+```powershell
+dashctl apply -f manifest/                          # create (blocks on existing)
+dashctl apply -f manifest/ --force                   # create or overwrite
+dashctl apply -f eni-bundle.yaml                     # EniBundle: full ENI + deps
+dashctl apply -f eni-bundle.yaml --force              # overwrite existing bundle
+dashctl diff -f manifest/                             # preview what would change
+dashctl validate -f manifest/                         # FK validation check
 ```
 
 ### dashctl counter commands (via dashd)
