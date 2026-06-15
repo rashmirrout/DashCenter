@@ -23,7 +23,7 @@
 
 | Phase | Objective | Status | Gates Passed |
 |---|---|---|---|
-| **Phase 1** — REST backend (operator-ready CLI) | Cobra command tree + REST SDK against dashd `:8443`/`:7443`; all write & read verbs for the spec kinds shipped today; production-grade UX (contexts, output formats, tests). | ✅ Complete; 12 / 12 gates green (G10 deferred-by-design to Phase 2) | 12 / 12 |
+| **Phase 1** — REST backend (operator-ready CLI) | Cobra command tree + REST SDK against dashd `:8443`/`:7443`; all write & read verbs for the spec kinds shipped today; production-grade UX (contexts, output formats, tests). FK validation (`validate`), bundle kinds (`EniBundle`/`AclBundle`/`RouteBundle`/`HaBundle`), create-vs-update detection (`--force`). | ✅ Complete; 14 / 14 gates green | 14 / 14 |
 | **Phase 2** — gRPC backend (full fidelity) | gRPC SDK against dashd `:9443`; native streaming; `ApplyBatch`; Operations / HA / Migration / Diagnostics commands as dashd's Phase 2 milestones land. Delivered in 5 sub-phases (2A–2E) matched to dashd PA–PE. | ❌ Not started | 0 / 31 sub-phase gates · 0 / 10 overall exit gates |
 
 > **Dependency**: Phase 1 of dashctl can ship today against dashd Phase 1B
@@ -145,7 +145,7 @@ no native streaming, no `ApplyBatch`.
 | C1-G11 | Cross-platform build | `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, `windows/amd64` | ✅ [`make -C src/impl-go/dashctl build-all`](../../src/impl-go/dashctl/Makefile) covers all 5 platforms |
 | C1-G12 | Integration suite | 13 scenarios pass via `go test -tags=integration` | ✅ **All 13 scenarios PASS** in `165s` on Windows with chocolatey `GNU Make 4.4.1`. Run via `make test-integration` or [`src/impl-go/dashctl/test/integration/`](../../src/impl-go/dashctl/test/integration/). |
 | C1-G13 | `dashctl validate -f` | Pre-flight FK validation: loads manifests, applies each to dashd, reports pass/fail summary per object. Continues past failures. Exit code = rejected count. | ✅ **Landed 2026-06-15.** `internal/cmd/validate.go` + wired in `root.go`. dashd-side: `namespace.Validator.CheckDelete()` orphan protection on vnet/eni/service_tunnel + `CheckHaSet` DPU inventory FK + `CheckRoutePolicy` service_tunnel FK. 28 namespace tests (95.2% coverage). Live e2e: wrong ENI→400, delete-with-deps→412, valid→200, clean delete→204. |
-| C1-G14 | `EniBundle` kind + `--force` | `EniBundle` manifest kind for full ENI + dependency chain in one YAML. `--force` flag for create-vs-update detection: new→CREATE, existing→BLOCKED+warning, existing+force→MODIFY. | ✅ **Landed 2026-06-15.** `pkg/manifest/bundle.go` (EniBundle expander + auto-wiring), `internal/cmd/apply.go` (create-vs-update via Get, --force flag, BLOCKED/CREATE/MODIFY output, summary + warning). 12 bundle unit tests. Live e2e: 5 CREATE → 5 BLOCKED → 5 MODIFY. |
+| C1-G14 | 4 bundle kinds + `--force` | `EniBundle`, `AclBundle`, `RouteBundle`, `HaBundle` manifest kinds for full DASH construct + dependency chain in one YAML. `--force` flag for create-vs-update detection: new→CREATE, existing→BLOCKED+warning, existing+force→MODIFY. | ✅ **Landed 2026-06-15.** `pkg/manifest/bundle.go` (4 bundle expanders + auto-wiring + kind registration), `internal/cmd/apply.go` (create-vs-update via Get, --force flag, BLOCKED/CREATE/MODIFY output, summary + warning). 20 bundle unit tests. Live e2e: 5 CREATE → 5 BLOCKED → 5 MODIFY. |
 
 ### Phase 1 extension quality gates (`debug`)
 

@@ -23,22 +23,31 @@ _err = 0
 
 
 def put(path, body):
-    """PUT JSON to dashd REST API."""
+    """PUT JSON to dashd REST API with retry on transient failures."""
     global _ok, _err
     url = f"{DASHD}{path}"
     data = json.dumps(body).encode()
-    req = urllib.request.Request(
-        url, data=data,
-        headers={"Content-Type": "application/json"},
-        method="PUT",
-    )
-    try:
-        resp = urllib.request.urlopen(req)
-        print(f"  ✓ PUT {path} → {resp.status}")
-        _ok += 1
-    except urllib.error.HTTPError as e:
-        print(f"  ✗ PUT {path} → {e.code} {e.read().decode()[:120]}")
-        _err += 1
+    for attempt in range(1, 4):
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        try:
+            resp = urllib.request.urlopen(req)
+            print(f"  ✓ PUT {path} → {resp.status}")
+            _ok += 1
+            return
+        except urllib.error.HTTPError as e:
+            print(f"  ✗ PUT {path} → {e.code} {e.read().decode()[:120]}")
+            _err += 1
+            return
+        except (ConnectionError, urllib.error.URLError, OSError) as e:
+            if attempt < 3:
+                time.sleep(1 * attempt)
+            else:
+                print(f"  ✗ PUT {path} → FAILED after 3 attempts: {e}")
+                _err += 1
 
 
 def banner(title):
