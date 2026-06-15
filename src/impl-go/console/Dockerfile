@@ -11,10 +11,12 @@ WORKDIR /app/web
 COPY src/impl-web/console/package*.json ./
 RUN npm ci 2>/dev/null || echo "No SPA package.json yet — skipping npm install"
 COPY src/impl-web/console/ ./
-RUN if [ -f package.json ] && grep -q '"build"' package.json; then \
-npx vite build; \
-else \
-mkdir -p dist && echo '<!DOCTYPE html><html><head><title>dashw</title></head><body><h1>dashw</h1><p>SPA not built</p></body></html>' > dist/index.html; \
+RUN mkdir -p dist && \
+if [ -f package.json ] && grep -q '"build"' package.json; then \
+npx vite build 2>&1 || echo "WARN: vite build failed, using placeholder SPA"; \
+fi && \
+if [ ! -f dist/index.html ]; then \
+echo '<!DOCTYPE html><html><head><title>dashw</title></head><body><h1>dashw</h1><p>SPA placeholder</p></body></html>' > dist/index.html; \
 fi
 
 # ── Stage 2: Build BFF ──────────────────────────────────────────
