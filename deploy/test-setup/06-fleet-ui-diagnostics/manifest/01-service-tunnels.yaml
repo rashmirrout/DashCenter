@@ -1,0 +1,74 @@
+# 01-service-tunnels.yaml — 6 service tunnels (superset of 04-ha).
+#
+# 04-ha originals: internet egress (NAT), shared NSG, PrivateLink, corp VPN.
+# NEW in 05: gaming DDoS scrubbing center, cross-region peering.
+
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-internet-egress, labels: { class: nat, scope: fleet } }
+spec:
+  local_underlay_ip:  10.255.0.10
+  remote_underlay_ip: 198.51.100.10
+  vni: 8001
+  params:
+    action: nat
+    nat_pool: 203.0.113.0/26
+    snat_persist_seconds: "300"
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-nsg-shared, labels: { class: nsg } }
+spec:
+  local_underlay_ip:  10.255.0.20
+  remote_underlay_ip: 10.255.1.20
+  vni: 8002
+  params:
+    action: inspect
+    chain: shared-nsg-default
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-privatelink-azuredb, labels: { class: privatelink, target: azuredb } }
+spec:
+  local_underlay_ip:  10.255.0.30
+  remote_underlay_ip: 10.0.255.30
+  vni: 8003
+  params:
+    action: privatelink
+    target_fqdn: db.privatelink.example.com
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-vpn-corp, labels: { class: vpn, target: corp-hq } }
+spec:
+  local_underlay_ip:  10.255.0.40
+  remote_underlay_ip: 192.0.2.40
+  vni: 8004
+  params:
+    action: ipsec
+    ike_group: "14"
+---
+# ===== NEW in 05 =====
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-ddos-scrub, labels: { class: ddos, scope: gaming } }
+spec:
+  local_underlay_ip:  10.255.0.50
+  remote_underlay_ip: 198.51.100.50
+  vni: 8005
+  params:
+    action: scrub
+    provider: cloudflare-sim
+    scrub_threshold_mbps: "500"
+---
+apiVersion: dashcenter.v1
+kind: ServiceTunnel
+metadata: { name: st-cross-region, labels: { class: peering, scope: fleet } }
+spec:
+  local_underlay_ip:  10.255.0.60
+  remote_underlay_ip: 10.128.0.60
+  vni: 8006
+  params:
+    action: vxlan_peer
+    remote_region: us-west-2
+    mtu: "8950"

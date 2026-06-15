@@ -1,0 +1,25 @@
+{
+  "vnets": [
+    {"metadata":{"namespace":"default","name":"vnet-prod"},"vni":100,"address_space":["10.0.0.0/16"],"gw_mac":"00:00:00:00:01:00"},
+    {"metadata":{"namespace":"default","name":"vnet-staging"},"vni":200,"address_space":["10.1.0.0/16"],"gw_mac":"00:00:00:00:02:00"},
+    {"metadata":{"namespace":"default","name":"vnet-dev"},"vni":300,"address_space":["10.2.0.0/16"],"gw_mac":"00:00:00:00:03:00"}
+  ],
+  "enis": [
+    {"metadata":{"namespace":"default","name":"eni-prod-01"},"vnet_name":"vnet-prod","mac_address":"00:11:22:33:44:01","underlay_ip":"192.168.1.1","admin_state":"ENABLED","primary_ip":"10.0.1.10"},
+    {"metadata":{"namespace":"default","name":"eni-prod-02"},"vnet_name":"vnet-prod","mac_address":"00:11:22:33:44:02","underlay_ip":"192.168.1.2","admin_state":"ENABLED","primary_ip":"10.0.1.20"},
+    {"metadata":{"namespace":"default","name":"eni-prod-03"},"vnet_name":"vnet-prod","mac_address":"00:11:22:33:44:03","underlay_ip":"192.168.1.3","admin_state":"ENABLED","primary_ip":"10.0.1.30"},
+    {"metadata":{"namespace":"default","name":"eni-staging-01"},"vnet_name":"vnet-staging","mac_address":"00:11:22:33:55:01","underlay_ip":"192.168.2.1","admin_state":"ENABLED","primary_ip":"10.1.1.10"},
+    {"metadata":{"namespace":"default","name":"eni-staging-02"},"vnet_name":"vnet-staging","mac_address":"00:11:22:33:55:02","underlay_ip":"192.168.2.2","admin_state":"ENABLED","primary_ip":"10.1.1.20"},
+    {"metadata":{"namespace":"default","name":"eni-dev-01"},"vnet_name":"vnet-dev","mac_address":"00:11:22:33:66:01","underlay_ip":"192.168.3.1","admin_state":"ENABLED","primary_ip":"10.2.1.10"}
+  ],
+  "acl_policies": [
+    {"metadata":{"namespace":"default","name":"acl-prod-web"},"eni_names":["eni-prod-01","eni-prod-02"],"default_action":"DENY","rules":[{"priority":100,"action":"ALLOW","direction":"IN","protocol":6,"dst_port_range":{"start":443,"end":443},"src_prefixes":["0.0.0.0/0"]},{"priority":200,"action":"ALLOW","direction":"OUT","protocol":6,"src_prefixes":["10.0.0.0/16"]}]},
+    {"metadata":{"namespace":"default","name":"acl-staging-all"},"eni_names":["eni-staging-01","eni-staging-02"],"default_action":"ALLOW","rules":[{"priority":100,"action":"DENY","direction":"IN","protocol":6,"dst_port_range":{"start":22,"end":22},"src_prefixes":["0.0.0.0/0"]}]}
+  ],
+  "route_policies": [
+    {"metadata":{"namespace":"default","name":"rp-prod-default"},"eni_names":["eni-prod-01","eni-prod-02","eni-prod-03"],"direction":"OUT","rules":[{"priority":100,"action":"PERMIT","prefixes":["10.0.0.0/8"]},{"priority":200,"action":"DENY","prefixes":["172.16.0.0/12"]}]}
+  ],
+  "service_tunnels": [
+    {"metadata":{"namespace":"default","name":"tunnel-prod-staging"},"source_vnet":"vnet-prod","destination_vnet":"vnet-staging","tunnel_type":"VXLAN","bidirectional":true}
+  ]
+}

@@ -24,13 +24,18 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
+# Python distutils MANIFEST file (exact root-level file only, not directories).
+/MANIFEST
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
 *.spec
+
+# Re-include all manifest directories and Go packages that the above
+# patterns would otherwise shadow on case-insensitive file systems.
+!**/manifest/
+!**/pkg/manifest/
 
 # Installer logs
 pip-log.txt

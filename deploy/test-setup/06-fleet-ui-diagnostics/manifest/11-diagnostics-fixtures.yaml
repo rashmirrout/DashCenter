@@ -1,0 +1,73 @@
+# 11-diagnostics-fixtures.yaml — extra objects to make DiagnosticsService
+# labs vivid. Layered on top of 00–10 (do not replace).
+#
+# What this adds (3 objects, all in `default` namespace):
+#   1. acl-diag-chain — multi-stage ACL on eni-bank-web-01 with
+#      allow_and_continue → port-range deny → ICMP allow → catch-all,
+#      ideal for "explain-match SUBJECT_ACL" demos showing each
+#      candidate's match reason.
+#   2. acl-diag-dead-rules — ACL on eni-bank-web-02 whose rules cover
+#      address spaces the lab will never touch (documentation prefixes
+#      192.0.2.0/24, 198.51.100.0/24, etc). Every rule will report
+#      zero hits → perfect input for
+#      `POST /v1/diagnostics/acl-hit-stats {"zero_hits_only":true}`.
+#   3. rp-diag-overlap — RoutePolicy on eni-bank-web-01 with FOUR
+#      overlapping prefixes (default /0, /8, /24, /32), each pointing
+#      to a different next-hop type. Drives the longest-prefix +
+#      metric tie-break narrative for "explain-match SUBJECT_ROUTE".
+#
+# Read together with deploy/test-setup/06-fleet-ui-diagnostics/manual-handson.md
+# Lab 13 ("DiagnosticsService Deep Dive").
+
+# 1) Multi-stage ACL chain — narrates every action type in one place.
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-diag-chain
+  labels: { tenant: diag, purpose: explain-match-demo }
+spec:
+  stage: inbound
+  eni_names: [eni-bank-web-01]
+  rules:
+    - { priority:  50, action: allow_and_continue, src_prefixes: [10.255.0.0/16],                            description: "step 1: monitoring path opens, then chain continues" }
+    - { priority: 100, action: allow,              src_prefixes: [0.0.0.0/0],       dst_ports: ["443"],     protocols: [tcp], description: "step 2: standard https admit" }
+    - { priority: 150, action: deny,               src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23"], protocols: [tcp], description: "step 3: hard block remote shell" }
+    - { priority: 200, action: allow,              src_prefixes: [198.51.100.0/24], protocols: [icmp],      description: "step 4: scoped ICMP from probe network" }
+    - { priority: 250, action: deny,               src_prefixes: [0.0.0.0/0],       protocols: [icmp],      description: "step 5: no other ICMP" }
+    - { priority: 999, action: deny,               src_prefixes: [0.0.0.0/0],                               description: "step 6: catch-all" }
+---
+
+# 2) Dead-rule ACL — every rule covers ranges the lab will never traverse.
+#    Run `POST /v1/diagnostics/acl-hit-stats {"zero_hits_only":true,"policy_names":["acl-diag-dead-rules"]}`
+#    to surface them.
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata:
+  name: acl-diag-dead-rules
+  labels: { tenant: diag, purpose: dead-rule-demo }
+spec:
+  stage: outbound
+  eni_names: [eni-bank-web-02]
+  rules:
+    - { priority: 100, action: allow, dst_prefixes: [192.0.2.0/24],     dst_ports: ["8080"],    protocols: [tcp], description: "dead: TEST-NET-1 range, never reached" }
+    - { priority: 110, action: allow, dst_prefixes: [198.51.100.0/24],  dst_ports: ["8443"],    protocols: [tcp], description: "dead: TEST-NET-2 range, never reached" }
+    - { priority: 120, action: allow, dst_prefixes: [203.0.113.0/24],   dst_ports: ["9001"],    protocols: [tcp], description: "dead: TEST-NET-3 range, never reached" }
+    - { priority: 130, action: deny,  dst_prefixes: [240.0.0.0/4],                              protocols: [tcp], description: "dead: reserved class-E, no traffic possible" }
+    - { priority: 999, action: deny,  dst_prefixes: [0.0.0.0/0],                                description: "catch-all (will also be zero-hit in lab)" }
+---
+
+# 3) Route policy with 4 overlapping prefixes — longest-prefix demo.
+#    Use `POST /v1/diagnostics/explain-match SUBJECT_ROUTE` against
+#    a flow with dst_ip in 10.0.1.10 to see all four candidates ranked.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata:
+  name: rp-diag-overlap
+  labels: { tenant: diag, purpose: longest-prefix-demo }
+spec:
+  eni_names: [eni-bank-web-01]
+  routes:
+    - { prefix: 0.0.0.0/0,       next_hop_type: drop,           metric: 1000, description: "default deny — last resort" }
+    - { prefix: 10.0.0.0/8,      next_hop_type: vnet,           next_hop_target: bank-prod-web,        metric:  100, description: "broad: any rfc1918 10/8 → bank-web" }
+    - { prefix: 10.0.1.0/24,     next_hop_type: vnet,           next_hop_target: bank-prod-db,         metric:   50, description: "narrower: db-subnet → bank-db" }
+    - { prefix: 10.0.1.10/32,    next_hop_type: service_tunnel, next_hop_target: st-internet-egress,   metric:   10, description: "most specific: scrubbed via internet-egress tunnel" }

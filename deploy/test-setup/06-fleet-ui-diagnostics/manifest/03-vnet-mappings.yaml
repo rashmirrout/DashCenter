@@ -1,0 +1,233 @@
+# 03-vnet-mappings.yaml — 40 overlay-IP → underlay-IP mappings.
+# One mapping per ENI: 37 vnet_encap + 3 service_tunnel.
+
+# ===== bank =====
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-web-01 }
+spec: { vnet_name: bank-prod-web, ip_address: 192.168.11.1, underlay_ip: 10.0.1.11, mac_address: aa:bb:cc:01:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-web-02 }
+spec: { vnet_name: bank-prod-web, ip_address: 192.168.11.2, underlay_ip: 10.0.1.12, mac_address: aa:bb:cc:01:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-web-03 }
+spec: { vnet_name: bank-prod-web, ip_address: 192.168.11.3, underlay_ip: 10.0.1.13, mac_address: aa:bb:cc:01:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-web-04 }
+spec: { vnet_name: bank-prod-web, ip_address: 192.168.11.4, underlay_ip: 10.0.1.14, mac_address: aa:bb:cc:01:00:04, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-db-01 }
+spec: { vnet_name: bank-prod-db, ip_address: 192.168.12.1, underlay_ip: 10.0.2.11, mac_address: aa:bb:cc:02:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-bank-db-02 }
+spec: { vnet_name: bank-prod-db, ip_address: 192.168.12.2, underlay_ip: 10.0.2.12, mac_address: aa:bb:cc:02:00:02, action: vnet_encap }
+
+# ===== retail =====
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-retail-web-01 }
+spec: { vnet_name: retail-prod-web, ip_address: 192.168.21.1, underlay_ip: 10.1.1.11, mac_address: aa:bb:cc:11:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-retail-web-02 }
+spec: { vnet_name: retail-prod-web, ip_address: 192.168.21.2, underlay_ip: 10.1.1.12, mac_address: aa:bb:cc:11:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-retail-web-03 }
+spec: { vnet_name: retail-prod-web, ip_address: 192.168.21.3, underlay_ip: 10.1.1.13, mac_address: aa:bb:cc:11:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-retail-web-04 }
+spec: { vnet_name: retail-prod-web, ip_address: 192.168.21.4, underlay_ip: 10.1.1.14, mac_address: aa:bb:cc:11:00:04, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-retail-db-01 }
+spec: { vnet_name: retail-prod-db, ip_address: 192.168.22.1, underlay_ip: 10.1.2.11, mac_address: aa:bb:cc:12:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-retail-db-02 }
+spec: { vnet_name: retail-prod-db, ip_address: 192.168.22.2, underlay_ip: 10.1.2.12, mac_address: aa:bb:cc:12:00:02, action: vnet_encap }
+
+# ===== media =====
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-media-stream-01 }
+spec: { vnet_name: media-stream, ip_address: 192.168.31.1, underlay_ip: 10.2.1.11, mac_address: aa:bb:cc:21:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-media-stream-02 }
+spec: { vnet_name: media-stream, ip_address: 192.168.31.2, underlay_ip: 10.2.1.12, mac_address: aa:bb:cc:21:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-media-stream-03 }
+spec: { vnet_name: media-stream, ip_address: 192.168.31.3, underlay_ip: 10.2.1.13, mac_address: aa:bb:cc:21:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-media-stream-04 }
+spec: { vnet_name: media-stream, ip_address: 192.168.31.4, underlay_ip: 10.2.1.14, mac_address: aa:bb:cc:21:00:04, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-media-ctrl-01 }
+spec: { vnet_name: media-control, ip_address: 192.168.32.1, underlay_ip: 10.2.2.11, mac_address: aa:bb:cc:22:00:01, action: vnet_encap }
+
+# ===== iot =====
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-iot-edge-01 }
+spec: { vnet_name: iot-edge, ip_address: 192.168.41.1, underlay_ip: 10.3.1.11, mac_address: aa:bb:cc:31:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-iot-edge-02 }
+spec: { vnet_name: iot-edge, ip_address: 192.168.41.2, underlay_ip: 10.3.1.12, mac_address: aa:bb:cc:31:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-iot-edge-03 }
+spec: { vnet_name: iot-edge, ip_address: 192.168.41.3, underlay_ip: 10.3.1.13, mac_address: aa:bb:cc:31:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-iot-core-01 }
+spec: { vnet_name: iot-core, ip_address: 192.168.42.1, underlay_ip: 10.3.2.11, mac_address: aa:bb:cc:32:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-iot-core-02 }
+spec: { vnet_name: iot-core, ip_address: 192.168.42.2, underlay_ip: 10.3.2.12, mac_address: aa:bb:cc:32:00:02, action: vnet_encap }
+
+# ===== analytics =====
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-spark-01 }
+spec: { vnet_name: analytics-spark, ip_address: 192.168.51.1, underlay_ip: 10.4.1.11, mac_address: aa:bb:cc:41:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-spark-02 }
+spec: { vnet_name: analytics-spark, ip_address: 192.168.51.2, underlay_ip: 10.4.1.12, mac_address: aa:bb:cc:41:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-spark-03 }
+spec: { vnet_name: analytics-spark, ip_address: 192.168.51.3, underlay_ip: 10.4.1.13, mac_address: aa:bb:cc:41:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-kafka-01 }
+spec: { vnet_name: analytics-kafka, ip_address: 192.168.52.1, underlay_ip: 10.4.2.11, mac_address: aa:bb:cc:42:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-kafka-02 }
+spec: { vnet_name: analytics-kafka, ip_address: 192.168.52.2, underlay_ip: 10.4.2.12, mac_address: aa:bb:cc:42:00:02, action: vnet_encap }
+
+# ===== gaming (NEW in 05) =====
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-lobby-01 }
+spec: { vnet_name: gaming-lobby, ip_address: 192.168.61.1, underlay_ip: 10.5.1.11, mac_address: aa:bb:cc:51:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-lobby-02 }
+spec: { vnet_name: gaming-lobby, ip_address: 192.168.61.2, underlay_ip: 10.5.1.12, mac_address: aa:bb:cc:51:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-lobby-03 }
+spec: { vnet_name: gaming-lobby, ip_address: 192.168.61.3, underlay_ip: 10.5.1.13, mac_address: aa:bb:cc:51:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-lobby-04 }
+spec: { vnet_name: gaming-lobby, ip_address: 192.168.61.4, underlay_ip: 10.5.1.14, mac_address: aa:bb:cc:51:00:04, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-match-01 }
+spec: { vnet_name: gaming-match, ip_address: 192.168.62.1, underlay_ip: 10.5.2.11, mac_address: aa:bb:cc:52:00:01, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-match-02 }
+spec: { vnet_name: gaming-match, ip_address: 192.168.62.2, underlay_ip: 10.5.2.12, mac_address: aa:bb:cc:52:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-match-03 }
+spec: { vnet_name: gaming-match, ip_address: 192.168.62.3, underlay_ip: 10.5.2.13, mac_address: aa:bb:cc:52:00:03, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-gaming-match-04 }
+spec: { vnet_name: gaming-match, ip_address: 192.168.62.4, underlay_ip: 10.5.2.14, mac_address: aa:bb:cc:52:00:04, action: vnet_encap }
+
+# ===== shared (with service_tunnel actions) =====
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-shared-ingress-01 }
+spec:
+  vnet_name: shared-ingress
+  ip_address: 192.168.91.1
+  underlay_ip: 10.9.1.11
+  mac_address: aa:bb:cc:91:00:01
+  action: service_tunnel
+  params: { tunnel: st-nsg-shared }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-shared-ingress-02 }
+spec: { vnet_name: shared-ingress, ip_address: 192.168.91.2, underlay_ip: 10.9.1.12, mac_address: aa:bb:cc:91:00:02, action: vnet_encap }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-shared-egress-01 }
+spec:
+  vnet_name: shared-egress
+  ip_address: 192.168.92.1
+  underlay_ip: 10.9.2.11
+  mac_address: aa:bb:cc:92:00:01
+  action: service_tunnel
+  params: { tunnel: st-internet-egress }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-shared-egress-02 }
+spec:
+  vnet_name: shared-egress
+  ip_address: 192.168.92.2
+  underlay_ip: 10.9.2.12
+  mac_address: aa:bb:cc:92:00:02
+  action: service_tunnel
+  params: { tunnel: st-cross-region }
+---
+apiVersion: dashcenter.v1
+kind: VnetMapping
+metadata: { name: map-shared-egress-03 }
+spec: { vnet_name: shared-egress, ip_address: 192.168.92.3, underlay_ip: 10.9.2.13, mac_address: aa:bb:cc:92:00:03, action: vnet_encap }

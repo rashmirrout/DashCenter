@@ -1,0 +1,291 @@
+# 05-acl-policies.yaml — 15 ACL policies, ~150 rules total (superset of 04-ha).
+# Coverage: inbound + outbound stages, allow/deny/allow_and_continue actions,
+# IPv4 prefixes, single ports + port ranges, tcp/udp/icmp protocols.
+# NEW in 05: gaming-lobby + gaming-match + gaming-outbound ACLs.
+
+# 1) bank-web inbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-bank-web-inbound, labels: { tenant: bank, tier: web } }
+spec:
+  stage: inbound
+  eni_names: [eni-bank-web-01, eni-bank-web-02, eni-bank-web-03, eni-bank-web-04]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [0.0.0.0/0],          dst_ports: ["443"],  protocols: [tcp], description: "https from internet" }
+    - { priority: 110, action: allow, src_prefixes: [203.0.113.0/24],     dst_ports: ["80"],   protocols: [tcp], description: "http from cdn" }
+    - { priority: 120, action: allow, src_prefixes: [192.168.12.0/24],    dst_ports: ["3306","5432"], protocols: [tcp], description: "db reply traffic" }
+    - { priority: 130, action: allow, src_prefixes: [192.168.91.0/24],    dst_ports: ["443"],  protocols: [tcp], description: "via shared ingress" }
+    - { priority: 140, action: deny,  src_prefixes: [10.0.0.0/8],         dst_ports: ["22","23"], protocols: [tcp], description: "no mgmt from rfc1918" }
+    - { priority: 150, action: deny,  src_prefixes: [0.0.0.0/0],          dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 160, action: allow_and_continue, src_prefixes: [198.51.100.0/24], protocols: [icmp], description: "icmp from monitoring" }
+    - { priority: 170, action: deny,  src_prefixes: [0.0.0.0/0],          protocols: [icmp], description: "no other icmp" }
+    - { priority: 180, action: allow, src_prefixes: [10.255.0.0/16],      dst_ports: ["9100"], protocols: [tcp], description: "prom node-exporter" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],          description: "catch-all deny" }
+---
+# 2) bank-web outbound — 8 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-bank-web-outbound, labels: { tenant: bank, tier: web } }
+spec:
+  stage: outbound
+  eni_names: [eni-bank-web-01, eni-bank-web-02, eni-bank-web-03, eni-bank-web-04]
+  rules:
+    - { priority: 100, action: allow, dst_prefixes: [192.168.12.0/24], dst_ports: ["3306","5432"], protocols: [tcp], description: "to bank db" }
+    - { priority: 110, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["443"], protocols: [tcp], description: "outbound https" }
+    - { priority: 120, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["53"],  protocols: [udp,tcp], description: "dns" }
+    - { priority: 130, action: allow, dst_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp], description: "prom scrape return" }
+    - { priority: 140, action: allow, dst_prefixes: [192.168.91.0/24], dst_ports: ["443"], protocols: [tcp], description: "to shared ingress" }
+    - { priority: 150, action: deny,  dst_prefixes: [192.168.21.0/24], description: "no retail traffic" }
+    - { priority: 160, action: deny,  dst_prefixes: [192.168.31.0/24], description: "no media traffic" }
+    - { priority: 1000, action: deny, dst_prefixes: [0.0.0.0/0],       description: "catch-all egress deny" }
+---
+# 3) bank-db inbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-bank-db-inbound, labels: { tenant: bank, tier: db } }
+spec:
+  stage: inbound
+  eni_names: [eni-bank-db-01, eni-bank-db-02]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [192.168.11.0/24], dst_ports: ["3306"], protocols: [tcp], description: "mysql from bank-web" }
+    - { priority: 110, action: allow, src_prefixes: [192.168.11.0/24], dst_ports: ["5432"], protocols: [tcp], description: "pg from bank-web" }
+    - { priority: 120, action: allow, src_prefixes: [10.0.255.30/32],  dst_ports: ["3306","5432"], protocols: [tcp], description: "azuredb sync" }
+    - { priority: 130, action: deny,  src_prefixes: [192.168.0.0/16],  description: "no cross-tenant overlay" }
+    - { priority: 140, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 150, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp], description: "monitoring icmp" }
+    - { priority: 160, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 170, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100","9187"], protocols: [tcp], description: "node + pg exporter" }
+    - { priority: 180, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["3306","5432"], protocols: [tcp], description: "no other db clients" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 4) retail-web inbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-retail-web-inbound, labels: { tenant: retail, tier: web } }
+spec:
+  stage: inbound
+  eni_names: [eni-retail-web-01, eni-retail-web-02, eni-retail-web-03, eni-retail-web-04]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["443"],  protocols: [tcp], description: "https from internet" }
+    - { priority: 110, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["80"],   protocols: [tcp], description: "http redirect" }
+    - { priority: 120, action: allow, src_prefixes: [192.168.22.0/24], dst_ports: ["1521","5432"], protocols: [tcp], description: "db reply traffic" }
+    - { priority: 130, action: allow, src_prefixes: [192.168.31.0/24], dst_ports: ["443"],  protocols: [tcp], description: "from media-stream" }
+    - { priority: 140, action: deny,  src_prefixes: [10.0.0.0/8],      dst_ports: ["22","23"], protocols: [tcp], description: "no mgmt from rfc1918" }
+    - { priority: 150, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 160, action: allow_and_continue, src_prefixes: [198.51.100.0/24], protocols: [icmp], description: "monitoring icmp" }
+    - { priority: 170, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 180, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp], description: "node-exporter" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 5) retail-web outbound — 8 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-retail-web-outbound, labels: { tenant: retail, tier: web } }
+spec:
+  stage: outbound
+  eni_names: [eni-retail-web-01, eni-retail-web-02, eni-retail-web-03, eni-retail-web-04]
+  rules:
+    - { priority: 100, action: allow, dst_prefixes: [192.168.22.0/24], dst_ports: ["1521","5432"], protocols: [tcp], description: "to retail db" }
+    - { priority: 110, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["443"], protocols: [tcp], description: "outbound https" }
+    - { priority: 120, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["53"], protocols: [udp,tcp], description: "dns" }
+    - { priority: 130, action: allow, dst_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp], description: "prom scrape" }
+    - { priority: 140, action: deny,  dst_prefixes: [192.168.11.0/24], description: "no bank traffic" }
+    - { priority: 150, action: deny,  dst_prefixes: [192.168.41.0/24], description: "no iot traffic" }
+    - { priority: 160, action: deny,  dst_prefixes: [192.168.51.0/24], description: "no spark traffic" }
+    - { priority: 1000, action: deny, dst_prefixes: [0.0.0.0/0],       description: "catch-all egress deny" }
+---
+# 6) retail-db inbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-retail-db-inbound, labels: { tenant: retail, tier: db } }
+spec:
+  stage: inbound
+  eni_names: [eni-retail-db-01, eni-retail-db-02]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [192.168.21.0/24], dst_ports: ["1521"], protocols: [tcp], description: "oracle from retail-web" }
+    - { priority: 110, action: allow, src_prefixes: [192.168.21.0/24], dst_ports: ["5432"], protocols: [tcp], description: "pg from retail-web" }
+    - { priority: 120, action: allow, src_prefixes: [192.168.52.0/24], dst_ports: ["5432"], protocols: [tcp], description: "pg from kafka" }
+    - { priority: 130, action: allow, src_prefixes: [10.0.255.30/32],  dst_ports: ["1521","5432"], protocols: [tcp], description: "azuredb sync" }
+    - { priority: 140, action: deny,  src_prefixes: [192.168.0.0/16],  description: "no other overlay" }
+    - { priority: 150, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 160, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp], description: "monitoring icmp" }
+    - { priority: 170, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100","9187"], protocols: [tcp], description: "exporters" }
+    - { priority: 180, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["1521","5432"], protocols: [tcp], description: "no other db clients" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 7) media-stream inbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-media-stream-inbound, labels: { tenant: media, tier: data } }
+spec:
+  stage: inbound
+  eni_names: [eni-media-stream-01, eni-media-stream-02, eni-media-stream-03, eni-media-stream-04]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["1935"], protocols: [tcp], description: "rtmp ingest" }
+    - { priority: 110, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["3478"], protocols: [udp], description: "stun" }
+    - { priority: 120, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["10000-20000"], protocols: [udp], description: "rtp" }
+    - { priority: 130, action: allow, src_prefixes: [192.168.32.0/24], dst_ports: ["8080","8443"], protocols: [tcp], description: "from media-control" }
+    - { priority: 140, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 150, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp] }
+    - { priority: 160, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 170, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp] }
+    - { priority: 180, action: deny,  src_prefixes: [192.168.41.0/24], description: "no iot ingress to media" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 8) media-stream outbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-media-stream-outbound, labels: { tenant: media, tier: data } }
+spec:
+  stage: outbound
+  eni_names: [eni-media-stream-01, eni-media-stream-02, eni-media-stream-03, eni-media-stream-04]
+  rules:
+    - { priority: 100, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["443"], protocols: [tcp], description: "https" }
+    - { priority: 110, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["53"], protocols: [udp,tcp], description: "dns" }
+    - { priority: 120, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["10000-20000"], protocols: [udp], description: "rtp egress" }
+    - { priority: 130, action: allow, dst_prefixes: [10.100.0.0/16],   description: "cdn overlay (ecmp)" }
+    - { priority: 140, action: allow, dst_prefixes: [192.168.32.0/24], dst_ports: ["8080","8443"], protocols: [tcp], description: "back to media-control" }
+    - { priority: 150, action: allow, dst_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp] }
+    - { priority: 160, action: deny,  dst_prefixes: [192.168.11.0/24], description: "no bank" }
+    - { priority: 170, action: deny,  dst_prefixes: [192.168.21.0/24], description: "no retail" }
+    - { priority: 180, action: deny,  dst_prefixes: [192.168.41.0/24], description: "no iot" }
+    - { priority: 1000, action: deny, dst_prefixes: [0.0.0.0/0],       description: "catch-all egress deny" }
+---
+# 9) iot-edge inbound — 12 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-iot-edge-inbound, labels: { tenant: iot, tier: edge } }
+spec:
+  stage: inbound
+  eni_names: [eni-iot-edge-01, eni-iot-edge-02, eni-iot-edge-03]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["8883"], protocols: [tcp], description: "mqtt-tls from devices" }
+    - { priority: 110, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["5683"], protocols: [udp], description: "coap" }
+    - { priority: 120, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["443"],  protocols: [tcp], description: "device https provisioning" }
+    - { priority: 130, action: allow, src_prefixes: [192.168.42.0/24], dst_ports: ["443","8883"], protocols: [tcp], description: "from iot-core" }
+    - { priority: 140, action: deny,  src_prefixes: [203.0.113.0/24],  description: "block known abuse range" }
+    - { priority: 150, action: deny,  src_prefixes: [198.18.0.0/15],   description: "block benchmark range" }
+    - { priority: 160, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389","5060"], protocols: [tcp], description: "no remote shell or sip" }
+    - { priority: 170, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp] }
+    - { priority: 180, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 190, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp] }
+    - { priority: 200, action: deny,  src_prefixes: [192.168.0.0/16],  description: "no overlay ingress to edge" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 10) iot-core inbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-iot-core-inbound, labels: { tenant: iot, tier: core } }
+spec:
+  stage: inbound
+  eni_names: [eni-iot-core-01, eni-iot-core-02]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [192.168.41.0/24], dst_ports: ["8883"], protocols: [tcp], description: "mqtt from edge" }
+    - { priority: 110, action: allow, src_prefixes: [192.168.41.0/24], dst_ports: ["443"],  protocols: [tcp], description: "https from edge" }
+    - { priority: 120, action: allow, src_prefixes: [192.168.52.0/24], dst_ports: ["9092"], protocols: [tcp], description: "kafka from analytics" }
+    - { priority: 130, action: allow, src_prefixes: [192.168.51.0/24], dst_ports: ["8088"], protocols: [tcp], description: "spark history server" }
+    - { priority: 140, action: deny,  src_prefixes: [192.168.0.0/16],  dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 150, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["8883","443"], protocols: [tcp], description: "no external mqtt/https to core" }
+    - { priority: 160, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp] }
+    - { priority: 170, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 180, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp] }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 11) analytics-spark inbound — 10 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-spark-inbound, labels: { tenant: analytics, tier: compute } }
+spec:
+  stage: inbound
+  eni_names: [eni-spark-01, eni-spark-02, eni-spark-03]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [192.168.52.0/24], dst_ports: ["9092"], protocols: [tcp], description: "from kafka" }
+    - { priority: 110, action: allow, src_prefixes: [192.168.51.0/24], dst_ports: ["7077"], protocols: [tcp], description: "intra-spark master" }
+    - { priority: 120, action: allow, src_prefixes: [192.168.51.0/24], dst_ports: ["4040-4050"], protocols: [tcp], description: "spark ui" }
+    - { priority: 130, action: allow, src_prefixes: [192.168.42.0/24], dst_ports: ["8088"], protocols: [tcp], description: "history server from iot-core" }
+    - { priority: 140, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["7077"], protocols: [tcp], description: "no external master access" }
+    - { priority: 150, action: deny,  src_prefixes: [192.168.0.0/16],  dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 160, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp] }
+    - { priority: 170, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 180, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp] }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 12) shared-ingress inbound — 12 rules
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-shared-ingress-inbound, labels: { tenant: shared, tier: ingress } }
+spec:
+  stage: inbound
+  eni_names: [eni-shared-ingress-01, eni-shared-ingress-02]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [0.0.0.0/0], dst_ports: ["80","443"], protocols: [tcp], description: "public http(s)" }
+    - { priority: 110, action: allow, src_prefixes: [0.0.0.0/0], dst_ports: ["8080","8443"], protocols: [tcp], description: "alt http(s)" }
+    - { priority: 120, action: allow, src_prefixes: [0.0.0.0/0], dst_ports: ["53"], protocols: [udp,tcp], description: "public dns" }
+    - { priority: 130, action: deny,  src_prefixes: [203.0.113.0/24], description: "blocked source range" }
+    - { priority: 140, action: deny,  src_prefixes: [198.18.0.0/15],  description: "blocked benchmark range" }
+    - { priority: 150, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 160, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["1900","11211","17","19"], description: "amplification ports" }
+    - { priority: 170, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp] }
+    - { priority: 180, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 190, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp] }
+    - { priority: 200, action: deny,  src_prefixes: [192.168.0.0/16],  description: "no overlay ingress from outside" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+
+# ===== NEW in 05: gaming ACLs =====
+---
+# 13) gaming-lobby inbound — 10 rules (latency-sensitive, DDoS-protected)
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-gaming-lobby-inbound, labels: { tenant: gaming, tier: lobby } }
+spec:
+  stage: inbound
+  eni_names: [eni-gaming-lobby-01, eni-gaming-lobby-02, eni-gaming-lobby-03, eni-gaming-lobby-04]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["443"],  protocols: [tcp], description: "https from players" }
+    - { priority: 110, action: allow, src_prefixes: [0.0.0.0/0],       dst_ports: ["8443"], protocols: [tcp], description: "websocket wss" }
+    - { priority: 120, action: allow, src_prefixes: [192.168.62.0/24], dst_ports: ["443","8443"], protocols: [tcp], description: "from match servers" }
+    - { priority: 130, action: allow, src_prefixes: [10.128.0.0/16],   dst_ports: ["443","8443"], protocols: [tcp], description: "cross-region lobby" }
+    - { priority: 140, action: deny,  src_prefixes: [203.0.113.0/24],  description: "block abuse range" }
+    - { priority: 150, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 160, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp], description: "ops icmp" }
+    - { priority: 170, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 180, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp], description: "node-exporter" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 14) gaming-match inbound — 12 rules (UDP game traffic + anti-cheat)
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-gaming-match-inbound, labels: { tenant: gaming, tier: match } }
+spec:
+  stage: inbound
+  eni_names: [eni-gaming-match-01, eni-gaming-match-02, eni-gaming-match-03, eni-gaming-match-04]
+  rules:
+    - { priority: 100, action: allow, src_prefixes: [192.168.61.0/24], dst_ports: ["7777-7800"], protocols: [udp], description: "game UDP from lobby" }
+    - { priority: 110, action: allow, src_prefixes: [192.168.61.0/24], dst_ports: ["443"],       protocols: [tcp], description: "https from lobby" }
+    - { priority: 120, action: allow, src_prefixes: [10.128.0.0/16],   dst_ports: ["7777-7800"], protocols: [udp], description: "cross-region game traffic" }
+    - { priority: 130, action: allow, src_prefixes: [10.128.0.0/16],   dst_ports: ["443"],       protocols: [tcp], description: "cross-region control" }
+    - { priority: 140, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["7777-7800"], protocols: [udp], description: "no direct player UDP" }
+    - { priority: 150, action: deny,  src_prefixes: [0.0.0.0/0],       dst_ports: ["22","23","3389"], protocols: [tcp], description: "no remote shell" }
+    - { priority: 160, action: deny,  src_prefixes: [192.168.11.0/24], description: "no bank traffic" }
+    - { priority: 170, action: deny,  src_prefixes: [192.168.21.0/24], description: "no retail traffic" }
+    - { priority: 180, action: allow_and_continue, src_prefixes: [10.255.0.0/16], protocols: [icmp], description: "ops icmp" }
+    - { priority: 190, action: deny,  src_prefixes: [0.0.0.0/0],       protocols: [icmp] }
+    - { priority: 200, action: allow, src_prefixes: [10.255.0.0/16],   dst_ports: ["9100"], protocols: [tcp], description: "node-exporter" }
+    - { priority: 1000, action: deny, src_prefixes: [0.0.0.0/0],       description: "catch-all" }
+---
+# 15) gaming outbound — 8 rules (both lobby + match egress)
+apiVersion: dashcenter.v1
+kind: AclPolicy
+metadata: { name: acl-gaming-outbound, labels: { tenant: gaming } }
+spec:
+  stage: outbound
+  eni_names: [eni-gaming-lobby-01, eni-gaming-lobby-02, eni-gaming-lobby-03, eni-gaming-lobby-04, eni-gaming-match-01, eni-gaming-match-02, eni-gaming-match-03, eni-gaming-match-04]
+  rules:
+    - { priority: 100, action: allow, dst_prefixes: [192.168.61.0/24], description: "to gaming-lobby" }
+    - { priority: 110, action: allow, dst_prefixes: [192.168.62.0/24], description: "to gaming-match" }
+    - { priority: 120, action: allow, dst_prefixes: [10.128.0.0/16],   description: "cross-region" }
+    - { priority: 130, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["443"], protocols: [tcp], description: "outbound https" }
+    - { priority: 140, action: allow, dst_prefixes: [0.0.0.0/0],       dst_ports: ["53"],  protocols: [udp,tcp], description: "dns" }
+    - { priority: 150, action: deny,  dst_prefixes: [192.168.11.0/24], description: "no bank" }
+    - { priority: 160, action: deny,  dst_prefixes: [192.168.41.0/24], description: "no iot" }
+    - { priority: 1000, action: deny, dst_prefixes: [0.0.0.0/0],       description: "catch-all egress deny" }

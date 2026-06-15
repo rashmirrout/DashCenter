@@ -1,0 +1,29 @@
+# 10-advanced-routes.yaml — advanced route patterns:
+#   - Multi-hop ECMP with 3+ members
+#   - Weighted service_tunnel failover
+#   - Gaming cross-region blackhole override
+
+# 3-way ECMP for shared egress: split across NAT, cross-region, DDoS scrub.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-shared-egress-ecmp, labels: { tenant: shared, class: ecmp } }
+spec:
+  eni_names: [eni-shared-egress-01, eni-shared-egress-02, eni-shared-egress-03]
+  routes:
+    - prefix: 198.51.100.0/24
+      ecmp_members:
+        - { next_hop_type: service_tunnel, next_hop_target: st-internet-egress, weight: 50 }
+        - { next_hop_type: service_tunnel, next_hop_target: st-cross-region,    weight: 30 }
+        - { next_hop_type: service_tunnel, next_hop_target: st-ddos-scrub,      weight: 20 }
+      metric: 15
+---
+# Gaming blackhole: if st-ddos-scrub is unreachable, drop to prevent leak.
+apiVersion: dashcenter.v1
+kind: RoutePolicy
+metadata: { name: rp-gaming-blackhole-fallback, labels: { tenant: gaming, class: failsafe } }
+spec:
+  eni_names: [eni-gaming-lobby-03, eni-gaming-lobby-04]
+  routes:
+    - { prefix: 198.18.0.0/15,   next_hop_type: drop, metric: 5,    description: "benchmark range — always drop" }
+    - { prefix: 203.0.113.0/24,  next_hop_type: drop, metric: 5,    description: "doc range — always drop" }
+    - { prefix: 0.0.0.0/0,       next_hop_type: service_tunnel, next_hop_target: st-ddos-scrub, metric: 200, description: "fallback via scrub" }
