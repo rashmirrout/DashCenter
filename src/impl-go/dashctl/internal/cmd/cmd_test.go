@@ -301,7 +301,11 @@ func TestApplyHappyPath(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "v.yaml")
 	_ = os.WriteFile(p, []byte("apiVersion: dashcenter.v1\nkind: Vnet\nmetadata: { name: v1, namespace: ns }\nspec: { vni: 1001 }\n"), 0o600)
-	fc := &fakeClient{}
+	fc := &fakeClient{
+		getFn: func(_ context.Context, _, _, _ string) (*client.StoredItem, error) {
+			return nil, dashErrors.New(dashErrors.CodeNotFound, "not found")
+		},
+	}
 	a, out, _ := testApp(t, fc)
 	if code := runArgs(a, "apply", "-f", p); code != 0 {
 		t.Fatalf("exit=%d out=%s", code, out)
@@ -309,7 +313,7 @@ func TestApplyHappyPath(t *testing.T) {
 	if len(fc.putCalls) != 1 || fc.putCalls[0].Kind != "vnet" || fc.putCalls[0].NS != "ns" {
 		t.Fatalf("%+v", fc.putCalls)
 	}
-	if !strings.Contains(out.String(), "vnet/v1 apply in namespace ns") {
+	if !strings.Contains(out.String(), "vnet/v1 CREATE in namespace ns") {
 		t.Fatalf("%s", out.String())
 	}
 }
@@ -335,7 +339,11 @@ func TestApplyDryRunServer(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "v.yaml")
 	_ = os.WriteFile(p, []byte("apiVersion: dashcenter.v1\nkind: Vnet\nmetadata: { name: v1 }\nspec: {vni:1}\n"), 0o600)
-	fc := &fakeClient{}
+	fc := &fakeClient{
+		getFn: func(_ context.Context, _, _, _ string) (*client.StoredItem, error) {
+			return nil, dashErrors.New(dashErrors.CodeNotFound, "not found")
+		},
+	}
 	a, out, _ := testApp(t, fc)
 	if code := runArgs(a, "apply", "-f", p, "--dry-run", "server"); code != 0 {
 		t.Fatal()
@@ -343,7 +351,7 @@ func TestApplyDryRunServer(t *testing.T) {
 	if len(fc.putCalls) != 0 {
 		t.Fatal("server dry-run must not Put")
 	}
-	if !strings.Contains(out.String(), "would apply") {
+	if !strings.Contains(out.String(), "would create") {
 		t.Fatalf("%s", out.String())
 	}
 }

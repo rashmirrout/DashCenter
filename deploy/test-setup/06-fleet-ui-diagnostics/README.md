@@ -239,3 +239,41 @@ kicks in so the workflow still works end-to-end.
 - [`manifest/bootstrap.py`](manifest/bootstrap.py) — Python loader for the 160-object superset (used as provision.sh fallback)
 - [`manifest/*.yaml`](manifest/) — dashctl-ready YAML manifests (00–10), applied recursively by provision.sh
 - [04-ha-fleet](../04-ha-fleet/README.md) — same HA controllers, no console (this repo's scripts mirror that one's pattern)
+
+## Docker Exec — in-container diagnostics
+
+Both `dash-sim` and `dashd` images ship their respective operator CLIs
+inside the container (Alpine-based runtime with shell access).
+
+### dash-sim containers
+
+```bash
+# Enter any sim container:
+docker exec -it dc-diag-sim-01 sh
+
+# Inside — dash-sim-client talks to localhost:50051:
+dash-sim-client ping --target localhost:50051
+dash-sim-client dpu-counters --target localhost:50051 -o table
+dash-sim-client dpu-counters --include-enis --target localhost:50051
+dash-sim-client reset-counters --target localhost:50051
+dash-sim-client kinds --target localhost:50051 -o table
+
+# One-liner (no shell entry needed):
+docker exec dc-diag-sim-01 dash-sim-client reset-counters --target localhost:50051
+```
+
+### dashd containers
+
+```bash
+# Enter any dashd container:
+docker exec -it dc-diag-dashd-1 sh
+
+# Inside — dashctl talks to localhost:8443:
+dashctl version --endpoint http://localhost:8443 --insecure
+dashctl counters --endpoint http://localhost:8443 --insecure
+dashctl counters details --dpu=dpu-sim-01 --endpoint http://localhost:8443 --insecure
+dashctl counters clear --reset-sim --endpoint http://localhost:8443 --insecure
+
+# One-liner:
+docker exec dc-diag-dashd-1 dashctl counters --endpoint http://localhost:8443 --insecure
+```

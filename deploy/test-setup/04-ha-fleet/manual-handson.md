@@ -389,6 +389,87 @@ Remove-Item .\new-cache.yaml,.\eni-edit.yaml
 
 ---
 
+## Step 10a · Referential integrity (FK validation)
+
+**Objective**: prove dashd rejects wrong-order creates and protects
+against orphan-creating deletes.
+
+### Why this matters at the dashd level
+
+dashd is the fleet controller. When an operator PUTs an ENI spec that
+says `vnet_name: "vnet-nonexistent"`, dashd checks whether that vnet
+exists in the same namespace. If not — the PUT is rejected with a
+clear error. The ENI is never stored, never dispatched to DPUs.
+
+On the Delete side, dashd checks whether anything still references
+the object you're deleting. Deleting a vnet while ENIs reference it
+would orphan those ENIs and drop all their traffic silently.
+
+### Experiment A — wrong config: ENI with missing vnet (FAIL)
+
+```powershell
+@"
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-orphan-test }
+spec:
+  vnet_name: vnet-nonexistent
+  mac_address: aa:bb:cc:99:00:01
+  underlay_ip: 10.0.99.1
+  admin_state: up
+"@ | Set-Content -Encoding ascii .\bad-eni.yaml
+
+./dashctl.exe apply -f .\bad-eni.yaml
+```
+
+**Error:**
+```
+Error: invalid argument: eni.vnet_name="vnet-nonexistent":
+  namespace: cross-namespace reference rejected
+  (referenced default/vnet/vnet-nonexistent not found in this namespace)
+```
+
+**Why it failed**: dashd's `CheckEni()` called `refExists()` to look up
+`vnet-nonexistent` in the `default` namespace. The store returned
+`ErrNotFound`. The ENI spec was not persisted.
+
+### Experiment B — wrong config: delete vnet with dependents (FAIL)
+
+```powershell
+./dashctl.exe delete vnet bank-prod-web
+```
+
+**Error:**
+```
+Error: failed precondition: referential integrity: object has dependents:
+  cannot delete vnet "bank-prod-web" — eni "eni-bank-web-01" still references it
+```
+
+**Why it failed**: dashd's `CheckDelete()` scanned all ENIs in the
+`default` namespace and found `eni-bank-web-01` with
+`vnet_name: "bank-prod-web"`. Deleting the vnet would orphan the ENI.
+
+**The right approach** — delete dependents first (top-down):
+```
+delete eni-bank-web-01  →  then delete vnet bank-prod-web
+```
+
+### Experiment C — validate manifests against the live store
+
+```powershell
+./dashctl.exe validate -f manifest/
+# Expected: all objects accepted (manifests are in correct tier order)
+```
+
+**Why it works**: the manifest files are numbered `00-vnets.yaml`,
+`01-enis.yaml`, etc. — they naturally follow the dependency order.
+
+```powershell
+Remove-Item .\bad-eni.yaml
+```
+
+---
+
 ## Step 11 · HA planned switchover (drains old, promotes new)
 
 **Objective**: roll the active role from one DPU to the other inside an `active_standby` HA set, with a controlled `drain` on the way down.

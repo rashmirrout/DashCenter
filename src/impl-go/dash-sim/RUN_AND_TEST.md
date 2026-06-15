@@ -114,6 +114,27 @@ Optional preload:
 .\bin\dash-sim.exe --scenario .\dash-sim\testdata\scenarios\small.yaml
 ```
 
+### 5a. Docker: in-container diagnostics
+
+The dash-sim Docker image ships both `dash-sim` and `dash-sim-client`
+(Alpine-based runtime with shell). Operators can exec into any running
+sim container for direct diagnostics:
+
+```bash
+# Enter the container:
+docker exec -it dc-console-sim-01 sh
+
+# All dash-sim-client commands work against localhost:
+dash-sim-client ping --target localhost:50051
+dash-sim-client dpu-counters --target localhost:50051 -o table
+dash-sim-client dpu-counters --include-enis --target localhost:50051
+dash-sim-client reset-counters --target localhost:50051
+dash-sim-client kinds --target localhost:50051 -o table
+
+# One-liner (no shell entry):
+docker exec dc-console-sim-01 dash-sim-client reset-counters --target localhost:50051
+```
+
 ## 6. Run dash-redis-adapter (Redis APP_DB backend)
 
 Self-contained demo (no Redis required — uses embedded miniredis):
@@ -353,6 +374,264 @@ dashctl counters --endpoint http://localhost:28443 --insecure
 # (values near zero — fresh accumulation from the ~6s of ticking since reset)
 ```
 
+
+## 9c. Referential integrity — FK validation
+
+### Why this matters
+
+The DASH pipeline is a **dependency graph**, not a flat list. An ENI
+needs a VNet to know which virtual network it belongs to. A route
+needs a route group to be reachable. An ACL rule needs its ACL group.
+If any of these references are wrong — a typo, a missing parent, a
+wrong creation order — the DPU silently drops packets. The operator
+discovers the problem minutes later through counter spikes, not at
+the moment of misconfiguration.
+
+With `--strict-refs` (enabled by default), dash-sim validates **all
+25 foreign-key relationships at apply time**. A bad reference gets
+an immediate, actionable error — not a silent drop 20 minutes later.
+
+**Launch with FK validation (default):**
+
+```powershell
+.\bin\dash-sim.exe --grpc-listen :50051 --admin-listen :8080 --device-id dpu-sim-01
+```
+
+**Disable for legacy/test pipelines:**
+
+```powershell
+.\bin\dash-sim.exe --strict-refs=false --grpc-listen :50051 --admin-listen :8080
+```
+
+### Understanding the dependency graph
+
+Every DASH object kind lives on one of three tiers. Objects on higher
+tiers **depend on** objects on lower tiers. You must create lower-tier
+objects first.
+
+```
+                          ┌─────────────────────────────────────────────┐
+                          │              Tier 2 (leaf objects)          │
+                          │  eni_route → eni + route_group             │
+                          │  acl_in/out → eni + acl_group              │
+                          │  route_rule → eni + vnet                   │
+                          │  meter → eni                               │
+                          │  ha_scope_config → ha_scope + ha_set       │
+                          └─────────────────┬───────────────────────────┘
+                                            │ depends on
+                          ┌─────────────────▼───────────────────────────┐
+                          │              Tier 1 (mid-level)             │
+                          │  eni → vnet (+ optional qos)               │
+                          │  acl_rule → acl_group (+ optional tags)    │
+                          │  route → route_group + vnet/tunnel         │
+                          │  vnet_mapping → vnet (+ optional tunnel)   │
+                          │  meter_rule → meter_policy                 │
+                          │  ha_scope → ha_set                         │
+                          └─────────────────┬───────────────────────────┘
+                                            │ depends on
+                          ┌─────────────────▼───────────────────────────┐
+                          │              Tier 0 (roots — no deps)       │
+                          │  vnet, qos, acl_group, route_group,        │
+                          │  routing_appliance, prefix_tag, tunnel,    │
+                          │  meter_policy, outbound_port_map, ha_set   │
+                          └─────────────────────────────────────────────┘
+
+      Rule: create bottom-up (Tier 0 → Tier 1 → Tier 2)
+            delete top-down  (Tier 2 → Tier 1 → Tier 0)
+```
+
+### Experiment 1 — wrong config: ENI references a vnet that doesn't exist
+
+**What we'll try**: create an ENI that references `"vnet-bllue"` — a
+typo for `"vnet-blue"`. The store is empty, so no vnet exists at all.
+
+```powershell
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind eni --key eni-bad `
+  --value '{"vnet":"vnet-bllue"}'
+```
+
+**What happens**: the Apply is **rejected**.
+
+```
+Apply rejected: referential integrity: eni references vnet "vnet-bllue"
+(field vnet) which does not exist; create it first
+```
+
+**Why it failed**: ENI is a Tier 1 object. It has a `vnet` field that
+references a `vnet` object (Tier 0). The sim looked up `"vnet-bllue"`
+in the store's vnet table — it's not there. The error tells you:
+- **what** you tried to create (`eni`)
+- **what's missing** (`vnet "vnet-bllue"`)
+- **which field** carries the bad reference (`vnet`)
+- **how to fix it** ("create it first")
+
+The ENI was **not stored** — no silent corruption.
+
+### Experiment 2 — wrong config: Tier 2 object before its Tier 1 parent
+
+**What we'll try**: create an `eni_route` (Tier 2) that binds
+`"eni-ghost"` to a route group — but `eni-ghost` doesn't exist.
+
+```powershell
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind eni_route --key eni-ghost `
+  --value '{"group_id":"rg-prod"}'
+```
+
+**What happens**: **rejected** — two FK violations.
+
+```
+Apply rejected: referential integrity: eni_route references eni "eni-ghost"
+(field key.eni) which does not exist; create it first
+```
+
+**Why it failed**: `eni_route` is Tier 2. Its key contains the ENI
+name (`key[0] = "eni-ghost"`), and its `group_id` field references a
+route group. Both are checked. The ENI doesn't exist, so the first
+check fails immediately. Even if the ENI existed, `"rg-prod"` would
+also fail unless a route group by that name was created first.
+
+### Experiment 3 — wrong config: ACL rule without its ACL group
+
+**What we'll try**: create an ACL rule in group `"acl-web"` — but the
+group doesn't exist.
+
+```powershell
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind acl_rule --key acl-web:100 `
+  --value '{}'
+```
+
+**What happens**: **rejected**.
+
+```
+Apply rejected: referential integrity: acl_rule references acl_group "acl-web"
+(field key.group_id) which does not exist; create it first
+```
+
+**Why it failed**: ACL rules live inside ACL groups. The rule's key
+starts with the group ID (`key[0] = "acl-web"`). The group must exist
+first because the sim needs to know the rule belongs to a valid group.
+
+### Experiment 4 — right config: build a complete ENI pipeline bottom-up
+
+Now let's do it correctly — Tier 0 first, then Tier 1, then Tier 2.
+Every Apply succeeds because each object's dependencies already exist.
+
+```powershell
+# ─── Tier 0: create roots (no dependencies) ─────────────────────
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind vnet --key vnet-lab --value '{"vni":9999}'
+# → accepted ✅  (vnet is Tier 0 — no FK checks needed)
+
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind acl_group --key acl-lab --value '{}'
+# → accepted ✅
+
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind route_group --key rg-lab --value '{}'
+# → accepted ✅
+
+# ─── Tier 1: reference Tier 0 ───────────────────────────────────
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind eni --key eni-lab --value '{"vnet":"vnet-lab"}'
+# → accepted ✅  (vnet-lab exists — FK check passes)
+
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind acl_rule --key acl-lab:100 --value '{}'
+# → accepted ✅  (acl_group "acl-lab" exists)
+
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind route --key rg-lab:10.0.0.0/8 `
+  --value '{"vnet":"vnet-lab"}'
+# → accepted ✅  (route_group "rg-lab" + vnet "vnet-lab" both exist)
+
+# ─── Tier 2: reference Tier 0 + Tier 1 ──────────────────────────
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind eni_route --key eni-lab `
+  --value '{"group_id":"rg-lab"}'
+# → accepted ✅  (eni "eni-lab" + route_group "rg-lab" both exist)
+
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind acl_in --key eni-lab:1 `
+  --value '{"v4_acl_group_id":"acl-lab"}'
+# → accepted ✅  (eni "eni-lab" + acl_group "acl-lab" both exist)
+```
+
+**What you built**: a complete ENI pipeline — vnet → eni → eni_route
+→ acl_in, with routes and ACL rules. Every object's FK references
+resolved successfully because you created them in tier order.
+
+### Experiment 5 — fix-then-retry workflow
+
+Real operators hit FK errors by accident (typos, wrong order). The
+workflow is simple: read the error → create what's missing → retry.
+
+```powershell
+# Step 1: attempt fails (tunnel doesn't exist)
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind route --key rg-lab:192.168.0.0/16 `
+  --value '{"tunnel":"tun-missing"}'
+# → rejected: route references tunnel "tun-missing" which does not exist
+
+# Step 2: create the missing tunnel
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind tunnel --key tun-missing --value '{}'
+# → accepted ✅
+
+# Step 3: retry the route — now succeeds
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind route --key rg-lab:192.168.0.0/16 `
+  --value '{"tunnel":"tun-missing"}'
+# → accepted ✅
+```
+
+### Experiment 6 — backward compatibility: disable strict refs
+
+For legacy pipelines that create objects in arbitrary order, disable
+FK validation:
+
+```powershell
+# Start sim with --strict-refs=false
+.\bin\dash-sim.exe --strict-refs=false --grpc-listen :50051 --admin-listen :8080
+
+# Now any Apply succeeds regardless of FK order
+.\bin\dash-sim-client.exe --target localhost:50051 apply `
+  --kind eni --key eni-any --value '{"vnet":"nonexistent"}'
+# → accepted (no FK check — the dangling ref sits silently in the store)
+```
+
+> **Warning**: with `--strict-refs=false`, typos and missing parents go
+> undetected. You'll only discover them at packet time as traffic drops.
+
+### Common FK relationships (quick reference)
+
+| Object (Tier) | References | Via field |
+|---|---|---|
+| eni (T1) | vnet, qos | `vnet`, `qos` |
+| acl_rule (T1) | acl_group, prefix_tag | `key[0]`, `src_tag/dst_tag` |
+| route (T1) | route_group, vnet, tunnel, appliance | `key[0]`, `vnet`, `tunnel`, `appliance` |
+| vnet_mapping (T1) | vnet, tunnel, port_map | `key[0]`, `tunnel`, `port_map` |
+| eni_route (T2) | eni, route_group | `key[0]`, `group_id` |
+| acl_in/out (T2) | eni, acl_group | `key[0]`, `v4/v6_acl_group_id` |
+| route_rule (T2) | eni, vnet | `key[0]`, `vnet` |
+| meter (T2) | eni | `key[0]` |
+
+### Tests
+
+```powershell
+# 51 unit tests covering all 25 FK families (100% coverage on core functions)
+& $go test -v -count=1 ./internal/sim/model/ -run TestRefs
+
+# 9 integration tests over gRPC (reject, accept, error quality, fix-then-retry)
+& $go test -v -count=1 ./test/integration/ -run TestIntegration_Refs
+```
+
+See [referential-integrity-validation.md](../../../docs/dashd-features/referential-integrity-validation.md)
+for the full FK map and design.
+
+---
 
 ## 10. Object kinds
 

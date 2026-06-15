@@ -186,6 +186,44 @@ body {
     transform: rotate(360deg);
   }
 }
+@keyframes particle-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+@keyframes shimmer-x {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+@keyframes heartbeat {
+  0%,
+  60%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  20% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+}
+@keyframes gradient-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
 
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out;
@@ -207,6 +245,29 @@ body {
 }
 .animate-spin-slow {
   animation: ring-spin 8s linear infinite;
+}
+.animate-particle-flow {
+  animation: particle-flow 1.5s linear infinite;
+}
+.animate-particle-flow-slow {
+  animation: particle-flow 3s linear infinite;
+}
+.animate-heartbeat {
+  animation: heartbeat 1.6s ease-in-out infinite;
+}
+.animate-gradient-shift {
+  background-size: 200% 200%;
+  animation: gradient-shift 6s ease infinite;
+}
+.animate-shimmer-x {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-x 2.5s ease-in-out infinite;
 }
 
 .skeleton-shimmer {

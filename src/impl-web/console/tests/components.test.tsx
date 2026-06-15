@@ -178,6 +178,10 @@ describe("Sidebar · NAV_GROUPS", () => {
       "/eni-stats",
       "/audit",
       "/health",
+      // A-IF: new interactive-forms page added above /admin in the
+      // Operate group; preserves Admin Ops as the developer YAML
+      // experimentation surface.
+      "/resources",
       "/admin",
       "/commands",
       "/debug",

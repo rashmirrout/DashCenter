@@ -18,6 +18,7 @@ func (a *Application) newApplyCmd() *cobra.Command {
 		files     []string
 		recursive bool
 		dryRun    string
+		force     bool
 	)
 	c := &cobra.Command{
 		Use:   "apply",
@@ -26,6 +27,17 @@ func (a *Application) newApplyCmd() *cobra.Command {
 
 Manifests may be a single YAML/JSON file, a directory of YAML/JSON files,
 or "-" for stdin. Multi-document YAML (separated by '---') is supported.
+
+Supports EniBundle kind: a single document containing an ENI and its full
+dependency chain (vnet, vnet_mappings, route_policy, acl_policies). The
+bundle is auto-expanded into individual specs in the correct tier order.
+
+Create vs. modify detection:
+  - New objects are created normally.
+  - Existing objects trigger a WARNING listing the modifications.
+  - Without --force, existing-object modifications are BLOCKED with
+    instructions to use --force or dashctl replace for individual updates.
+  - With --force, existing objects are overwritten.
 
 Each envelope carries:
   apiVersion: dashcenter.v1
@@ -46,12 +58,15 @@ When metadata.generation is set it is used as expected_generation (CAS).
 			if err != nil {
 				return errors.Wrap(errors.CodeInvalidArgument, "apply", err)
 			}
-			return a.runApply(cmd.Context(), envs, dryRun)
+			// Expand EniBundle envelopes into individual spec envelopes.
+			envs = manifest.ExpandBundles(envs)
+			return a.runApply(cmd.Context(), envs, dryRun, force)
 		},
 	}
 	c.Flags().StringArrayVarP(&files, "filename", "f", nil, "manifest file, directory, or '-' for stdin (repeatable)")
 	c.Flags().BoolVarP(&recursive, "recursive", "R", false, "recursively process the given directory")
 	c.Flags().StringVar(&dryRun, "dry-run", "none", "none|client|server (server uses dashd SimulateApply when available)")
+	c.Flags().BoolVar(&force, "force", false, "allow overwriting existing objects (without this, modifications are blocked)")
 	return c
 }
 
@@ -59,15 +74,15 @@ type applyRow struct {
 	Kind       string
 	Namespace  string
 	Name       string
-	Op         string
+	Op         string // "create", "modify", "skip", "dry-run", "blocked"
 	Generation uint64
 	Result     string
 	Err        error
 }
 
-func (a *Application) runApply(parent context.Context, envs []*manifest.Envelope, dryRun string) error {
+func (a *Application) runApply(parent context.Context, envs []*manifest.Envelope, dryRun string, force bool) error {
 	if dryRun == "client" {
-		return a.renderApplyRows(synthesiseClientDryRunRows(envs))
+		return a.renderApplyRows(synthesiseClientDryRunRows(envs), false)
 	}
 	cl, rc, err := a.dial(parent)
 	if err != nil {
@@ -79,17 +94,25 @@ func (a *Application) runApply(parent context.Context, envs []*manifest.Envelope
 
 	rows := make([]applyRow, 0, len(envs))
 	var firstErr error
+	blocked := 0
 	for _, env := range envs {
-		row, err := a.applyOne(ctx, cl, env, rc.Namespace, dryRun)
+		row, err := a.applyOne(ctx, cl, env, rc.Namespace, dryRun, force)
 		rows = append(rows, row)
+		if row.Op == "blocked" {
+			blocked++
+		}
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	if err := a.renderApplyRows(rows); err != nil {
+	if err := a.renderApplyRows(rows, blocked > 0); err != nil {
 		if firstErr == nil {
 			firstErr = err
 		}
+	}
+	if blocked > 0 && firstErr == nil {
+		firstErr = errors.Newf(errors.CodeConflict,
+			"apply: %d object(s) would be modified; use --force to overwrite, or dashctl replace for individual updates", blocked)
 	}
 	return firstErr
 }
@@ -109,13 +132,13 @@ func synthesiseClientDryRunRows(envs []*manifest.Envelope) []applyRow {
 	return rows
 }
 
-func (a *Application) applyOne(ctx context.Context, cl client.Client, env *manifest.Envelope, defaultNS string, dryRun string) (applyRow, error) {
+func (a *Application) applyOne(ctx context.Context, cl client.Client, env *manifest.Envelope, defaultNS string, dryRun string, force bool) (applyRow, error) {
 	ns := firstNonEmpty(env.Metadata.Namespace, defaultNS)
 	row := applyRow{
 		Kind:       strings.ToLower(env.Kind),
 		Namespace:  ns,
 		Name:       env.Metadata.Name,
-		Op:         "apply",
+		Op:         "create",
 		Generation: env.Metadata.Generation,
 	}
 	if env.Kind == "Inventory" {
@@ -151,6 +174,21 @@ func (a *Application) applyOne(ctx context.Context, cl client.Client, env *manif
 		row.Result = "dry-run"
 		return row, nil
 	}
+
+	// Create-vs-update detection: check if the object already exists.
+	existing, getErr := cl.Get(ctx, ns, ki.StoreKind, env.Metadata.Name)
+	if getErr == nil && existing != nil {
+		// Object exists — this is a modification.
+		if !force {
+			row.Op = "blocked"
+			row.Result = "blocked"
+			row.Generation = existing.Generation
+			return row, nil
+		}
+		row.Op = "modify"
+	}
+	// getErr with CodeNotFound → new object (create). Other errors → try the PUT anyway.
+
 	res, err := cl.Put(ctx, ns, ki.StoreKind, env.Metadata.Name, body)
 	if err != nil {
 		row.Result = "fail"
@@ -162,9 +200,8 @@ func (a *Application) applyOne(ctx context.Context, cl client.Client, env *manif
 	return row, nil
 }
 
-func (a *Application) renderApplyRows(rows []applyRow) error {
-	// Minimal hand-rolled rendering — apply rows are too summary-shaped for
-	// the generic table renderer (no spec body). One line per row.
+func (a *Application) renderApplyRows(rows []applyRow, hasBlocked bool) error {
+	created, modified, failed, blockedCount := 0, 0, 0, 0
 	for _, r := range rows {
 		ns := r.Namespace
 		if ns == "" {
@@ -172,12 +209,38 @@ func (a *Application) renderApplyRows(rows []applyRow) error {
 		}
 		switch r.Result {
 		case "ok":
-			fmt.Fprintf(a.Out, "%s/%s %s in namespace %s (generation %d)\n", r.Kind, r.Name, r.Op, ns, r.Generation)
+			switch r.Op {
+			case "create":
+				fmt.Fprintf(a.Out, "%s/%s CREATE in namespace %s (generation %d)\n", r.Kind, r.Name, ns, r.Generation)
+				created++
+			case "modify":
+				fmt.Fprintf(a.Out, "%s/%s MODIFY in namespace %s (generation %d)\n", r.Kind, r.Name, ns, r.Generation)
+				modified++
+			default:
+				fmt.Fprintf(a.Out, "%s/%s %s in namespace %s (generation %d)\n", r.Kind, r.Name, r.Op, ns, r.Generation)
+				created++
+			}
 		case "dry-run":
 			fmt.Fprintf(a.Out, "%s/%s would %s in namespace %s\n", r.Kind, r.Name, r.Op, ns)
+		case "blocked":
+			fmt.Fprintf(a.Out, "%s/%s BLOCKED — already exists (generation %d); use --force to overwrite\n", r.Kind, r.Name, r.Generation)
+			blockedCount++
 		case "fail":
-			fmt.Fprintf(a.Out, "%s/%s FAILED %s in namespace %s: %v\n", r.Kind, r.Name, r.Op, ns, r.Err)
+			fmt.Fprintf(a.Out, "%s/%s FAILED in namespace %s: %v\n", r.Kind, r.Name, ns, r.Err)
+			failed++
 		}
+	}
+	// Summary line
+	total := len(rows)
+	if total > 0 {
+		fmt.Fprintf(a.Out, "\nApplied %d object(s): %d created, %d modified, %d blocked, %d failed\n",
+			total, created, modified, blockedCount, failed)
+	}
+	if hasBlocked {
+		fmt.Fprintf(a.Out, "\nWARNING: %d object(s) already exist and were NOT modified.\n", blockedCount)
+		fmt.Fprintf(a.Out, "  To overwrite:  dashctl apply -f <file> --force\n")
+		fmt.Fprintf(a.Out, "  To see diff:   dashctl diff -f <file>\n")
+		fmt.Fprintf(a.Out, "  To update one: dashctl replace <kind> <name> -f <file>\n")
 	}
 	return nil
 }

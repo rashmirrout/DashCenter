@@ -60,6 +60,9 @@ func newHarness(t *testing.T, deviceID string) *harness {
 	t.Helper()
 	bus := events.New()
 	store := model.New(bus)
+	// Disable strict FK refs — integration counter tests create objects
+	// without their parents. FK validation is tested in model/refs_test.go.
+	store.SetStrictRefs(false)
 	reg := counters.New()
 	fi := faults.New()
 	srv := server.New(store, bus, fi, reg).WithDeviceID(deviceID)

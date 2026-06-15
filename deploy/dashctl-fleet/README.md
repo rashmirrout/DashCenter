@@ -101,6 +101,7 @@ The script exits **0** with a green `PASS` line when every command path is verif
 | 11 | `dashctl dpu drift --dpu dpu-sim-01`   | Converges to 0 within 30 s |
 | 12 | `dashctl delete eni eni-db-03`         | Delete + 404-on-re-get |
 | 13 | `dashctl explain vnet`                 | Offline field reference |
+| 14 | `dashctl validate -f manifests/`       | Pre-flight FK validation (all accepted) |
 
 Every command is executed inside the `dashctl` container. If `bin/dashctl` (or `.exe`) was built on the host, the script ALSO runs the host binary in steps 1 to prove the host path works against the same fleet.
 

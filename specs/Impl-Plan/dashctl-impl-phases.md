@@ -4,7 +4,7 @@
 > **Ground truth**: [`specs/HLD/dashctl-hld.md`](../HLD/dashctl-hld.md) and
 > [`specs/LLD/dashctl-lld.md`](../LLD/dashctl-lld.md).
 > **Companion**: dashd phase tracker is [`impl-phases.md`](impl-phases.md).
-> **Last updated**: 2026-06-09
+> **Last updated**: 2026-06-15
 
 ---
 
@@ -144,6 +144,8 @@ no native streaming, no `ApplyBatch`.
 | C1-G10 | Streaming Ctrl-C | `events --watch` cancels within 250 ms of SIGINT | ⚬ Deferred to Phase 2 — `events` is a clean Unimplemented stub in Phase 1 |
 | C1-G11 | Cross-platform build | `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, `windows/amd64` | ✅ [`make -C src/impl-go/dashctl build-all`](../../src/impl-go/dashctl/Makefile) covers all 5 platforms |
 | C1-G12 | Integration suite | 13 scenarios pass via `go test -tags=integration` | ✅ **All 13 scenarios PASS** in `165s` on Windows with chocolatey `GNU Make 4.4.1`. Run via `make test-integration` or [`src/impl-go/dashctl/test/integration/`](../../src/impl-go/dashctl/test/integration/). |
+| C1-G13 | `dashctl validate -f` | Pre-flight FK validation: loads manifests, applies each to dashd, reports pass/fail summary per object. Continues past failures. Exit code = rejected count. | ✅ **Landed 2026-06-15.** `internal/cmd/validate.go` + wired in `root.go`. dashd-side: `namespace.Validator.CheckDelete()` orphan protection on vnet/eni/service_tunnel + `CheckHaSet` DPU inventory FK + `CheckRoutePolicy` service_tunnel FK. 28 namespace tests (95.2% coverage). Live e2e: wrong ENI→400, delete-with-deps→412, valid→200, clean delete→204. |
+| C1-G14 | `EniBundle` kind + `--force` | `EniBundle` manifest kind for full ENI + dependency chain in one YAML. `--force` flag for create-vs-update detection: new→CREATE, existing→BLOCKED+warning, existing+force→MODIFY. | ✅ **Landed 2026-06-15.** `pkg/manifest/bundle.go` (EniBundle expander + auto-wiring), `internal/cmd/apply.go` (create-vs-update via Get, --force flag, BLOCKED/CREATE/MODIFY output, summary + warning). 12 bundle unit tests. Live e2e: 5 CREATE → 5 BLOCKED → 5 MODIFY. |
 
 ### Phase 1 extension quality gates (`debug`)
 

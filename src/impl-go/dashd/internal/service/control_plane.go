@@ -186,7 +186,7 @@ type controlPlaneService struct {
 // tracker and schema gate are optional — pass nil to disable admission
 // gates (used by existing unit tests; production wires both).
 func NewControlPlane(st store.DesiredStore, inv *inventory.Inventory, rec *reconciler.Reconciler, cap *capacity.Tracker, gate *schema.Gate, ops *operations.Manager, haOrch *orchestrator.Orchestrator) ControlPlaneService {
-	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st), cap: cap, gate: gate, ops: ops, haOrch: haOrch}
+	return &controlPlaneService{store: st, inv: inv, rec: rec, nsv: namespace.NewValidator(st).WithInventory(inv), cap: cap, gate: gate, ops: ops, haOrch: haOrch}
 }
 
 // validKinds is the set of spec kinds the service layer recognizes.
@@ -632,6 +632,12 @@ func (s *controlPlaneService) Delete(ctx context.Context, ns, kind, name string)
 		return fmt.Errorf("%w: name is required", ErrInvalidArgument)
 	}
 	ns = resolveNS(ns)
+
+	// Orphan protection: reject if other objects still reference this one.
+	if err := s.nsv.CheckDelete(ctx, ns, kind, name, false); err != nil {
+		return fmt.Errorf("%w: %w", ErrFailedPrecondition, err)
+	}
+
 	// Read the spec before deletion so we can decrement capacity
 	// counters correctly (we need fields like placement hints / rule
 	// counts that the bare key doesn't carry).

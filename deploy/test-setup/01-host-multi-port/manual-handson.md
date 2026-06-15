@@ -404,6 +404,97 @@ Full design + Future Scopes:
 
 ---
 
+## Step 14b — Referential integrity validation
+
+`dash-sim` validates all 25 foreign-key relationships at apply time
+(enabled by default via `--strict-refs`). Wrong references are rejected
+immediately with an actionable error message.
+
+### Why this matters
+
+Without FK validation, an operator can create an ENI with
+`vnet: "vnet-bllue"` (a typo for `"vnet-blue"`). The sim accepts it
+silently. Packets arrive, the pipeline tries to look up `vnet-bllue`
+for encapsulation, finds nothing, and drops. The operator discovers
+the problem 20 minutes later via counter spikes — not at the Apply
+that caused it.
+
+With `--strict-refs`, the Apply is rejected immediately with a clear
+error naming the typo, the field, and how to fix it.
+
+### Experiment A — wrong config: ENI with typo'd vnet (FAIL)
+
+```powershell
+# "vnet-bllue" doesn't exist in the store — it's a typo
+& $c --target $sim1 apply --kind eni --key eni-bad --value '{"vnet":"vnet-bllue"}'
+```
+
+**Error:**
+```
+referential integrity: eni references vnet "vnet-bllue" (field vnet)
+which does not exist; create it first
+```
+
+**Why it failed**: ENI is a Tier 1 object. Its `vnet` field is a
+foreign key to a `vnet` object (Tier 0). The sim looked up
+`"vnet-bllue"` in the vnet table — not there. The ENI was not stored.
+
+### Experiment B — right config: create dependencies first (PASS)
+
+```powershell
+# Tier 0: vnet first (no dependencies)
+& $c --target $sim1 apply --kind vnet --key vnet-lab --value '{"vni":9999}'
+# → accepted ✅  (vnet is Tier 0 — no FK checks needed)
+
+# Tier 1: eni references vnet (now exists)
+& $c --target $sim1 apply --kind eni --key eni-lab --value '{"vnet":"vnet-lab"}'
+# → accepted ✅  (vnet-lab exists — FK check passes)
+```
+
+**Why it worked**: we created the vnet first (Tier 0, no dependencies),
+then the ENI (Tier 1, references the vnet). The sim checked
+`vnet-lab` → found it → accepted.
+
+### Experiment C — fix-then-retry
+
+```powershell
+# Attempt fails (acl_group doesn't exist)
+& $c --target $sim1 apply --kind acl_rule --key acl-missing:100 --value '{}'
+# → rejected: acl_group "acl-missing" does not exist
+
+# Create the missing group
+& $c --target $sim1 apply --kind acl_group --key acl-missing --value '{}'
+# → accepted ✅
+
+# Retry the exact same command — now succeeds
+& $c --target $sim1 apply --kind acl_rule --key acl-missing:100 --value '{}'
+# → accepted ✅
+```
+
+### Clean up
+
+```powershell
+& $c --target $sim1 delete --kind acl_rule --key acl-missing:100
+& $c --target $sim1 delete --kind acl_group --key acl-missing
+& $c --target $sim1 delete --kind eni --key eni-lab
+& $c --target $sim1 delete --kind vnet --key vnet-lab
+```
+
+### Dependency tiers (reference)
+
+```
+Tier 0 (roots):  vnet, qos, acl_group, route_group, tunnel, ...
+Tier 1 (→ T0):   eni→vnet, acl_rule→acl_group, route→route_group+vnet
+Tier 2 (→ T0+1): eni_route→eni+route_group, acl_in→eni+acl_group
+
+Rule: create bottom-up (0→1→2). Delete top-down (2→1→0).
+```
+
+> See [referential-integrity-validation.md](../../../docs/dashd-features/referential-integrity-validation.md)
+> for the full FK map and tier ordering.
+
+---
+
 ## Step 15 — Use the admin HTTP endpoints (dash-sim only)
 
 ```powershell

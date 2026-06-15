@@ -1,6 +1,7 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
+  LayoutGrid,
   Network,
   Waypoints,
   Route,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useUiPrefsStore } from "@/stores/ui-prefs-store";
+import { LogoMark } from "@/components/brand/LogoMark";
 
 /** A single sidebar navigation item. */
 export interface NavItem {
@@ -71,6 +73,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Operate",
     items: [
+      /* A-IF: new interactive-forms page for customer-grade CRUD.
+       * Sits ABOVE Admin Ops (which is preserved for developer
+       * YAML/JSON experimentation). */
+      { path: "/resources", label: "Resources", icon: LayoutGrid },
       { path: "/admin", label: "Admin Ops", icon: Settings },
       { path: "/commands", label: "Commands", icon: Terminal },
       { path: "/debug", label: "Debug", icon: Bug },
@@ -112,36 +118,48 @@ export default function Sidebar() {
       )}
     >
       {/* Brand / collapse toggle */}
-      <div
-        className={cn(
-          "flex items-center gap-2 h-14 px-3 border-b border-[color:var(--border-subtle)]",
-          collapsed ? "justify-center" : "justify-between"
-        )}
-      >
-        {!collapsed && (
-          <div className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className="inline-block w-6 h-6 rounded-md bg-gradient-to-br from-cyan-400 to-purple-500 shadow-[0_0_12px_rgba(0,212,255,0.45)]"
-            />
-            <span className="font-semibold tracking-tight text-[color:var(--text-primary)]">
-              dashw
-            </span>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="p-1.5 rounded-md text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-white/5 transition-colors"
-        >
-          {collapsed ? (
+      {collapsed ? (
+        <div className="flex flex-col items-center gap-1 py-2 border-b border-[color:var(--border-subtle)]">
+          <Link
+            to="/home"
+            aria-label="DashCenter home"
+            title="DashCenter home"
+            className="p-1.5 rounded-md transition-colors hover:bg-white/5"
+          >
+            <LogoMark size={22} ariaLabel={null} />
+          </Link>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="Expand sidebar"
+            className="p-1.5 rounded-md text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-white/5 transition-colors"
+          >
             <PanelLeftOpen size={16} />
-          ) : (
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 h-14 px-3 border-b border-[color:var(--border-subtle)]">
+          <Link
+            to="/home"
+            aria-label="DashCenter home"
+            title="DashCenter home"
+            className="flex items-center gap-2 rounded-md px-1 -mx-1 py-0.5 transition-colors hover:bg-white/5 focus:outline-none"
+          >
+            <LogoMark size={22} ariaLabel={null} />
+            <span className="font-semibold tracking-tight text-[color:var(--text-primary)]">
+              DashCenter
+            </span>
+          </Link>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="Collapse sidebar"
+            className="p-1.5 rounded-md text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] hover:bg-white/5 transition-colors"
+          >
             <PanelLeftClose size={16} />
-          )}
-        </button>
-      </div>
+          </button>
+        </div>
+      )}
 
       {/* Groups */}
       <nav

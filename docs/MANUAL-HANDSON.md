@@ -839,6 +839,67 @@ PS> $env:DASHCTL_ADMIN_ENDPOINT = "http://localhost:7443"
 clean Unimplemented stub shown in Step 32 — `dashctl dpu status --watch`
 is reserved for Phase 2C.)
 
+### Step 37 — FK validation + delete orphan protection
+
+dashd validates foreign-key references on both Put and Delete. This
+prevents silent orphaning that leads to traffic drops.
+
+**Understanding the problem**: an ENI has a `vnet_name` field that
+points to a VNet. If that VNet doesn't exist, the ENI is orphaned —
+its pipeline can't find encapsulation config, so packets drop. Without
+FK validation, the PUT succeeds silently. With FK validation, the PUT
+is rejected immediately with a clear error.
+
+**Experiment A — wrong config: ENI with missing vnet (FAIL):**
+
+```powershell
+PS> & $bin apply -f - <<'EOF'
+apiVersion: dashcenter.v1
+kind: Eni
+metadata: { name: eni-bad-ref }
+spec: { vnet_name: vnet-nonexistent, mac_address: "00:00:00:00:00:01", underlay_ip: "10.0.0.99" }
+EOF
+```
+
+**Error:**
+```
+Error: invalid argument: eni.vnet_name="vnet-nonexistent":
+  cross-namespace reference rejected
+  (referenced default/vnet/vnet-nonexistent not found in this namespace)
+```
+
+**Why it failed**: dashd checked whether `vnet-nonexistent` exists in
+the `default` namespace. It doesn't. The ENI was not stored.
+
+**Experiment B — wrong config: delete vnet with dependents (FAIL):**
+
+```powershell
+PS> & $bin delete vnet vnet-app
+```
+
+**Error:**
+```
+failed precondition: referential integrity: object has dependents:
+  cannot delete vnet "vnet-app" — eni "eni-app-01" still references it
+```
+
+**Why it failed**: dashd scanned all ENIs and found one that references
+this vnet. Deleting it would orphan the ENI.
+
+**Right approach** — delete dependents first (top-down):
+
+```powershell
+PS> & $bin delete eni eni-app-01   # remove the dependent
+PS> & $bin delete vnet vnet-app    # now succeeds
+```
+
+**Experiment C — pre-flight validation:**
+
+```powershell
+PS> & $bin validate -f deploy/dashctl-fleet/manifests
+# Total: N  Accepted: N  Rejected: 0
+```
+
 ---
 
 ## 8. Drive the fleet from inside the container

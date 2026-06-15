@@ -29,6 +29,9 @@ func newServiceWithOrch(t *testing.T, orch *orchestrator.Orchestrator) ControlPl
 	}
 	t.Cleanup(func() { fs.Close() })
 	inv := inventory.New()
+	// Seed DPU entries so HaSet FK validation passes.
+	_ = inv.Register(inventory.DpuEntry{ID: "x", Endpoint: "localhost:50051"})
+	_ = inv.Register(inventory.DpuEntry{ID: "y", Endpoint: "localhost:50052"})
 	return NewControlPlane(fs, inv, nil, nil, nil, nil, orch)
 }
 

@@ -202,6 +202,95 @@ func main() {
 
 ---
 
+## 7a. Referential integrity errors
+
+When `dash-sim` runs with `--strict-refs` (the default), `apply`
+commands that reference missing objects are **rejected**. The error
+message names the missing ref, the field, and suggests the fix.
+
+### Why Apply can fail even with valid syntax
+
+The JSON/YAML you pass is syntactically correct — the kind exists, the
+key has the right number of parts, the value fields match the proto
+schema. But the sim also checks **semantic correctness**: does the
+object you're referencing actually exist in the store?
+
+This is called **referential integrity** — the same concept as foreign
+keys in a relational database. An ENI's `vnet` field is a foreign key
+to a `vnet` object. If that vnet doesn't exist, the ENI is orphaned
+and the pipeline will drop packets.
+
+### Experiment: wrong config → error → understand → fix → retry
+
+**Step 1 — Apply an ENI with a typo'd vnet (FAIL):**
+
+```bash
+dash-sim-client apply --kind eni --key eni-001 --value '{"vnet":"vnet-bllue"}'
+```
+
+**Output:**
+
+```
+referential integrity: eni references vnet "vnet-bllue" (field vnet)
+which does not exist; create it first
+```
+
+**What the error tells you:**
+- `eni` — the kind you tried to create
+- `vnet "vnet-bllue"` — the missing dependency (the typo)
+- `(field vnet)` — which field carries the bad reference
+- `create it first` — the fix: create the vnet before the ENI
+
+**Step 2 — Create the dependency first (PASS):**
+
+```bash
+dash-sim-client apply --kind vnet --key vnet-bllue --value '{"vni":100}'
+# → accepted (vnet is Tier 0 — no FK checks)
+
+dash-sim-client apply --kind eni --key eni-001 --value '{"vnet":"vnet-bllue"}'
+# → accepted (vnet-bllue now exists — FK check passes)
+```
+
+### The dependency tiers
+
+The 29 DASH object kinds follow a strict creation order:
+
+```
+Tier 0 (roots — create first, no dependencies):
+  vnet, qos, acl_group, route_group, tunnel, meter_policy, ha_set, ...
+
+Tier 1 (references Tier 0 only):
+  eni → vnet         acl_rule → acl_group
+  route → route_group + vnet   vnet_mapping → vnet
+
+Tier 2 (references Tier 0 + Tier 1):
+  eni_route → eni + route_group
+  acl_in/out → eni + acl_group
+  route_rule → eni + vnet
+```
+
+**Rule**: create bottom-up (Tier 0 → 1 → 2). Delete top-down (2 → 1 → 0).
+
+### Using `validate -f` for pre-flight checks
+
+For scenario files with many objects, use `validate` to check them all
+at once instead of applying one at a time:
+
+```bash
+dash-sim-client validate -f scenario.yaml
+# INDEX  STATUS  KIND       KEY         ERROR
+# 0      ✅ OK   vnet       vnet-prod
+# 1      ✅ OK   eni        eni-001
+# 2      ❌ FAIL eni_route  eni-ghost   referential integrity: ...
+#
+# Total: 3  Accepted: 2  Rejected: 1
+```
+
+See [referential-integrity-validation.md](../../dashd-features/referential-integrity-validation.md)
+for the complete FK map.
+
+---
+
 ## 8. Adding a new subcommand
 
 1. Create `internal/cmd/<name>.go` with a `newXxxCmd() *cobra.Command` that
