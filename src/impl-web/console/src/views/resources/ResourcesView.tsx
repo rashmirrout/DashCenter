@@ -1,29 +1,28 @@
 /* ═══════════════════════════════════════════════════════════════
- * ResourcesView — the new `/resources` page (A-IF4).
+ * ResourcesView — `/resources` page with resource dependency
+ * resolution + validation.
  *
- * One self-contained page that delivers customer-grade interactive
- * CRUD for all 7 dashd resource kinds:
- *   Vnets · ENIs · Vnet Mappings · Service Tunnels · ACL Policies ·
+ * Customer-grade interactive CRUD for all 7 dashd resource kinds:
+ *   Vnets · Service Tunnels · ENIs · Vnet Mappings · ACL Policies ·
  *   Route Policies · HA Sets
  *
- * The page is intentionally isolated from every other view:
- *   • Reads list data via the shared `useXxxList` hooks (no new
- *     network calls — same polling cadence as the existing list
- *     views).
- *   • Uses the A-IF3 form components for Create/Edit/Clone.
- *   • Uses `useDeleteResource` for deletes (already wired for
- *     every kind including vnet-mappings).
+ * Now wired to the dependency module (`lib/resource-deps`) for:
+ *   • Tab order matches the resource creation DAG topology
+ *   • Visual dependency mini-map at the top showing the DAG
+ *   • Each table has an extra "Dependents" column showing what
+ *     downstream resources reference the row
+ *   • Tables for non-root kinds also have a "References" column
+ *     showing the upstream resources this row points to
+ *   • Delete confirmation shows a warning when the resource has
+ *     dependents, listing every dependent that would be orphaned
  *
- * All seven existing read-only list views (`/enis`, `/vnets`,
- * `/mappings`, `/tunnels`, `/routing`, `/policies`, `/health`,
- * `/dashboard`) remain untouched. `AdminOpsView` remains untouched.
- *
- * Added in A-IF4-G1..G4.
+ * The page still reads list data via the shared `useXxxList` hooks
+ * and uses the form components for Create/Edit/Clone.
  * ═══════════════════════════════════════════════════════════════ */
 
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2, GitBranch } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/PageHeader";
 import { GlassCard } from "@/components/feedback/GlassCard";
@@ -53,6 +52,7 @@ import type {
   VnetMappingSpec,
   VnetSpec,
 } from "@/api/types";
+import type { ResourceKind } from "@/lib/constants";
 
 import { VnetForm } from "./forms/VnetForm";
 import { EniForm } from "./forms/EniForm";
@@ -62,26 +62,31 @@ import { AclPolicyForm } from "./forms/AclPolicyForm";
 import { RoutePolicyForm } from "./forms/RoutePolicyForm";
 import { HaSetForm } from "./forms/HaSetForm";
 
-/* ── Resource registry ─────────────────────────────────────── */
-/* Each entry pairs a tab with its data hook, form component,
- * and DataTable columns. Adding a new resource is a one-line
- * append here. */
+import {
+  RESOURCE_CREATION_ORDER,
+  KIND_LABELS,
+  KIND_LABELS_PLURAL,
+  type AnyResource,
+  type ResourceSnapshot,
+  emptySnapshot,
+  rollupAllDependents,
+  getDependencies,
+  getDependents,
+  type ResourceDepInfo,
+  type DependencyRef,
+} from "@/lib/resource-deps";
 
-type AnyResource =
-  | VnetSpec
-  | EniSpec
-  | VnetMappingSpec
-  | ServiceTunnelSpec
-  | AclPolicySpec
-  | RoutePolicySpec
-  | HaSetSpec;
+import { DependencyMiniMap } from "./DependencyMiniMap";
+import { DependentsBadge, DependenciesBadge } from "./DependentsBadge";
+
+/* ── Resource registry ─────────────────────────────────────── */
 
 interface ResourceDef<T extends AnyResource = AnyResource> {
   /** URL slug — matches the `kind` used by `useDeleteResource`. */
-  kind: string;
+  kind: ResourceKind;
   /** Tab label. */
   label: string;
-  /** Live list hook (must return `{ data: { items: T[] }, … }`). */
+  /** Live list hook. */
   useList: () => {
     data?: ListResponse<T>;
     isLoading: boolean;
@@ -93,14 +98,16 @@ interface ResourceDef<T extends AnyResource = AnyResource> {
   FormComponent: React.ComponentType<{
     open: boolean;
     onClose: () => void;
-    // Form initial values are loosely typed to allow row → form coercion.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     initial?: any;
     titleOverride?: string;
     onSaved?: () => void;
   }>;
-  /** Columns for the DataTable. */
+  /** Columns for the DataTable (excluding deps/actions, added at runtime). */
   columns: Column<T>[];
+  /** True when this kind has upstream resource references — controls
+   *  whether the "References" column is rendered. */
+  hasUpstreamRefs: boolean;
 }
 
 /* ── Column factories ──────────────────────────────────────── */
@@ -274,14 +281,6 @@ const mappingCols: Column<VnetMappingSpec>[] = [
     ),
   },
   {
-    key: "mac_address",
-    header: "MAC",
-    accessor: (r) => r.mac_address ?? "",
-    cell: (r) => (
-      <span className="font-mono text-xs">{r.mac_address || "—"}</span>
-    ),
-  },
-  {
     key: "action",
     header: "Action",
     accessor: (r) => r.action ?? "",
@@ -322,34 +321,6 @@ const tunnelCols: Column<ServiceTunnelSpec>[] = [
       </span>
     ),
     width: "w-20",
-  },
-  {
-    key: "params",
-    header: "Params",
-    accessor: (r) => Object.keys(r.params ?? {}).length,
-    cell: (r) => {
-      const ps = r.params ?? {};
-      const entries = Object.entries(ps);
-      if (entries.length === 0)
-        return <span className="text-[color:var(--text-muted)] text-xs">—</span>;
-      return (
-        <div className="flex flex-wrap gap-1 max-w-[240px]">
-          {entries.slice(0, 3).map(([k, v]) => (
-            <span
-              key={k}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 font-mono"
-            >
-              {k}={v}
-            </span>
-          ))}
-          {entries.length > 3 && (
-            <span className="text-[10px] text-[color:var(--text-muted)]">
-              +{entries.length - 3}
-            </span>
-          )}
-        </div>
-      );
-    },
   },
 ];
 
@@ -431,8 +402,6 @@ const haCols: Column<HaSetSpec>[] = [
     header: "Member DPUs",
     accessor: (r) => (r.member_dpu_ids ?? r.members?.map((m) => m.dpu_id) ?? []).length,
     cell: (r) => {
-      // Prefer the canonical `member_dpu_ids`; fall back to the
-      // legacy `members[].dpu_id` only when present.
       const ids =
         r.member_dpu_ids ??
         (r.members ?? []).map((m) => m.dpu_id).filter(Boolean);
@@ -468,60 +437,86 @@ const haCols: Column<HaSetSpec>[] = [
   },
 ];
 
-/* ── RESOURCE_DEFS ─────────────────────────────────────────── */
+/* ── RESOURCE_DEFS — ORDERED BY DEPENDENCY DAG ─────────────── */
+/* The order here matches RESOURCE_CREATION_ORDER from
+ * lib/resource-deps.ts. Vnets and Service Tunnels come first
+ * (roots), then ENIs (depend on vnets), then mappings (depend on
+ * vnets + tunnels), then ACLs and Routes (depend on ENIs +
+ * vnets + tunnels), and finally HA Sets. */
 
 const RESOURCE_DEFS: ResourceDef[] = [
   {
     kind: "vnets",
-    label: "Vnets",
+    label: KIND_LABELS_PLURAL.vnets,
     useList: useVnetList as ResourceDef["useList"],
     FormComponent: VnetForm,
     columns: vnetCols as Column<AnyResource>[],
-  },
-  {
-    kind: "enis",
-    label: "ENIs",
-    useList: useEniList as ResourceDef["useList"],
-    FormComponent: EniForm,
-    columns: eniCols as Column<AnyResource>[],
-  },
-  {
-    kind: "vnet-mappings",
-    label: "Mappings",
-    useList: useVnetMappings as ResourceDef["useList"],
-    FormComponent: VnetMappingForm,
-    columns: mappingCols as Column<AnyResource>[],
+    hasUpstreamRefs: false,
   },
   {
     kind: "service-tunnels",
-    label: "Tunnels",
+    label: KIND_LABELS_PLURAL["service-tunnels"],
     useList: useServiceTunnels as ResourceDef["useList"],
     FormComponent: ServiceTunnelForm,
     columns: tunnelCols as Column<AnyResource>[],
+    hasUpstreamRefs: false,
+  },
+  {
+    kind: "enis",
+    label: KIND_LABELS_PLURAL.enis,
+    useList: useEniList as ResourceDef["useList"],
+    FormComponent: EniForm,
+    columns: eniCols as Column<AnyResource>[],
+    hasUpstreamRefs: true,
+  },
+  {
+    kind: "vnet-mappings",
+    label: KIND_LABELS_PLURAL["vnet-mappings"],
+    useList: useVnetMappings as ResourceDef["useList"],
+    FormComponent: VnetMappingForm,
+    columns: mappingCols as Column<AnyResource>[],
+    hasUpstreamRefs: true,
   },
   {
     kind: "acl-policies",
-    label: "ACL Policies",
+    label: KIND_LABELS_PLURAL["acl-policies"],
     useList: useAclPolicies as ResourceDef["useList"],
     FormComponent: AclPolicyForm,
     columns: aclCols as Column<AnyResource>[],
+    hasUpstreamRefs: true,
   },
   {
     kind: "route-policies",
-    label: "Route Policies",
+    label: KIND_LABELS_PLURAL["route-policies"],
     useList: useRoutePolicies as ResourceDef["useList"],
     FormComponent: RoutePolicyForm,
     columns: routeCols as Column<AnyResource>[],
+    hasUpstreamRefs: true,
   },
   {
-    // dashd route is `/v1/{ns}/ha-sets/...`; `ha` returns HTTP 405.
     kind: "ha-sets",
-    label: "HA Sets",
+    label: KIND_LABELS_PLURAL["ha-sets"],
     useList: useHaSets as ResourceDef["useList"],
     FormComponent: HaSetForm,
     columns: haCols as Column<AnyResource>[],
+    hasUpstreamRefs: false,
   },
 ];
+
+// Sanity check: RESOURCE_DEFS order must match RESOURCE_CREATION_ORDER
+// (the dependency module's topological order). This is enforced at
+// runtime in dev builds to catch desync if someone reorders one but
+// not the other.
+if (import.meta.env.DEV) {
+  const defOrder = RESOURCE_DEFS.map((d) => d.kind).join(",");
+  const expected = RESOURCE_CREATION_ORDER.join(",");
+  if (defOrder !== expected) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[ResourcesView] RESOURCE_DEFS order (${defOrder}) does not match RESOURCE_CREATION_ORDER (${expected}). Tab order will be inconsistent with the dependency DAG.`,
+    );
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════════
  * Top-level page
@@ -534,32 +529,48 @@ export default function ResourcesView() {
     RESOURCE_DEFS.find((d) => d.kind === requested)?.kind ??
     RESOURCE_DEFS[0]!.kind;
 
-  // Use each list hook once at the top so the Tabs badges can show
-  // live counts without each tab having to mount first.
-  const counts = RESOURCE_DEFS.map((d) => {
+  // Fetch every list once at the top so we can:
+  //   1. Show live tab counts without each tab having to mount.
+  //   2. Build a `ResourceSnapshot` for dependency rollups.
+  //   3. Power the mini-map's per-node counts.
+  const listResults = RESOURCE_DEFS.map((d) => ({
+    kind: d.kind,
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    const list = d.useList();
-    return {
-      kind: d.kind,
-      count: list.isLoading ? null : list.data?.items?.length ?? 0,
-    };
-  });
+    list: d.useList(),
+  }));
 
-  /* Build the tab definitions. The `key` on the inner ResourceTab
-   * element forces a full unmount/remount when the user switches
-   * tabs, so internal form state (open/close, editing row, …)
-   * doesn't leak across tabs.
-   *
-   * Tabs only mounts the active tab's content, so the inactive
-   * ResourceTab subtrees pay no rendering cost. The list hooks
-   * at the top of this component keep the badge counts live. */
+  // Build a unified snapshot. Each list may still be loading; we use
+  // empty arrays as defensive defaults so rollups don't crash.
+  const snapshot: ResourceSnapshot = useMemo(() => {
+    const snap = emptySnapshot();
+    for (const { kind, list } of listResults) {
+      const items = (list.data?.items ?? []) as AnyResource[];
+      (snap as unknown as Record<string, AnyResource[]>)[kind] = items;
+    }
+    return snap;
+    // listResults identity changes on every render, but the *contents*
+    // only change when list data refreshes. We snapshot by-data via
+    // JSON length signatures.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    listResults.map((r) => r.list.data?.items?.length ?? 0).join(","),
+    listResults.map((r) => (r.list.isLoading ? 1 : 0)).join(","),
+  ]);
+
+  // Counts for tab badges + mini-map.
+  const counts: Partial<Record<ResourceKind, number | null>> = {};
+  for (const { kind, list } of listResults) {
+    counts[kind] = list.isLoading ? null : list.data?.items?.length ?? 0;
+  }
+
+  /* Build the tab definitions. */
   const tabs: TabDef[] = RESOURCE_DEFS.map((d) => {
-    const c = counts.find((x) => x.kind === d.kind);
+    const c = counts[d.kind];
     return {
       id: d.kind,
       label: d.label,
-      badge: c?.count != null ? String(c.count) : "…",
-      content: <ResourceTab key={d.kind} def={d} />,
+      badge: c != null ? String(c) : "…",
+      content: <ResourceTab key={d.kind} def={d} snapshot={snapshot} />,
     };
   });
 
@@ -573,8 +584,26 @@ export default function ResourcesView() {
     <div className="animate-fade-in space-y-6">
       <PageHeader
         title="Resources"
-        subtitle="Create, edit, and manage all networking resources via guided forms"
+        subtitle="Create, edit, and manage all networking resources via guided forms — with dependency tracking"
       />
+
+      {/* Dependency mini-map */}
+      <GlassCard>
+        <div className="flex items-start gap-3">
+          <GitBranch
+            size={18}
+            className="shrink-0 mt-1 text-[color:var(--accent-cyan)]"
+            aria-hidden
+          />
+          <div className="flex-1">
+            <DependencyMiniMap
+              activeKind={activeKind}
+              onSelectKind={(k) => onTabChange(k)}
+              counts={counts}
+            />
+          </div>
+        </div>
+      </GlassCard>
 
       <Tabs tabs={tabs} activeTabId={activeKind} onChange={onTabChange} />
     </div>
@@ -591,22 +620,77 @@ type FormMode =
   | { kind: "clone"; row: AnyResource }
   | { kind: "closed" };
 
-function ResourceTab({ def }: { def: ResourceDef }) {
+interface ResourceTabProps {
+  def: ResourceDef;
+  /** Live snapshot of all resource kinds (for dep rollups). */
+  snapshot: ResourceSnapshot;
+}
+
+function ResourceTab({ def, snapshot }: ResourceTabProps) {
   const list = def.useList();
   const deleteMut = useDeleteResource();
 
-  // Form state
   const [mode, setMode] = useState<FormMode>({ kind: "closed" });
-
-  // Delete confirmation state
   const [pendingDelete, setPendingDelete] = useState<AnyResource | null>(null);
 
   const items: AnyResource[] = list.data?.items ?? [];
 
-  /* Build the augmented columns list: the resource's own columns
-   * plus a final "Actions" column. We rebuild on every render
-   * (the cost is negligible) so each row gets fresh closures. */
+  // Precompute dependent counts for every row in this kind — O(N*M)
+  // where N is the row count and M is the total resource count.
+  // For typical fleet sizes (~100 resources/kind, ~700 total) this
+  // is a few thousand comparisons per refresh — well under 1ms.
+  const dependentsMap = useMemo(
+    () => rollupAllDependents(def.kind, snapshot),
+    [def.kind, snapshot],
+  );
+
+  // For kinds with upstream refs, precompute references per row.
+  const referencesMap = useMemo(() => {
+    const out = new Map<string, DependencyRef[]>();
+    if (!def.hasUpstreamRefs) return out;
+    for (const item of items) {
+      const name = item.metadata?.name ?? "";
+      if (!name) continue;
+      out.set(name, getDependencies(def.kind, item));
+    }
+    return out;
+  }, [def.kind, def.hasUpstreamRefs, items]);
+
+  // Build the column list: original cols + (optional) References +
+  // Dependents + Actions.
   const columns: Column<AnyResource>[] = useMemo(() => {
+    const dependentsCol: Column<AnyResource> = {
+      key: "__dependents",
+      header: "Dependents",
+      accessor: (r) => dependentsMap.get(r.metadata?.name ?? "")?.totalDependents ?? 0,
+      sortable: true,
+      width: "w-44",
+      cell: (row) => {
+        const name = row.metadata?.name ?? "";
+        const info = dependentsMap.get(name);
+        // Include the full list (for the tooltip)
+        const fullInfo: ResourceDepInfo | undefined = info
+          ? {
+              ...info,
+              dependents: getDependents(def.kind, name, snapshot),
+            }
+          : undefined;
+        return <DependentsBadge info={fullInfo} />;
+      },
+    };
+
+    const referencesCol: Column<AnyResource> = {
+      key: "__references",
+      header: "References",
+      accessor: (r) => referencesMap.get(r.metadata?.name ?? "")?.length ?? 0,
+      sortable: true,
+      width: "w-52",
+      cell: (row) => {
+        const refs = referencesMap.get(row.metadata?.name ?? "") ?? [];
+        return <DependenciesBadge refs={refs} />;
+      },
+    };
+
     const actionsCol: Column<AnyResource> = {
       key: "__actions",
       header: "Actions",
@@ -621,10 +705,21 @@ function ResourceTab({ def }: { def: ResourceDef }) {
         />
       ),
     };
-    return [...def.columns, actionsCol];
-  }, [def.columns]);
+
+    const cols: Column<AnyResource>[] = [...def.columns];
+    if (def.hasUpstreamRefs) cols.push(referencesCol);
+    cols.push(dependentsCol);
+    cols.push(actionsCol);
+    return cols;
+  }, [def.columns, def.kind, def.hasUpstreamRefs, dependentsMap, referencesMap, snapshot]);
 
   const FormComponent = def.FormComponent;
+
+  // For the delete dialog: compute live dependents of the row being deleted
+  const pendingDependents = useMemo(() => {
+    if (!pendingDelete) return [];
+    return getDependents(def.kind, pendingDelete.metadata?.name ?? "", snapshot);
+  }, [pendingDelete, def.kind, snapshot]);
 
   return (
     <div className="space-y-3">
@@ -643,7 +738,7 @@ function ResourceTab({ def }: { def: ResourceDef }) {
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-[color:var(--accent-cyan)]/15 text-[color:var(--accent-cyan)] border border-[color:var(--accent-cyan)]/40 hover:bg-[color:var(--accent-cyan)]/25 transition-colors"
         >
           <Plus size={14} />
-          Create {def.label.replace(/s$/, "")}
+          Create {KIND_LABELS[def.kind]}
         </button>
       </div>
 
@@ -682,15 +777,7 @@ function ResourceTab({ def }: { def: ResourceDef }) {
         </GlassCard>
       )}
 
-      {/* Form dialog.
-       *
-       * The `key` forces a full unmount/remount whenever the form
-       * mode flips OR the target row changes. Without it, editing
-       * row A then immediately editing row B (without closing the
-       * dialog in between) would keep A's stale field values in
-       * the FormDialog's internal state — the useEffect reset is
-       * keyed only on `open` transitions.
-       */}
+      {/* Form dialog */}
       <FormComponent
         key={formKeyFor(mode)}
         open={mode.kind === "create" || mode.kind === "edit" || mode.kind === "clone"}
@@ -705,22 +792,24 @@ function ResourceTab({ def }: { def: ResourceDef }) {
         titleOverride={mode.kind === "clone" ? `Clone — pick a new name` : undefined}
       />
 
-      {/* Delete confirmation */}
+      {/* Delete confirmation — augmented with dependency warning */}
       <ConfirmDialog
         open={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
-        title={`Delete ${def.label.replace(/s$/, "")}?`}
+        title={
+          pendingDependents.length > 0
+            ? `Delete ${KIND_LABELS[def.kind]} with ${pendingDependents.length} dependent${pendingDependents.length === 1 ? "" : "s"}?`
+            : `Delete ${KIND_LABELS[def.kind]}?`
+        }
         message={
-          <>
-            This will permanently delete{" "}
-            <code className="text-[color:var(--accent-red)] font-mono">
-              {pendingDelete?.metadata?.name}
-            </code>
-            . This action cannot be undone.
-          </>
+          <DeleteWarning
+            kindLabel={KIND_LABELS[def.kind]}
+            name={pendingDelete?.metadata?.name ?? ""}
+            dependents={pendingDependents}
+          />
         }
         confirmLabel={`Delete ${pendingDelete?.metadata?.name ?? ""}`.trim()}
-        tone="danger"
+        tone={pendingDependents.length > 0 ? "warning" : "danger"}
         showReasonInput={false}
         onConfirm={async () => {
           if (!pendingDelete) return;
@@ -735,30 +824,78 @@ function ResourceTab({ def }: { def: ResourceDef }) {
   );
 }
 
+/* ── DeleteWarning — rich message body for the confirm dialog ── */
+
+interface DeleteWarningProps {
+  kindLabel: string;
+  name: string;
+  dependents: Array<{ kind: ResourceKind; name: string; field: string }>;
+}
+
+function DeleteWarning({ kindLabel, name, dependents }: DeleteWarningProps) {
+  if (dependents.length === 0) {
+    return (
+      <>
+        <p>
+          This will permanently delete{" "}
+          <code className="text-[color:var(--accent-red)] font-mono">{name}</code>.
+          This action cannot be undone.
+        </p>
+      </>
+    );
+  }
+
+  // Group dependents by kind so the warning is readable
+  const byKind = new Map<ResourceKind, string[]>();
+  for (const d of dependents) {
+    const arr = byKind.get(d.kind) ?? [];
+    if (!arr.includes(d.name)) arr.push(d.name);
+    byKind.set(d.kind, arr);
+  }
+
+  return (
+    <div className="space-y-2">
+      <p>
+        Deleting <code className="text-[color:var(--accent-red)] font-mono">{name}</code>{" "}
+        will leave the following resources with broken references:
+      </p>
+      <div className="rounded-md border border-[color:var(--accent-amber)]/30 bg-[color:var(--accent-amber)]/5 p-2 space-y-1 max-h-44 overflow-y-auto">
+        {Array.from(byKind.entries()).map(([kind, names]) => (
+          <div key={kind} className="text-xs">
+            <span className="font-semibold text-[color:var(--accent-amber)]">
+              {names.length} {names.length === 1 ? KIND_LABELS[kind] : KIND_LABELS_PLURAL[kind]}
+            </span>
+            <span className="text-[color:var(--text-muted)] ml-1">·</span>
+            <span className="font-mono text-[10px] ml-1 text-[color:var(--text-secondary)]">
+              {names.slice(0, 6).join(", ")}
+              {names.length > 6 && ` +${names.length - 6} more`}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-[color:var(--text-muted)] italic">
+        Tip: delete or update these dependents first to avoid orphan references.
+        dashd will accept the delete regardless, but the {kindLabel.toLowerCase()}{" "}
+        name will remain referenced in those resources until you fix them.
+      </p>
+    </div>
+  );
+}
+
 /** Produce a clone-mode initial: drop the name + generation but
- *  keep every other field. Strips generation from BOTH the SPA
- *  metadata block AND the wire-shape top-level (just in case the
- *  row is in an un-normalised state when cloned). */
+ *  keep every other field. */
 function cloneInitial(row: AnyResource): AnyResource {
-  // Deep-clone via JSON to avoid mutating the source row.
   const copy = JSON.parse(JSON.stringify(row)) as AnyResource;
   if (copy.metadata) {
     copy.metadata.name = "";
     if ("generation" in copy.metadata) copy.metadata.generation = undefined;
   }
-  // Defensive: also clear a top-level `generation` that a future
-  // un-normalised row might carry. Cast through unknown because
-  // AnyResource doesn't model the wire-shape field.
   const looseCopy = copy as unknown as Record<string, unknown>;
   if ("generation" in looseCopy) delete looseCopy.generation;
   return copy;
 }
 
-/** Compute a stable React key for the FormComponent that captures
- *  both the form mode and the row identity. When the user switches
- *  between rows (edit A → edit B) without first closing the
- *  dialog, the key changes and React fully remounts the form,
- *  resetting all internal state. */
+/** Stable React key for the FormComponent. */
 function formKeyFor(mode: FormMode): string {
   switch (mode.kind) {
     case "edit":
@@ -768,14 +905,12 @@ function formKeyFor(mode: FormMode): string {
     case "create":
       return "create";
     case "closed":
-      // Use a stable closed key so React doesn't churn while
-      // the dialog is being torn down.
       return "closed";
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * Row actions — Edit / Clone / Delete (A-IF4-G3)
+ * Row actions — Edit / Clone / Delete
  * ═══════════════════════════════════════════════════════════════ */
 
 interface ResourceRowActionsProps {
@@ -792,7 +927,6 @@ function ResourceRowActions({
   return (
     <div
       className="flex items-center gap-1"
-      // Stop propagation so the parent row (if clickable) doesn't fire.
       onClick={(e) => e.stopPropagation()}
     >
       <button

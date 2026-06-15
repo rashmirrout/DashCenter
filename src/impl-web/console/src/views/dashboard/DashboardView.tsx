@@ -158,10 +158,14 @@ export default function DashboardView() {
           whileInView="visible"
           viewport={{ once: true }}
           variants={sectionVariants}
-          className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4"
+          className="grid grid-cols-1 lg:grid-cols-[minmax(520px,_36%)_1fr] gap-4"
         >
-          {/* Fleet Connectivity Map */}
-          <GlassCard className="flex flex-col items-center justify-center min-h-[440px]">
+          {/* Fleet Connectivity Map — wider column + larger viz so the
+              orb fills its card on desktop layouts. The grid uses a
+              fluid `minmax(520px, 36%)` track so the card grows on
+              wide screens but never goes below 520px on narrower
+              laptops. The KPI grid keeps `1fr` to absorb the rest. */}
+          <GlassCard className="flex flex-col items-center justify-center min-h-[540px]">
             <div className="w-full flex items-center justify-between mb-2">
               <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-secondary)]">
                 Fleet Connectivity
@@ -172,7 +176,7 @@ export default function DashboardView() {
                 </span>
               )}
             </div>
-            <FleetConnectivityViz size={380} />
+            <FleetConnectivityViz size={480} />
           </GlassCard>
 
           {/* Primary KPI grid (4 stats cards) */}

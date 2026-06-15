@@ -37,6 +37,14 @@ share/python-wheels/
 !**/manifest/
 !**/pkg/manifest/
 
+# Re-include source-tree lib/ directories that are NOT Python build output.
+# The earlier `lib/` rule (Python distutils) is intentionally broad, so we
+# explicitly re-include code-owned lib/ trees here.
+!src/impl-web/console/src/lib/
+!src/impl-web/console/src/lib/**
+!deploy/test-setup/lib/
+!deploy/test-setup/lib/**
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
