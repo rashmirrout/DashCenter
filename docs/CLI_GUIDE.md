@@ -1062,6 +1062,9 @@ $c = ".\bin\dash-sim-client.exe"
 dashctl apply -f manifest/                          # create (blocks on existing)
 dashctl apply -f manifest/ --force                   # create or overwrite
 dashctl apply -f eni-bundle.yaml                     # EniBundle: full ENI + deps
+dashctl apply -f acl-bundle.yaml                     # AclBundle: ACL policy + deps
+dashctl apply -f route-bundle.yaml                   # RouteBundle: route policy + deps
+dashctl apply -f ha-bundle.yaml                      # HaBundle: HA set
 dashctl apply -f eni-bundle.yaml --force              # overwrite existing bundle
 dashctl diff -f manifest/                             # preview what would change
 dashctl validate -f manifest/                         # FK validation check
