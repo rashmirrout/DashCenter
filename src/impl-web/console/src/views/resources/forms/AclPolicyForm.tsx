@@ -9,7 +9,7 @@
  * ═══════════════════════════════════════════════════════════════ */
 
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FormDialog } from "@/components/form/FormDialog";
 import { LabelsEditor } from "@/components/form/LabelsEditor";
 import { PortListEditor } from "@/components/form/PortListEditor";
@@ -262,10 +262,31 @@ function AclRuleCard({
   canRemove,
 }: AclRuleCardProps) {
   const [collapsed, setCollapsed] = useState(true);
+  // Aggregate every error path that could surface inside this rule
+  // card so submit-time validation reliably auto-expands it.
+  // (Without this, a "must constrain at least one of..." error on
+  // a collapsed card would render invisibly above the chevron.)
   const hasError =
     !!errorAt(`rules.${idx}`) ||
     !!errorAt(`rules.${idx}.priority`) ||
-    !!errorAt(`rules.${idx}.action`);
+    !!errorAt(`rules.${idx}.action`) ||
+    !!errorAt(`rules.${idx}.description`) ||
+    !!errorAt(`rules.${idx}.src_prefixes`) ||
+    !!errorAt(`rules.${idx}.dst_prefixes`) ||
+    !!errorAt(`rules.${idx}.src_ports`) ||
+    !!errorAt(`rules.${idx}.dst_ports`) ||
+    !!errorAt(`rules.${idx}.protocols`);
+
+  // When validation surfaces an error for this card, force-expand
+  // so the offending field is visible. We only flip from collapsed
+  // → expanded; never the other way (so the user doesn't lose
+  // their place if they manually collapsed an erroring card).
+  useEffect(() => {
+    if (hasError && collapsed) setCollapsed(false);
+    // Intentionally not depending on `collapsed` — we want the
+    // one-way transition to fire only on error appearance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasError]);
 
   const ruleErr = errorAt(`rules.${idx}`);
   const actionColor =

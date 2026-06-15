@@ -362,35 +362,64 @@ describe("serviceTunnelSchema", () => {
 });
 
 /* ── HA Set ─────────────────────────────────────────────── */
+/* Rewritten to match dashd's actual write-shape (mode + flat
+ * member_dpu_ids[]). The earlier scope/members[].role shape was
+ * silently dropped by dashd; see scripts/debug-spa-shape.py
+ * test 2 for the empirical evidence. */
 
 describe("haSetSchema", () => {
   const valid = {
     metadata: { namespace: "default", name: "ha-bank-prod" },
-    scope: "appliance",
-    members: [
-      { dpu_id: "dpu-sim-01", role: "ACTIVE" as const },
-      { dpu_id: "dpu-sim-02", role: "STANDBY" as const },
-    ],
+    mode: "active_standby" as const,
+    member_dpu_ids: ["dpu-sim-01", "dpu-sim-02"],
   };
 
-  it("accepts 2 members", () => {
+  it("accepts 2 member DPUs", () => {
     expect(haSetSchema.safeParse(valid).success).toBe(true);
   });
 
-  it("rejects less than 2 members", () => {
+  it("accepts the optional virtual_ip + flow_sync_endpoints", () => {
+    const v = {
+      ...valid,
+      virtual_ip: "10.0.0.100",
+      flow_sync_endpoints: [
+        "udp://dpu-sim-01:4789",
+        "udp://dpu-sim-02:4789",
+      ],
+    };
+    expect(haSetSchema.safeParse(v).success).toBe(true);
+  });
+
+  it("rejects less than 2 member DPUs", () => {
     expect(
-      haSetSchema.safeParse({ ...valid, members: [valid.members[0]!] }).success,
+      haSetSchema.safeParse({ ...valid, member_dpu_ids: ["dpu-sim-01"] })
+        .success,
     ).toBe(false);
   });
 
-  it("rejects duplicate dpu_ids", () => {
+  it("rejects duplicate member DPU ids", () => {
     expect(
       haSetSchema.safeParse({
         ...valid,
-        members: [
-          { dpu_id: "dpu-sim-01", role: "ACTIVE" as const },
-          { dpu_id: "dpu-sim-01", role: "STANDBY" as const },
-        ],
+        member_dpu_ids: ["dpu-sim-01", "dpu-sim-01"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects an invalid mode value", () => {
+    expect(
+      haSetSchema.safeParse({
+        ...valid,
+        mode: "rolling" as unknown as "active_standby" | "active_active",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a malformed flow-sync endpoint", () => {
+    expect(
+      haSetSchema.safeParse({
+        ...valid,
+        flow_sync_endpoints: ["http://nope"],
       }).success,
     ).toBe(false);
   });
@@ -425,12 +454,16 @@ describe("simulateRequestSchema", () => {
 /* ── Registry ─────────────────────────────────────────── */
 
 describe("RESOURCE_SCHEMAS registry", () => {
-  it("has all 7 kinds", () => {
+  it("has all 7 kinds (slugs match dashd's router)", () => {
+    // The `ha-sets` slug (NOT `ha`) is the canonical name — dashd's
+    // router returns HTTP 405 for `/v1/{ns}/ha/{name}` on PUT but
+    // accepts `/v1/{ns}/ha-sets/{name}`. The slug was corrected as
+    // part of the A-IF wire-format fix.
     expect(Object.keys(RESOURCE_SCHEMAS).sort()).toEqual(
       [
         "acl-policies",
         "enis",
-        "ha",
+        "ha-sets",
         "route-policies",
         "service-tunnels",
         "vnet-mappings",

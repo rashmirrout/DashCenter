@@ -9,7 +9,7 @@
  * ═══════════════════════════════════════════════════════════════ */
 
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FormDialog } from "@/components/form/FormDialog";
 import { LabelsEditor } from "@/components/form/LabelsEditor";
 import { ResourceMultiSelect } from "@/components/form/ResourceMultiSelect";
@@ -217,7 +217,36 @@ function RouteEntryCard({
 }: RouteEntryCardProps) {
   const [collapsed, setCollapsed] = useState(true);
   const isEcmp = !!route.ecmp_members && route.ecmp_members.length > 0;
-  const hasError = !!errorAt(`routes.${idx}`);
+
+  // Aggregate every error path that could surface inside this card.
+  // Top-level `routes.${idx}` catches the .refine() cross-field
+  // error; the per-field paths catch individual validators. We
+  // also probe a handful of ECMP-member paths so an invalid
+  // weight on a collapsed card still triggers auto-expand.
+  const ecmpMemberErrIdx =
+    (route.ecmp_members ?? []).findIndex(
+      (_m, mIdx) =>
+        !!errorAt(`routes.${idx}.ecmp_members.${mIdx}.next_hop_type`) ||
+        !!errorAt(`routes.${idx}.ecmp_members.${mIdx}.next_hop_target`) ||
+        !!errorAt(`routes.${idx}.ecmp_members.${mIdx}.weight`),
+    );
+  const hasError =
+    !!errorAt(`routes.${idx}`) ||
+    !!errorAt(`routes.${idx}.prefix`) ||
+    !!errorAt(`routes.${idx}.metric`) ||
+    !!errorAt(`routes.${idx}.next_hop_type`) ||
+    !!errorAt(`routes.${idx}.next_hop_target`) ||
+    !!errorAt(`routes.${idx}.description`) ||
+    ecmpMemberErrIdx >= 0;
+
+  // One-way auto-expand when an error appears, so the user can
+  // actually see what they need to fix. We never auto-collapse —
+  // a manually collapsed-then-erroring card should still expand
+  // on the next submit attempt to keep behaviour predictable.
+  useEffect(() => {
+    if (hasError && collapsed) setCollapsed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasError]);
 
   const summaryLabel = isEcmp
     ? `ECMP × ${route.ecmp_members?.length ?? 0}`

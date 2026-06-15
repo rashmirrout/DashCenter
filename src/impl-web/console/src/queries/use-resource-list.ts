@@ -90,7 +90,7 @@ export function useResourceList(
       return shape(tunnels);
     case "vnet-mappings":
       return shape(mappings);
-    case "ha":
+    case "ha-sets":
       return shape(haSets);
     case "inventory":
       return shape(inventory);

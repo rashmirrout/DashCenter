@@ -20,8 +20,12 @@ import {
 
 interface ResourceItem {
   metadata?: { name?: string };
-  // Some resource shapes (inventory) put the id elsewhere.
+  // Some resource shapes (normalized inventory) put the id under
+  // `identity.dpu_id`. Older or unnormalized DPU shapes may put it
+  // directly under `id` — handled by the fallback chain in
+  // `nameOf()` below.
   identity?: { dpu_id?: string };
+  id?: string;
 }
 
 interface ResourceSelectProps {
@@ -46,12 +50,19 @@ interface ResourceSelectProps {
 const selectClass =
   "w-full px-2 py-1 text-sm bg-bg-elevated border border-border rounded text-text-primary font-mono focus:outline-none focus:ring-1 focus:ring-accent-cyan/50 disabled:opacity-50 disabled:cursor-not-allowed";
 
-/** Best-effort name extractor that handles both the standard
- *  `metadata.name` shape and the inventory `identity.dpu_id` shape. */
+/** Best-effort name extractor. The dispatcher hands us items from
+ *  multiple resource kinds, each with a slightly different shape:
+ *    • CRUD resources  → `metadata.name`
+ *    • DpuRecord       → `identity.dpu_id`
+ *    • Raw wire DPU    → `id`  (fallback, in case normalisation drifts)
+ *  Returns an empty string when no identifier is found; callers
+ *  filter empties out. */
 function nameOf(item: ResourceItem): string {
   const n = item.metadata?.name;
   if (n) return n;
-  return item.identity?.dpu_id ?? "";
+  const dpuId = item.identity?.dpu_id;
+  if (dpuId) return dpuId;
+  return item.id ?? "";
 }
 
 export function ResourceSelect({

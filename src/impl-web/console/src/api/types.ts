@@ -161,12 +161,33 @@ export interface ServiceTunnelSpec {
 }
 
 /* ── HA Set ─────────────────────────────────────────────────── */
+/* dashd's actual wire-shape (verified via scripts/debug-spa-shape.py
+ * test 2). The earlier `scope` + `members[].dpu_id+role` shape was
+ * silently dropped by dashd's write path. The real fields are:
+ *
+ *   mode                  : "active_standby" | "active_active" | ...
+ *   member_dpu_ids[]      : flat list of DPU IDs (no per-member role)
+ *   virtual_ip            : optional VIP
+ *   flow_sync_endpoints[] : optional list of "udp://host:port" strings
+ *   labels                : optional kv map
+ *
+ * Legacy `scope`/`members[]` fields are retained as optional so any
+ * older list code that referenced them still type-checks. */
 
 export interface HaSetSpec {
   metadata: ObjectMeta;
-  scope: string;
-  members: HaSetMember[];
+  /** dashd's actual write field. */
+  mode?: string;
+  /** dashd's actual write field — flat list, no per-member roles. */
+  member_dpu_ids?: string[];
   virtual_ip?: string;
+  /** Optional flow-sync endpoints (one per member DPU typically). */
+  flow_sync_endpoints?: string[];
+  labels?: Record<string, string>;
+  /** @deprecated legacy field — dashd silently drops it on write. */
+  scope?: string;
+  /** @deprecated legacy field — superseded by `member_dpu_ids`. */
+  members?: HaSetMember[];
 }
 
 export interface HaSetMember {

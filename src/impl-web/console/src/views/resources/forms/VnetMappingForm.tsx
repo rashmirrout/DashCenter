@@ -5,9 +5,17 @@
  * the form conditionally shows a tunnel-select field for
  * params.tunnel.
  *
+ * Important dashd quirk (verified via scripts/debug-spa-shape.py
+ * test 3): dashd IGNORES the user-supplied `metadata.name` and
+ * derives the mapping's name server-side as
+ * `{vnet_name}-{ip_address}`. The form now mirrors that derivation
+ * client-side so the URL/PUT name matches what dashd actually
+ * stores — without this the post-PUT GET would 404.
+ *
  * Added in A-IF3-G3.
  * ═══════════════════════════════════════════════════════════════ */
 
+import { useEffect } from "react";
 import { FormDialog } from "@/components/form/FormDialog";
 import { LabelsEditor } from "@/components/form/LabelsEditor";
 import { ResourceSelect } from "@/components/form/ResourceSelect";
@@ -19,6 +27,13 @@ import {
 import type { VnetMappingSpec } from "@/api/types";
 import { usePutVnetMapping } from "@/queries/hooks";
 import { vnetMappingSchema, type VnetMappingInput } from "@/lib/schemas";
+
+/** Replicates dashd's server-side name-derivation for vnet-mappings.
+ *  Returns an empty string until both inputs are present. */
+function derivedMappingName(vnetName: string, ipAddress: string): string {
+  if (!vnetName || !ipAddress) return "";
+  return `${vnetName}-${ipAddress}`;
+}
 
 interface VnetMappingFormProps {
   open: boolean;
@@ -93,25 +108,42 @@ export function VnetMappingForm({
       submitLabel={isEdit ? "Save changes" : "Create Mapping"}
       width="md"
     >
-      {({ values, errorAt, setField }) => (
-        <>
-          <FieldWrapper
-            label="Name"
-            htmlFor="mapping-name"
-            error={errorAt("metadata.name")}
-            required
-          >
-            <input
-              id="mapping-name"
-              type="text"
-              value={values.metadata.name}
-              onChange={(e) => setField("metadata.name", e.target.value)}
-              disabled={isEdit}
-              placeholder="e.g. map-bank-web-01"
-              className="w-full px-3 py-1.5 text-sm bg-bg-elevated border border-border rounded-lg text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent-cyan/50 disabled:opacity-50"
-              aria-invalid={!!errorAt("metadata.name")}
-            />
-          </FieldWrapper>
+      {({ values, errorAt, setField }) => {
+        // Auto-derive the name in create mode so it matches what
+        // dashd actually persists (`{vnet_name}-{ip_address}`).
+        // Edit mode keeps whatever name was loaded into `initial`.
+        // eslint-disable-next-line react-hooks/rules-of-hooks
+        useEffect(() => {
+          if (isEdit) return;
+          const next = derivedMappingName(
+            values.vnet_name,
+            values.ip_address ?? "",
+          );
+          if (next && next !== values.metadata.name) {
+            setField("metadata.name", next);
+          }
+        }, [values.vnet_name, values.ip_address, isEdit, values.metadata.name, setField]);
+
+        return (
+          <>
+            <FieldWrapper
+              label="Name (auto-derived)"
+              htmlFor="mapping-name"
+              error={errorAt("metadata.name")}
+              required
+              hint="dashd uses `{vnet_name}-{ip_address}` as the key — this field is read-only and reflects what will be stored"
+            >
+              <input
+                id="mapping-name"
+                type="text"
+                value={values.metadata.name}
+                readOnly
+                disabled
+                placeholder="— pick a Vnet and overlay IP below —"
+                className="w-full px-3 py-1.5 text-sm bg-bg-elevated border border-border rounded-lg text-text-muted font-mono placeholder:text-text-muted focus:outline-none cursor-not-allowed"
+                aria-invalid={!!errorAt("metadata.name")}
+              />
+            </FieldWrapper>
 
           <ResourceSelect
             kind="vnets"
@@ -203,13 +235,14 @@ export function VnetMappingForm({
             />
           )}
 
-          <LabelsEditor
-            label="Labels (optional)"
-            value={values.metadata.labels}
-            onChange={(next) => setField("metadata.labels", next)}
-          />
-        </>
-      )}
+            <LabelsEditor
+              label="Labels (optional)"
+              value={values.metadata.labels}
+              onChange={(next) => setField("metadata.labels", next)}
+            />
+          </>
+        );
+      }}
     </FormDialog>
   );
 }

@@ -348,6 +348,10 @@ export function useDeleteResource() {
         'acl-policies': aclPolicyApi,
         'route-policies': routePolicyApi,
         'service-tunnels': serviceTunnelApi,
+        // dashd routes HaSet under `/ha-sets/...`. Both the new
+        // canonical slug and the legacy `ha` key map to the same
+        // backing client so existing callers keep working.
+        'ha-sets': haSetApi,
         ha: haSetApi,
         'vnet-mappings': vnetMappingApi,
       };

@@ -23,7 +23,11 @@ import {
 
 interface ResourceItem {
   metadata?: { name?: string };
+  // Normalized inventory items expose `identity.dpu_id`; raw wire
+  // DPU records expose a top-level `id`. Both fall through to the
+  // chained extractor in `nameOf()` below.
   identity?: { dpu_id?: string };
+  id?: string;
 }
 
 interface ResourceMultiSelectProps {
@@ -47,7 +51,9 @@ interface ResourceMultiSelectProps {
 function nameOf(item: ResourceItem): string {
   const n = item.metadata?.name;
   if (n) return n;
-  return item.identity?.dpu_id ?? "";
+  const dpuId = item.identity?.dpu_id;
+  if (dpuId) return dpuId;
+  return item.id ?? "";
 }
 
 export function ResourceMultiSelect({
@@ -102,10 +108,16 @@ export function ResourceMultiSelect({
     onChange([]);
   }
 
+  // We label using the count of *resolvable* items, not raw items —
+  // some wire shapes contribute zero usable identifiers and would
+  // otherwise inflate the "total" badge.
+  const resolvableTotal = (list.items as ResourceItem[]).filter(
+    (it) => nameOf(it) !== "",
+  ).length;
   const totalAvailable = list.isLoading ? "…" : available.length;
   const fullLabel = label
     ? `${label} · ${value.length} selected${
-        !list.isLoading ? ` of ${list.items.length} total` : ""
+        !list.isLoading ? ` of ${resolvableTotal} total` : ""
       }`
     : undefined;
 

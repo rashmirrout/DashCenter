@@ -405,32 +405,54 @@ const routeCols: Column<RoutePolicySpec>[] = [
 const haCols: Column<HaSetSpec>[] = [
   nameCol<HaSetSpec>(),
   {
-    key: "scope",
-    header: "Scope",
-    accessor: (r) => r.scope ?? "",
-    cell: (r) => (
-      <span className="text-xs font-mono">{r.scope || "—"}</span>
-    ),
-    width: "w-28",
+    key: "mode",
+    header: "Mode",
+    accessor: (r) => r.mode ?? r.scope ?? "",
+    cell: (r) => {
+      const m = r.mode ?? r.scope;
+      if (!m) return <span className="text-[color:var(--text-muted)] text-xs">—</span>;
+      const isActiveActive = m === "active_active";
+      return (
+        <span
+          className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded ${
+            isActiveActive
+              ? "bg-[color:var(--accent-purple)]/15 text-[color:var(--accent-purple)]"
+              : "bg-[color:var(--accent-cyan)]/15 text-[color:var(--accent-cyan)]"
+          }`}
+        >
+          {m}
+        </span>
+      );
+    },
+    width: "w-32",
   },
   {
-    key: "members",
-    header: "Members",
-    accessor: (r) => r.members?.length ?? 0,
+    key: "member_dpu_ids",
+    header: "Member DPUs",
+    accessor: (r) => (r.member_dpu_ids ?? r.members?.map((m) => m.dpu_id) ?? []).length,
     cell: (r) => {
-      const ms = r.members ?? [];
-      if (ms.length === 0)
+      // Prefer the canonical `member_dpu_ids`; fall back to the
+      // legacy `members[].dpu_id` only when present.
+      const ids =
+        r.member_dpu_ids ??
+        (r.members ?? []).map((m) => m.dpu_id).filter(Boolean);
+      if (ids.length === 0)
         return <span className="text-[color:var(--text-muted)] text-xs">—</span>;
       return (
         <div className="flex flex-wrap gap-1 max-w-[260px]">
-          {ms.map((m) => (
+          {ids.slice(0, 4).map((id) => (
             <span
-              key={m.dpu_id}
+              key={id}
               className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 font-mono"
             >
-              {m.dpu_id}={m.role}
+              {id}
             </span>
           ))}
+          {ids.length > 4 && (
+            <span className="text-[10px] text-[color:var(--text-muted)]">
+              +{ids.length - 4}
+            </span>
+          )}
         </div>
       );
     },
@@ -492,7 +514,8 @@ const RESOURCE_DEFS: ResourceDef[] = [
     columns: routeCols as Column<AnyResource>[],
   },
   {
-    kind: "ha",
+    // dashd route is `/v1/{ns}/ha-sets/...`; `ha` returns HTTP 405.
+    kind: "ha-sets",
     label: "HA Sets",
     useList: useHaSets as ResourceDef["useList"],
     FormComponent: HaSetForm,
@@ -659,8 +682,17 @@ function ResourceTab({ def }: { def: ResourceDef }) {
         </GlassCard>
       )}
 
-      {/* Form dialog */}
+      {/* Form dialog.
+       *
+       * The `key` forces a full unmount/remount whenever the form
+       * mode flips OR the target row changes. Without it, editing
+       * row A then immediately editing row B (without closing the
+       * dialog in between) would keep A's stale field values in
+       * the FormDialog's internal state — the useEffect reset is
+       * keyed only on `open` transitions.
+       */}
       <FormComponent
+        key={formKeyFor(mode)}
         open={mode.kind === "create" || mode.kind === "edit" || mode.kind === "clone"}
         onClose={() => setMode({ kind: "closed" })}
         initial={
@@ -704,7 +736,9 @@ function ResourceTab({ def }: { def: ResourceDef }) {
 }
 
 /** Produce a clone-mode initial: drop the name + generation but
- *  keep every other field. */
+ *  keep every other field. Strips generation from BOTH the SPA
+ *  metadata block AND the wire-shape top-level (just in case the
+ *  row is in an un-normalised state when cloned). */
 function cloneInitial(row: AnyResource): AnyResource {
   // Deep-clone via JSON to avoid mutating the source row.
   const copy = JSON.parse(JSON.stringify(row)) as AnyResource;
@@ -712,7 +746,32 @@ function cloneInitial(row: AnyResource): AnyResource {
     copy.metadata.name = "";
     if ("generation" in copy.metadata) copy.metadata.generation = undefined;
   }
+  // Defensive: also clear a top-level `generation` that a future
+  // un-normalised row might carry. Cast through unknown because
+  // AnyResource doesn't model the wire-shape field.
+  const looseCopy = copy as unknown as Record<string, unknown>;
+  if ("generation" in looseCopy) delete looseCopy.generation;
   return copy;
+}
+
+/** Compute a stable React key for the FormComponent that captures
+ *  both the form mode and the row identity. When the user switches
+ *  between rows (edit A → edit B) without first closing the
+ *  dialog, the key changes and React fully remounts the form,
+ *  resetting all internal state. */
+function formKeyFor(mode: FormMode): string {
+  switch (mode.kind) {
+    case "edit":
+      return `edit:${mode.row.metadata?.namespace ?? "default"}/${mode.row.metadata?.name ?? ""}`;
+    case "clone":
+      return `clone:${mode.row.metadata?.namespace ?? "default"}/${mode.row.metadata?.name ?? ""}`;
+    case "create":
+      return "create";
+    case "closed":
+      // Use a stable closed key so React doesn't churn while
+      // the dialog is being torn down.
+      return "closed";
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════

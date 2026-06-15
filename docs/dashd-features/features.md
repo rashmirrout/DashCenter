@@ -998,6 +998,7 @@ curl -N 'http://127.0.0.1:7443/admin/audit/stream'    # SSE follow
 - [dash-sim-counter-rollups.md](dash-sim-counter-rollups.md) — PE-3a / PE-G8 sim `GetDpuCounters` RPC + `dash-sim-client dpu-counters` subcommand (standalone, no dashd)
 - [counter-streaming.md](counter-streaming.md) — PE-3c / PD-G5 counter streaming end-to-end (`ObservabilityService.GetCounters` + dashw Hub + `/topology-v2` `CounterWidget`)
 - [docker-cli-packaging.md](docker-cli-packaging.md) — bundled operator CLIs in every container (Alpine base + `dash-sim-client` in sim + `dashctl` in dashd)
+- [referential-integrity-validation.md](referential-integrity-validation.md) — FK validation gap analysis + design proposal (29 object kinds, ~49 FK relationships, 4-phase implementation plan)
 - [proto/dashcenter/v1/](../../proto/dashcenter/v1) — proto sources of truth
 - [docs/CLI_GUIDE.md](../CLI_GUIDE.md) — `dashctl` equivalents
 - [deploy/test-setup/05-full-console/manual-handson.md](../../deploy/test-setup/05-full-console/manual-handson.md) — Lab 12.6 live captures of every diagnostic
