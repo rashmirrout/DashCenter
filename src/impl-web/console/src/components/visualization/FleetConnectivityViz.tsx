@@ -38,13 +38,18 @@
  *   • `useEniPlacement()` for per-DPU ENI counts (rendered as a small
  *     badge on each node).
  */
-import { useMemo } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Maximize2 } from 'lucide-react';
 import { useFleetSummary, useEniPlacement } from '@/queries/hooks';
 import { eniPlacementCountsByDpu, fleetHealthyDpus } from '@/lib/api-helpers';
 import { LogoMark } from '@/components/brand/LogoMark';
+
+// SSR-safe variant of useLayoutEffect — fall back to useEffect when there
+// is no `window` (e.g. server rendering / test runtimes without jsdom).
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 type DpuLite = { id: string; state: string };
 
@@ -88,16 +93,72 @@ function ringLayout(n: number, cx: number, cy: number, radius: number) {
 }
 
 export interface FleetConnectivityVizProps {
-  /** Square SVG size in pixels (default 380). */
+  /** Square SVG size in pixels (default 380). Ignored when `fill` is true. */
   size?: number;
   /** Extra Tailwind classes for the wrapper. */
   className?: string;
+  /**
+   * Auto-fit the viz to the parent container's width (capped at
+   * `maxFillSize`). When true, `size` is computed as
+   * `min(parentClientWidth, maxFillSize)` via a `ResizeObserver`.
+   */
+  fill?: boolean;
+  /** Hard cap (px) on the viz when `fill` is true. Default 720. */
+  maxFillSize?: number;
 }
 
-export function FleetConnectivityViz({ size = 380, className }: FleetConnectivityVizProps) {
+export function FleetConnectivityViz({
+  size: sizeProp = 380,
+  className,
+  fill = false,
+  maxFillSize = 720,
+}: FleetConnectivityVizProps) {
   const navigate = useNavigate();
   const fleet = useFleetSummary();
   const placements = useEniPlacement();
+
+  // --- Auto-fill sizing ---------------------------------------------------
+  // When `fill` is true we measure BOTH dimensions of the parent container
+  // (width AND height) and render the SVG as the largest square that fits
+  // inside, leaving a small reserve for the legend strip below it.
+  //
+  // This is the key design choice: the viz is intrinsically square (circular
+  // ring layout), so we cannot stretch it to fill a non-square box. Instead
+  // we let the *card* control its own dimensions (typically a fixed height
+  // like `h-[540px]`) and have the viz fill the largest square area the
+  // card offers, centered. This keeps the box at a sensible size while the
+  // animation/graph inside occupies as much of it as the geometry allows.
+  //
+  // `maxFillSize` is an absolute hard cap (default 720 px) so on ultra-wide
+  // monitors the viz never becomes absurdly large.
+  const LEGEND_RESERVE = 32; // px of vertical space reserved for the legend strip
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [autoSize, setAutoSize] = useState<number | null>(null);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!fill) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight - LEGEND_RESERVE;
+      // Largest square that fits inside the container (after reserving
+      // vertical space for the legend strip beneath the SVG).
+      const dim = Math.min(w, h);
+      if (dim > 0) {
+        setAutoSize(Math.min(Math.floor(dim), maxFillSize));
+      }
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fill, maxFillSize]);
+
+  // Effective render size — falls back to the explicit `sizeProp` if auto-fill
+  // is off, or if the first measurement hasn't completed yet.
+  const size = fill && autoSize != null ? autoSize : sizeProp;
 
   const dpus: DpuLite[] = useMemo(() => {
     const list = fleet.data?.dpus ?? [];
@@ -123,21 +184,40 @@ export function FleetConnectivityViz({ size = 380, className }: FleetConnectivit
   const total = dpus.length;
   const ariaLabel = `Fleet connectivity map. ${healthy} of ${total} DPUs healthy.`;
 
+  // Wrapper style: in `fill` mode the outer container takes 100% of both
+  // dimensions of its parent so the ResizeObserver can measure available
+  // width AND height; the SVG + legend are centered inside.
+  // In fixed-size mode we preserve the original layout exactly (size×size box).
+  const wrapperStyle: React.CSSProperties = fill
+    ? {
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }
+    : { width: size, height: size };
+
   if (fleet.isLoading) {
     return (
       <div
+        ref={containerRef}
         className={className}
-        style={{ width: size, height: size }}
+        style={wrapperStyle}
         aria-busy="true"
         aria-label="Loading fleet connectivity map"
       >
-        <div className="w-full h-full rounded-full skeleton-shimmer opacity-40" />
+        <div
+          className="rounded-full skeleton-shimmer opacity-40"
+          style={{ width: size, height: size }}
+        />
       </div>
     );
   }
 
   return (
-    <div className={className} style={{ width: size, height: size }}>
+    <div ref={containerRef} className={className} style={wrapperStyle}>
       <svg
         width={size}
         height={size}

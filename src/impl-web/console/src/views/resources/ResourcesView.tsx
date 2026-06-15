@@ -9,15 +9,18 @@
  * Now wired to the dependency module (`lib/resource-deps`) for:
  *   • Tab order matches the resource creation DAG topology
  *   • Visual dependency mini-map at the top showing the DAG
- *   • Each table has an extra "Dependents" column showing what
- *     downstream resources reference the row
- *   • Tables for non-root kinds also have a "References" column
- *     showing the upstream resources this row points to
  *   • Delete confirmation shows a warning when the resource has
  *     dependents, listing every dependent that would be orphaned
  *
  * The page still reads list data via the shared `useXxxList` hooks
  * and uses the form components for Create/Edit/Clone.
+ *
+ * Note (A-IF3-G3): The per-row "Dependents" / "References" columns
+ * were removed — they cluttered the table and the same information
+ * is now editable directly in the resource's create/edit dialog
+ * (e.g. EniForm has reverse-ref multi-selects for ACL/Route
+ * policies). The delete-confirmation warning is kept because that
+ * is the moment the user genuinely needs the warning.
  * ═══════════════════════════════════════════════════════════════ */
 
 import { useMemo, useState } from "react";
@@ -69,15 +72,10 @@ import {
   type AnyResource,
   type ResourceSnapshot,
   emptySnapshot,
-  rollupAllDependents,
-  getDependencies,
   getDependents,
-  type ResourceDepInfo,
-  type DependencyRef,
 } from "@/lib/resource-deps";
 
 import { DependencyMiniMap } from "./DependencyMiniMap";
-import { DependentsBadge, DependenciesBadge } from "./DependentsBadge";
 
 /* ── Resource registry ─────────────────────────────────────── */
 
@@ -635,62 +633,11 @@ function ResourceTab({ def, snapshot }: ResourceTabProps) {
 
   const items: AnyResource[] = list.data?.items ?? [];
 
-  // Precompute dependent counts for every row in this kind — O(N*M)
-  // where N is the row count and M is the total resource count.
-  // For typical fleet sizes (~100 resources/kind, ~700 total) this
-  // is a few thousand comparisons per refresh — well under 1ms.
-  const dependentsMap = useMemo(
-    () => rollupAllDependents(def.kind, snapshot),
-    [def.kind, snapshot],
-  );
-
-  // For kinds with upstream refs, precompute references per row.
-  const referencesMap = useMemo(() => {
-    const out = new Map<string, DependencyRef[]>();
-    if (!def.hasUpstreamRefs) return out;
-    for (const item of items) {
-      const name = item.metadata?.name ?? "";
-      if (!name) continue;
-      out.set(name, getDependencies(def.kind, item));
-    }
-    return out;
-  }, [def.kind, def.hasUpstreamRefs, items]);
-
-  // Build the column list: original cols + (optional) References +
-  // Dependents + Actions.
+  // Build the column list: original cols + Actions.
+  // (The previous "Dependents" / "References" columns were removed
+  // in A-IF3-G3 — the same info is now editable inside each form
+  // dialog, e.g. EniForm's ACL/Route policy multi-selects.)
   const columns: Column<AnyResource>[] = useMemo(() => {
-    const dependentsCol: Column<AnyResource> = {
-      key: "__dependents",
-      header: "Dependents",
-      accessor: (r) => dependentsMap.get(r.metadata?.name ?? "")?.totalDependents ?? 0,
-      sortable: true,
-      width: "w-44",
-      cell: (row) => {
-        const name = row.metadata?.name ?? "";
-        const info = dependentsMap.get(name);
-        // Include the full list (for the tooltip)
-        const fullInfo: ResourceDepInfo | undefined = info
-          ? {
-              ...info,
-              dependents: getDependents(def.kind, name, snapshot),
-            }
-          : undefined;
-        return <DependentsBadge info={fullInfo} />;
-      },
-    };
-
-    const referencesCol: Column<AnyResource> = {
-      key: "__references",
-      header: "References",
-      accessor: (r) => referencesMap.get(r.metadata?.name ?? "")?.length ?? 0,
-      sortable: true,
-      width: "w-52",
-      cell: (row) => {
-        const refs = referencesMap.get(row.metadata?.name ?? "") ?? [];
-        return <DependenciesBadge refs={refs} />;
-      },
-    };
-
     const actionsCol: Column<AnyResource> = {
       key: "__actions",
       header: "Actions",
@@ -706,12 +653,8 @@ function ResourceTab({ def, snapshot }: ResourceTabProps) {
       ),
     };
 
-    const cols: Column<AnyResource>[] = [...def.columns];
-    if (def.hasUpstreamRefs) cols.push(referencesCol);
-    cols.push(dependentsCol);
-    cols.push(actionsCol);
-    return cols;
-  }, [def.columns, def.kind, def.hasUpstreamRefs, dependentsMap, referencesMap, snapshot]);
+    return [...def.columns, actionsCol];
+  }, [def.columns]);
 
   const FormComponent = def.FormComponent;
 
