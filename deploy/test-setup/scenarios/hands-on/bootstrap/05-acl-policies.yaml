@@ -20,14 +20,14 @@ spec:
   rules:
     - priority: 100                               # allow HTTPS from 10.0.0.0/8
       action: allow
-      src_prefix: "10.0.0.0/8"
-      dst_port: "443"
-      protocol: tcp
+      src_prefixes: ["10.0.0.0/8"]
+      dst_ports: ["443"]
+      protocols: [tcp]
     - priority: 200                               # allow SSH from management subnet
       action: allow
-      src_prefix: "10.0.50.0/24"
-      dst_port: "22"
-      protocol: tcp
+      src_prefixes: ["10.0.50.0/24"]
+      dst_ports: ["22"]
+      protocols: [tcp]
     - priority: 1000                              # deny everything else
       action: deny
 ---
@@ -56,8 +56,8 @@ spec:
   rules:
     - priority: 100                               # allow DB port from web tier only
       action: allow
-      src_prefix: "192.168.50.0/24"
-      dst_port: "5432"
-      protocol: tcp
+      src_prefixes: ["192.168.50.0/24"]
+      dst_ports: ["5432"]
+      protocols: [tcp]
     - priority: 1000
       action: deny

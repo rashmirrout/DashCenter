@@ -1,5 +1,12 @@
 # 05-acl-policies.yaml - 32 AclPolicies
 # 10 tenant-in + 10 tenant-out + 2 platform + 5 tier-specific + 5 staging-restricted
+#
+# NOTE: AclRule match fields are REPEATED (plural) in the dashcenter.v1
+# schema: `src_prefixes: []`, `dst_prefixes: []`, `src_ports: []`,
+# `dst_ports: []`, `protocols: []`. The singular scalar forms
+# (`src_prefix`, `dst_port`, `protocol`) are NOT part of the schema and
+# are silently dropped by dashd's JSON decoder — leaving rules with only
+# `priority` + `action`. Always use the plural array forms below.
 ---
 apiVersion: dashcenter.v1
 kind: AclPolicy
@@ -9,10 +16,10 @@ spec:
   priority: 100
   eni_names: [eni-bank-web-01, eni-bank-api-01, eni-bank-db-01, eni-bank-cache-01, eni-bank-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -34,10 +41,10 @@ spec:
   priority: 100
   eni_names: [eni-retail-web-01, eni-retail-api-01, eni-retail-db-01, eni-retail-cache-01, eni-retail-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -59,10 +66,10 @@ spec:
   priority: 100
   eni_names: [eni-media-web-01, eni-media-api-01, eni-media-db-01, eni-media-cache-01, eni-media-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -84,10 +91,10 @@ spec:
   priority: 100
   eni_names: [eni-iot-web-01, eni-iot-api-01, eni-iot-db-01, eni-iot-cache-01, eni-iot-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -109,10 +116,10 @@ spec:
   priority: 100
   eni_names: [eni-analytics-web-01, eni-analytics-api-01, eni-analytics-db-01, eni-analytics-cache-01, eni-analytics-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -134,10 +141,10 @@ spec:
   priority: 100
   eni_names: [eni-telecom-web-01, eni-telecom-api-01, eni-telecom-db-01, eni-telecom-cache-01, eni-telecom-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -159,10 +166,10 @@ spec:
   priority: 100
   eni_names: [eni-health-web-01, eni-health-api-01, eni-health-db-01, eni-health-cache-01, eni-health-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -184,10 +191,10 @@ spec:
   priority: 100
   eni_names: [eni-fintech-web-01, eni-fintech-api-01, eni-fintech-db-01, eni-fintech-cache-01, eni-fintech-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -209,10 +216,10 @@ spec:
   priority: 100
   eni_names: [eni-gaming-web-01, eni-gaming-api-01, eni-gaming-db-01, eni-gaming-cache-01, eni-gaming-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -234,10 +241,10 @@ spec:
   priority: 100
   eni_names: [eni-logistics-web-01, eni-logistics-api-01, eni-logistics-db-01, eni-logistics-cache-01, eni-logistics-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "22", protocol: tcp }
-    - { priority: 300, action: allow, protocol: icmp }
-    - { priority: 400, action: allow, src_prefix: "10.10.0.0/16", dst_port: "9090", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 300, action: allow, protocols: [icmp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -259,8 +266,8 @@ spec:
   priority: 50
   eni_names: [eni-mgmt-01, eni-mgmt-02, eni-mgmt-03, eni-mgmt-04, eni-mgmt-05, eni-mgmt-06, eni-mgmt-07, eni-mgmt-08, eni-mgmt-09, eni-mgmt-10, eni-mgmt-11, eni-mgmt-12, eni-mgmt-13, eni-mgmt-14, eni-mgmt-15, eni-mgmt-16, eni-mgmt-17, eni-mgmt-18, eni-mgmt-19, eni-mgmt-20, eni-mgmt-21, eni-mgmt-22, eni-mgmt-23, eni-mgmt-24, eni-mgmt-25, eni-mgmt-26, eni-mgmt-27, eni-mgmt-28, eni-mgmt-29, eni-mgmt-30, eni-mgmt-31, eni-mgmt-32, eni-mgmt-33, eni-mgmt-34, eni-mgmt-35, eni-mgmt-36, eni-mgmt-37, eni-mgmt-38, eni-mgmt-39, eni-mgmt-40, eni-mgmt-41, eni-mgmt-42, eni-mgmt-43, eni-mgmt-44, eni-mgmt-45, eni-mgmt-46, eni-mgmt-47, eni-mgmt-48, eni-mgmt-49, eni-mgmt-50]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.10.0.0/16", dst_port: "22", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.10.0.0/16", dst_port: "2222", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["22"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.10.0.0/16"], dst_ports: ["2222"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -271,12 +278,10 @@ spec:
   priority: 60
   eni_names: [eni-mgmt-01, eni-mgmt-02, eni-mgmt-03, eni-mgmt-04, eni-mgmt-05, eni-mgmt-06, eni-mgmt-07, eni-mgmt-08, eni-mgmt-09, eni-mgmt-10, eni-mgmt-11, eni-mgmt-12, eni-mgmt-13, eni-mgmt-14, eni-mgmt-15, eni-mgmt-16, eni-mgmt-17, eni-mgmt-18, eni-mgmt-19, eni-mgmt-20, eni-mgmt-21, eni-mgmt-22, eni-mgmt-23, eni-mgmt-24, eni-mgmt-25, eni-mgmt-26, eni-mgmt-27, eni-mgmt-28, eni-mgmt-29, eni-mgmt-30, eni-mgmt-31, eni-mgmt-32, eni-mgmt-33, eni-mgmt-34, eni-mgmt-35, eni-mgmt-36, eni-mgmt-37, eni-mgmt-38, eni-mgmt-39, eni-mgmt-40, eni-mgmt-41, eni-mgmt-42, eni-mgmt-43, eni-mgmt-44, eni-mgmt-45, eni-mgmt-46, eni-mgmt-47, eni-mgmt-48, eni-mgmt-49, eni-mgmt-50]
   rules:
-    - { priority: 100, action: allow, dst_port: "161", protocol: udp }
-    - { priority: 200, action: allow, protocol: icmp }
-    - { priority: 300, action: allow, src_prefix: "10.20.0.0/16", dst_port: "9090", protocol: tcp }
-    - { priority: 400, action: allow, src_prefix: "10.20.0.0/16", dst_port: "9100", protocol: tcp }
-
-
+    - { priority: 100, action: allow, dst_ports: ["161"], protocols: [udp] }
+    - { priority: 200, action: allow, protocols: [icmp] }
+    - { priority: 300, action: allow, src_prefixes: ["10.20.0.0/16"], dst_ports: ["9090"], protocols: [tcp] }
+    - { priority: 400, action: allow, src_prefixes: ["10.20.0.0/16"], dst_ports: ["9100"], protocols: [tcp] }
 ---
 apiVersion: dashcenter.v1
 kind: AclPolicy
@@ -286,9 +291,9 @@ spec:
   priority: 200
   eni_names: [eni-bank-web-01, eni-retail-web-01, eni-media-web-01, eni-iot-web-01, eni-analytics-web-01, eni-telecom-web-01, eni-health-web-01, eni-fintech-web-01, eni-gaming-web-01, eni-logistics-web-01]
   rules:
-    - { priority: 100, action: allow, dst_port: "80", protocol: tcp }
-    - { priority: 110, action: allow, dst_port: "443", protocol: tcp }
-    - { priority: 120, action: allow, dst_port: "8080-8089", protocol: tcp }
+    - { priority: 100, action: allow, dst_ports: ["80"], protocols: [tcp] }
+    - { priority: 110, action: allow, dst_ports: ["443"], protocols: [tcp] }
+    - { priority: 120, action: allow, dst_ports: ["8080-8089"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -299,8 +304,8 @@ spec:
   priority: 200
   eni_names: [eni-bank-api-01, eni-retail-api-01, eni-media-api-01, eni-iot-api-01, eni-analytics-api-01, eni-telecom-api-01, eni-health-api-01, eni-fintech-api-01, eni-gaming-api-01, eni-logistics-api-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "192.168.0.0/16", dst_port: "8443", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "9443", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["192.168.0.0/16"], dst_ports: ["8443"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["9443"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -311,8 +316,8 @@ spec:
   priority: 200
   eni_names: [eni-bank-db-01, eni-retail-db-01, eni-media-db-01, eni-iot-db-01, eni-analytics-db-01, eni-telecom-db-01, eni-health-db-01, eni-fintech-db-01, eni-gaming-db-01, eni-logistics-db-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "192.168.0.0/16", dst_port: "5432", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "192.168.0.0/16", dst_port: "3306", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["192.168.0.0/16"], dst_ports: ["5432"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["192.168.0.0/16"], dst_ports: ["3306"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -323,8 +328,8 @@ spec:
   priority: 200
   eni_names: [eni-bank-cache-01, eni-retail-cache-01, eni-media-cache-01, eni-iot-cache-01, eni-analytics-cache-01, eni-telecom-cache-01, eni-health-cache-01, eni-fintech-cache-01, eni-gaming-cache-01, eni-logistics-cache-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "192.168.0.0/16", dst_port: "6379", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "192.168.0.0/16", dst_port: "11211", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["192.168.0.0/16"], dst_ports: ["6379"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["192.168.0.0/16"], dst_ports: ["11211"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -335,8 +340,8 @@ spec:
   priority: 200
   eni_names: [eni-bank-worker-01, eni-retail-worker-01, eni-media-worker-01, eni-iot-worker-01, eni-analytics-worker-01, eni-telecom-worker-01, eni-health-worker-01, eni-fintech-worker-01, eni-gaming-worker-01, eni-logistics-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8", dst_port: "9092", protocol: tcp }
-    - { priority: 200, action: allow, src_prefix: "10.0.0.0/8", dst_port: "5672", protocol: tcp }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["9092"], protocols: [tcp] }
+    - { priority: 200, action: allow, src_prefixes: ["10.0.0.0/8"], dst_ports: ["5672"], protocols: [tcp] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -347,7 +352,7 @@ spec:
   priority: 300
   eni_names: [eni-bank-web-01, eni-bank-api-01, eni-bank-db-01, eni-bank-cache-01, eni-bank-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -358,7 +363,7 @@ spec:
   priority: 300
   eni_names: [eni-retail-web-01, eni-retail-api-01, eni-retail-db-01, eni-retail-cache-01, eni-retail-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -369,7 +374,7 @@ spec:
   priority: 300
   eni_names: [eni-media-web-01, eni-media-api-01, eni-media-db-01, eni-media-cache-01, eni-media-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -380,7 +385,7 @@ spec:
   priority: 300
   eni_names: [eni-iot-web-01, eni-iot-api-01, eni-iot-db-01, eni-iot-cache-01, eni-iot-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"] }
     - { priority: 1000, action: deny }
 ---
 apiVersion: dashcenter.v1
@@ -391,6 +396,5 @@ spec:
   priority: 300
   eni_names: [eni-analytics-web-01, eni-analytics-api-01, eni-analytics-db-01, eni-analytics-cache-01, eni-analytics-worker-01]
   rules:
-    - { priority: 100, action: allow, src_prefix: "10.0.0.0/8" }
+    - { priority: 100, action: allow, src_prefixes: ["10.0.0.0/8"] }
     - { priority: 1000, action: deny }
-

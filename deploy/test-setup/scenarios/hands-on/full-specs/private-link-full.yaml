@@ -104,10 +104,10 @@ spec:
   eni_names: [full-pl-app-01, full-pl-app-02]
   rules:
     # — Allowed: SQL Server TCP to the privatelink /32
-    - { priority: 100,  action: allow, protocol: tcp, dst_port: "1433", dst_prefix: "10.60.255.70/32" }
+    - { priority: 100,  action: allow, protocols: [tcp], dst_ports: ["1433"], dst_prefixes: ["10.60.255.70/32"] }
     # — Allowed: intra-VNet east-west
-    - { priority: 200,  action: allow,                 dst_prefix: "192.168.67.0/24" }
+    - { priority: 200,  action: allow,                 dst_prefixes: ["192.168.67.0/24"] }
     # — Allowed: DNS replies
-    - { priority: 300,  action: allow, protocol: udp,  dst_port: "53" }
+    - { priority: 300,  action: allow, protocols: [udp],  dst_ports: ["53"] }
     # — Default deny (no direct internet egress, no other PrivateLink targets)
     - { priority: 1000, action: deny }

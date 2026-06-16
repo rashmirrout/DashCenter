@@ -104,6 +104,6 @@ spec:
   priority: 100
   eni_names: [full-ha-eni-01, full-ha-eni-02]
   rules:
-    - { priority: 100,  action: allow, protocol: tcp, dst_port: "443" }
-    - { priority: 200,  action: allow, protocol: tcp, dst_port: "22", src_prefix: "10.0.0.0/8" }
+    - { priority: 100,  action: allow, protocols: [tcp], dst_ports: ["443"] }
+    - { priority: 200,  action: allow, protocols: [tcp], dst_ports: ["22"], src_prefixes: ["10.0.0.0/8"] }
     - { priority: 1000, action: deny }
