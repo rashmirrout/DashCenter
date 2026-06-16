@@ -40,8 +40,11 @@ cd deploy/test-setup/07-full-experiment
 # 1. Build + start (takes ~2 min for 56 containers)
 pwsh ./start-fleet.ps1 -WithConsole
 
-# 2. Provision ~160 objects
-pwsh ./provision.ps1
+# 2. Provision ~449 objects (PowerShell wrapper)
+pwsh ./provision.ps1 -MaxRetries 10 -MaxWaitSeconds 180 -Force
+
+# Optional: directly run the Bash provisioner with explicit retry controls
+bash ./provision.sh --endpoint http://localhost:28443 --max-retries 10 --max-wait-seconds 180 --force
 
 # 3. Open web console
 start http://localhost:3000
@@ -50,6 +53,139 @@ start http://localhost:3000
 dashctl dpu list -o table --endpoint http://localhost:28443 --insecure
 dashctl get eni -o wide --endpoint http://localhost:28443 --insecure
 ```
+
+Linux/macOS quick start:
+
+```bash
+cd deploy/test-setup/07-full-experiment
+
+./start-fleet.sh --with-console
+
+# Provision with retries for transient leader flips / restarts
+./provision.sh --endpoint http://localhost:28443 --max-retries 10 --max-wait-seconds 180 --force
+
+./show-leader.sh
+```
+
+## Experimenter Flow
+
+Use this sequence when running workshops, hands-on sessions, or validation
+loops on the 07-full-experiment topology.
+
+### 1) Bring up fleet
+
+PowerShell:
+
+```powershell
+cd deploy/test-setup/07-full-experiment
+pwsh ./start-fleet.ps1 -WithConsole
+```
+
+Linux/macOS:
+
+```bash
+cd deploy/test-setup/07-full-experiment
+./start-fleet.sh --with-console
+```
+
+### 2) Provision with retry-safe apply
+
+Use the retry flags so transient leader flips or short restarts do not fail
+the full run.
+
+```bash
+./provision.sh --endpoint http://localhost:28443 --max-retries 10 --max-wait-seconds 180 --force
+```
+
+### 3) Verify baseline
+
+```bash
+dashctl get vnet -o table --endpoint http://localhost:28443 --insecure
+dashctl get eni -o wide --endpoint http://localhost:28443 --insecure
+dashctl get route-policy -o table --endpoint http://localhost:28443 --insecure
+dashctl get acl-policy -o table --endpoint http://localhost:28443 --insecure
+dashctl get ha-set -o table --endpoint http://localhost:28443 --insecure
+```
+
+### 4) Run guided spec experiments
+
+Move to the shared hands-on library and run either per-kind learning specs or
+full dependency-rich specs:
+
+- Per-kind: `deploy/test-setup/scenarios/hands-on/config-specs/`
+- Full specs: `deploy/test-setup/scenarios/hands-on/full-specs/`
+
+Recommended order for new experimenters:
+
+1. `vnet-experiments.yaml`
+2. `eni-experiments.yaml`
+3. `vnet-mapping-experiments.yaml`
+4. `route-policy-experiments.yaml`
+5. `acl-policy-experiments.yaml`
+6. `service-tunnel-experiments.yaml`
+7. `ha-set-experiments.yaml`
+
+For integrated scenarios, run:
+
+```bash
+cd deploy/test-setup/scenarios/hands-on/full-specs
+pwsh ./test-roundtrip.ps1 -Action test
+# or
+./test-roundtrip.sh test
+```
+
+### 5) Leader/health check during experiments
+
+If apply operations are flaky, verify leader and admin health before retrying:
+
+```bash
+curl -s http://localhost:27443/admin/health
+curl -s http://localhost:27443/admin/leader
+```
+
+### 6) Cleanup/reset
+
+Object cleanup only:
+
+```bash
+./cleanup-data.sh
+# or
+pwsh ./cleanup-data.ps1
+```
+
+Full teardown:
+
+```bash
+./stop-fleet.sh
+# or
+pwsh ./stop-fleet.ps1
+```
+
+## Provision.sh options
+
+`provision.sh` supports explicit flags (and keeps backward compatibility for
+positional endpoint + env vars):
+
+```bash
+./provision.sh [endpoint] [--force]
+./provision.sh --endpoint URL --admin-endpoint URL --force \
+               --max-retries N --max-wait-seconds N
+```
+
+- `--endpoint`: dashd REST endpoint (default: `http://localhost:28443`)
+- `--admin-endpoint`: health-check endpoint used before each apply attempt
+- `--force`: pass `--force` to `dashctl apply`
+- `--max-retries`: retry count per manifest for transient network errors (default `6`)
+- `--max-wait-seconds`: max wait for `/admin/health` before each attempt (default `90`)
+
+Transient errors retried automatically include:
+- `connection reset by peer`
+- `EOF`
+- `i/o timeout`
+- `connection refused`
+
+This is intended for at-scale provisioning where leader election or short
+container restarts can interrupt long apply runs.
 
 ## Ports
 
@@ -123,10 +259,15 @@ docker exec dc-exp-etcd-1 etcdctl endpoint health --endpoints=http://etcd-1:2379
 | Script | Purpose |
 |---|---|
 | `start-fleet.ps1` | Build + start 56 containers + wait for leader |
+| `start-fleet.sh` | Linux/macOS equivalent of `start-fleet.ps1` |
 | `stop-fleet.ps1` | Tear down (with volume cleanup) |
-| `provision.ps1` | Apply ~160 objects in dependency order |
+| `stop-fleet.sh` | Linux/macOS equivalent of `stop-fleet.ps1` |
+| `provision.ps1` | PowerShell wrapper to apply ~449 objects in dependency order |
+| `provision.sh` | Bash provisioner with health-gated retry options (`--max-retries`, `--max-wait-seconds`) |
 | `cleanup-data.ps1` | Delete all provisioned objects |
+| `cleanup-data.sh` | Linux/macOS equivalent of `cleanup-data.ps1` |
 | `show-leader.ps1` | Show which dashd is the leader |
+| `show-leader.sh` | Linux/macOS equivalent of `show-leader.ps1` |
 
 ## Resource requirements
 
