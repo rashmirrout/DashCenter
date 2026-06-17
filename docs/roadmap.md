@@ -369,6 +369,70 @@ work:
 | 9 | F22 Policy dependency graph | Pure frontend; no new APIs; high operator safety value |
 | 10 | F4 OIDC integration | Required before any production deployment outside a trusted LAN |
 
+### 6.7 Industry-hardening backlog (Phase 2 — F31–F60)
+
+A second 30-feature wave focused on **quality and reliability, scalability and
+performance, UI/UX, and high-demand industry features**, captured in detail in
+[`docs/dashd-features/FEATURE_ASK.md`](./dashd-features/FEATURE_ASK.md) sections 6–9. Summary:
+
+| ID | Feature (one line) | Theme |
+|---|---|---|
+| F31 | Chaos engineering harness with programmable failure injection | Reliability |
+| F32 | Disaster recovery — backup, restore, point-in-time recovery | Reliability |
+| F33 | Zero-downtime dashd rolling + canary upgrades | Reliability |
+| F34 | Versioned API schema + formal deprecation policy | Reliability |
+| F35 | Cluster-wide state consistency audit (Merkle tree) | Reliability |
+| F36 | Dead-letter queue + poison-message handling | Reliability |
+| F37 | Per-tenant quotas + fair-share scheduling | Reliability |
+| F38 | Deep health checks (write/dep/leader probes) | Reliability |
+| F39 | Sharded reconciliation workers | Scale |
+| F40 | Watch bookmarks + cursor-based pagination | Scale |
+| F41 | ETag / If-None-Match read optimization | Scale |
+| F42 | Compressed gRPC + HTTP streaming | Scale |
+| F43 | Read-replica routing in HA | Scale |
+| F44 | Coalesced server-side write windows | Scale |
+| F45 | Command palette (Cmd+K) + keyboard shortcuts | UI/UX |
+| F46 | Customizable dashboards (drag-and-drop widgets) | UI/UX |
+| F47 | Saved views, bookmarks, per-user workspace | UI/UX |
+| F48 | Time-machine point-in-time state replay | UI/UX |
+| F49 | Bulk actions (multi-select + batch ops) | UI/UX |
+| F50 | Inline diff visualization for apply preview | UI/UX |
+| F51 | Policy-as-Code (OPA / Rego) | Industry |
+| F52 | Compliance reporting pack (SOC2 / FedRAMP / PCI / ISO27001) | Industry |
+| F53 | KMS / HashiCorp Vault for secrets | Industry |
+| F54 | SBOM + signed images (sigstore / cosign) | Industry |
+| F55 | Air-gapped deployment + offline update bundles | Industry |
+| F56 | ARM64 first-class support | Industry |
+| F57 | Webhook subscription framework | Industry |
+| F58 | SIEM integration for audit log shipping | Industry |
+| F59 | Approval workflows + change windows | Industry |
+| F60 | Cost allocation + chargeback per tenant | Industry |
+
+### 6.8 Phase-2 priority order
+
+| Priority | Feature | Why now |
+|---|---|---|
+| 11 | F38 deep health checks | Smallest investment, immediate ops value |
+| 12 | F40 watch bookmarks + pagination | Unblocks scale + reduces UI memory |
+| 13 | F32 backup / restore / PITR | Top customer ask; compliance prerequisite |
+| 14 | F33 zero-downtime upgrades | Direct effect on deploy frequency |
+| 15 | F35 consistency audit | Trust and compliance signal |
+| 16 | F39 sharded reconciliation | Validates 10k-DPU scale story |
+| 17 | F54 SBOM + signed images | Common procurement blocker; low effort |
+| 18 | F58 SIEM integration | High-leverage security checkbox |
+| 19 | F51 OPA policy-as-code | Industry-standard governance |
+| 20 | F37 tenant quotas + fair share | Multi-tenancy readiness |
+| 21 | F45 + F47 command palette + saved views | Visible UX win for power operators |
+| 22 | F48 time-machine | Differentiating compliance / forensics capability |
+| 23 | F53 KMS / Vault | Common enterprise security requirement |
+| 24 | F59 approval workflows | Enables regulated production use |
+| 25 | F60 cost allocation | FinOps maturity; internal chargeback |
+| 26 | F31 chaos harness | Proves resilience claims continuously |
+| 27 | F52 compliance pack | Sales accelerator for regulated industries |
+| 28 | F55 air-gapped bundles | Unlocks government markets |
+| 29 | F56 ARM64 support | DPU-native + cloud-cost alignment |
+| 30 | F36 dead-letter queue | Operational polish for fleet ops |
+
 ---
 
 ## 7. How to use this document
