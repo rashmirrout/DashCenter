@@ -1376,6 +1376,249 @@ operations can review it consistently:
 
 ---
 
+## Section 10 — Logging and Observability Enhancements
+
+> **Scope.** These items are operability fixes for the existing code base
+> rather than new product features. They complement the bugs tracked in
+> [`BUGS.md`](./BUGS.md) and are sized so the entire section can be
+> delivered as one focused PR series. Identifiers (`L1`–`L10`) are stable.
+
+### L1. Request / trace ID propagation and slog correlation
+
+- **Category:** Cross-cutting / Observability
+- **Problem statement:** Zero matches for `trace_id`, `request_id`, or `X-Request-Id` across the codebase. There is no way to follow a single client call through REST → gRPC → reconciliation worker → DPU agent. Postmortems must rely on timestamp correlation alone.
+- **Primary use cases:**
+  - Operator follows a failed `dashctl apply -f` end-to-end across replicas.
+  - Support engineer reproduces a customer-reported issue and shares the request id for cross-team triage.
+  - Distributed tracing (Jaeger, Tempo) ingests dashd spans using the same ids.
+- **Proposed capability:** Add an HTTP middleware and gRPC interceptor that read or generate `X-Request-Id` and W3C `traceparent`, store them in `context.Context`, propagate via gRPC metadata to DPU agents, and enrich every `slog` line through a context-aware handler.
+- **Functional requirements:**
+  - Incoming `X-Request-Id` is honored; missing ones are generated (ULID).
+  - W3C `traceparent` parsed when present; new spans created otherwise.
+  - Every log line emitted while a request is being served includes `request_id` and `trace_id`.
+  - Propagation to DPU agents via gRPC metadata is verified by integration test.
+- **Non-functional requirements:**
+  - Per-request overhead bounded; ID generation does not allocate per log call.
+- **Business value:** Single biggest postmortem productivity gain; prerequisite for distributed tracing.
+- **Success metrics:** Time-to-trace a failed request across components; adoption in support runbooks.
+- **Dependencies:** None.
+- **Spec references:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md) §13.
+
+---
+
+### L2. Sample or rate-limit hot-path debug logs
+
+- **Category:** dashd / Observability
+- **Problem statement:** `slog.Debug("dispatch: worker run loop", ...)` and `slog.Debug("dispatch: in sync", ...)` fire per-DPU per-tick. At 10,000 DPUs with the default 30 s tick that is ~20,000 debug events per minute even on a healthy, steady-state cluster.
+- **Primary use cases:**
+  - Operators enable DEBUG on a single dashd replica to investigate a fleet-wide symptom without saturating log pipelines.
+  - Long-running soak runs that retain DEBUG output for audit.
+- **Proposed capability:** Sampled or rate-limited debug logging for steady-state heartbeat lines; or only emit on state transitions (in-sync ↔ dirty).
+- **Functional requirements:**
+  - Configurable per-component sampling rate (e.g. 1-in-N or token bucket).
+  - State-transition logs are never sampled (always emitted).
+  - Existing tests that assert specific log lines continue to pass.
+- **Non-functional requirements:**
+  - Sampling decision is O(1) and lock-free on the hot path.
+- **Business value:** Makes DEBUG safely usable at fleet scale.
+- **Success metrics:** Bytes emitted per minute at DEBUG on a 10k-DPU benchmark within a defined budget.
+- **Dependencies:** None.
+- **Spec references:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md) §13.
+
+---
+
+### L3. Standardize log key names
+
+- **Category:** Cross-cutting / Observability
+- **Problem statement:** Log keys are inconsistent: `"dpu"` vs `"dpu_id"`, `"error"` vs `"err"`, `"backend"` vs `"store_backend"`. Filters and queries in downstream log stores get harder to write and harder to share.
+- **Primary use cases:**
+  - Splunk/Elastic queries by stable field names.
+  - Alerting rules that match on `dpu_id` consistently.
+  - Cross-team postmortem queries.
+- **Proposed capability:** Document and enforce a key dictionary; add a lint to fail PRs that introduce new key names outside the dictionary.
+- **Functional requirements:**
+  - Canonical names: `dpu_id`, `error`, `kind`, `key`, `namespace`, `subject`, `component`, `request_id`, `trace_id`.
+  - Existing call sites migrated.
+  - `golangci-lint` plugin (or custom analyzer) enforces the dictionary.
+- **Non-functional requirements:**
+  - Migration delivered as a single mechanical PR to ease review.
+- **Business value:** Faster log queries; lower learning curve for new operators.
+- **Success metrics:** Lint passes; documented dictionary committed.
+- **Dependencies:** None.
+- **Spec references:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md) §13.
+
+---
+
+### L4. Replace string log prefixes with a `component` field
+
+- **Category:** Cross-cutting / Observability
+- **Problem statement:** Modules tag log lines via string prefixes (`"subscribe: pump started"`, `"dispatch: reconcile"`, `"cluster.registry: ..."`, `"leaderLoop: ..."`, `"pd: ..."`). Filtering by component requires brittle prefix matching and harms structured search.
+- **Primary use cases:**
+  - `component=dispatch level=warn` filter in any structured log store.
+  - Per-component dashboards and SLOs.
+  - Stable metadata even when message text evolves.
+- **Proposed capability:** At module init, derive `log := slog.With("component", "<name>")` and drop the string prefix from messages.
+- **Functional requirements:**
+  - Every module declares a single canonical component name.
+  - Existing prefixed messages migrated; tests updated.
+- **Non-functional requirements:**
+  - No change in log volume or shape beyond key normalization.
+- **Business value:** Structured queries replace string matching; foundation for component-level SLOs.
+- **Success metrics:** Every emitted log line carries `component`.
+- **Dependencies:** L3 key dictionary.
+- **Spec references:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md) §13.
+
+---
+
+### L5. JSON-format slog as the production default
+
+- **Category:** dashd / Observability
+- **Problem statement:** Go's `slog` defaults to `TextHandler`. Production deployments need structured JSON for log shippers (Loki, Splunk, Elastic) without hand-parsing.
+- **Primary use cases:**
+  - Container deployments where stdout is shipped to a structured store.
+  - Production troubleshooting using log-store queries instead of `grep`.
+  - Compliance-relevant logs requiring machine-readable formats.
+- **Proposed capability:** Add a `log.format` knob to `dashd.yaml` (`text` | `json`, default `text` in dev, `json` in production overlay) and select handler accordingly in `main.go`.
+- **Functional requirements:**
+  - Format selectable at startup; defaults documented.
+  - JSON handler honors the same level filter as text.
+  - All existing tests continue to pass under both formats.
+- **Non-functional requirements:**
+  - JSON throughput regression bounded.
+- **Business value:** Removes a friction point for production deployments and log-pipeline integration.
+- **Success metrics:** Reference container image emits JSON by default.
+- **Dependencies:** None.
+- **Spec references:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md) §13.
+
+---
+
+### L6. Per-component / per-resource `slog.With` context
+
+- **Category:** Cross-cutting / Observability
+- **Problem statement:** Every dispatch log line manually adds `"dpu", w.id`. The same pattern repeats in subscribe pump, counters poller, and reconciler. Trivial to forget, increases visual noise, and hard to maintain consistently.
+- **Primary use cases:**
+  - All worker logs auto-tagged with `dpu_id` without manual repetition.
+  - Subscribe pump logs auto-tagged with `dpu_id` and `endpoint`.
+  - Counters poller logs auto-tagged with `dpu_id` and `interval`.
+- **Proposed capability:** Capture a contextual `*slog.Logger` at module construction (`w.log = slog.With("dpu_id", w.id, "component", "dispatch")`) and use that logger throughout.
+- **Functional requirements:**
+  - Every module-scoped struct owns a `log` field initialized in its constructor.
+  - All call sites use the field-scoped logger.
+- **Non-functional requirements:**
+  - No new allocations on hot paths; loggers are reused.
+- **Business value:** Cleaner code, consistent logs, fewer "missing context" defects.
+- **Success metrics:** Lint forbids module-scoped calls to `slog.Info/Warn/Error` directly when a field logger exists.
+- **Dependencies:** L4 component tag.
+- **Spec references:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md) §13.
+
+---
+
+### L7. Leader-loss log with forensic fields
+
+- **Category:** dashd / Reliability
+- **Problem statement:** `slog.Warn("leaderLoop: lost leadership — tearing down and re-creating elector")` has no fields. Operators investigating "why did we step down" need lease TTL, time since last heartbeat, and the reason returned by the elector to write meaningful runbooks.
+- **Primary use cases:**
+  - Incident response: distinguish lease expiry vs explicit revoke vs etcd outage.
+  - Trend analysis: how often we lose leadership, how long the leader held the lease.
+  - Capacity planning: under-sized lease TTL surfaces as repeated losses.
+- **Proposed capability:** Enrich the leader-loss log with structured fields:
+  ```
+  lease_ttl, held_for, reason, last_heartbeat, elector_backend
+  ```
+- **Functional requirements:**
+  - Fields populated from the elector and a leader-state struct that tracks acquisition time.
+  - Companion `dashd_leader_loss_total` metric with reason label.
+- **Non-functional requirements:**
+  - No regression in leader-election path latency.
+- **Business value:** Faster incident response; data to size lease TTL correctly.
+- **Success metrics:** Reduction in time-to-diagnosis for leader-loss incidents.
+- **Dependencies:** None.
+- **Spec references:** [`specs/HLD/dashd-hld.md`](../../specs/HLD/dashd-hld.md) §11.
+
+---
+
+### L8. Centralized log-redaction guard
+
+- **Category:** Cross-cutting / Security + Observability
+- **Problem statement:** No central redaction wrapper for `slog`. Today no secrets are logged, but there is no failsafe; a future PR could trivially log `"token", tok` and ship the secret to log stores.
+- **Primary use cases:**
+  - Defence in depth against accidental secret leaks.
+  - Audit-friendly evidence that secret-shaped data is never persisted.
+  - Customer security review checklist.
+- **Proposed capability:** A `slog.Handler` wrapper that scrubs values for known-sensitive keys (`token`, `password`, `secret`, `authorization`, `bearer`) with a configurable allow/deny list.
+- **Functional requirements:**
+  - Wrap the production handler by default.
+  - Scrubbed values replaced with a marker (e.g. `"<redacted>"`).
+  - Configurable per-key allow list for legitimate debug needs.
+- **Non-functional requirements:**
+  - Negligible overhead vs unwrapped handler.
+- **Business value:** Compliance and security peace of mind; removes a recurring review question.
+- **Success metrics:** Unit tests cover all known sensitive keys; static analyzer flags new sensitive keys not in the dictionary.
+- **Dependencies:** L3 key dictionary.
+- **Spec references:** [`specs/HLD/next_gen_dpu_fleet_management_platform.md`](../../specs/HLD/next_gen_dpu_fleet_management_platform.md) §17.
+
+---
+
+### L9. Audit vs operational log policy
+
+- **Category:** Cross-cutting / Observability
+- **Problem statement:** Mutating events get logged both to `slog` and to the audit writer. They have drifted over time and operators do not know which is the canonical record.
+- **Primary use cases:**
+  - Compliance team needs unambiguous "source of truth" for who-did-what.
+  - SOC investigations rely on audit log; operational debugging relies on slog.
+  - Reduce log volume on the operational path.
+- **Proposed capability:** Document explicitly that audit log is the source of truth for security-relevant events; slog covers operational behavior only. Enforce with a lint that forbids `slog.Info("...apply...")`-style messages in code paths that already write audit entries.
+- **Functional requirements:**
+  - Policy document committed under `docs/`.
+  - Lint rule (custom analyzer) flags overlapping log + audit calls.
+  - Code paths updated to satisfy the lint.
+- **Non-functional requirements:**
+  - No loss of operational visibility; new audit-equivalent messages remain available at DEBUG.
+- **Business value:** Clearer compliance posture; smaller operational log volume.
+- **Success metrics:** Lint passes; documented policy adopted.
+- **Dependencies:** Existing audit infrastructure.
+- **Spec references:** [`docs/dashd-features/features.md`](./features.md) §2.
+
+---
+
+### L10. Subscribe pump reconnect logs with consecutive-failure context
+
+- **Category:** dashd / Subscribe pump
+- **Problem statement:** `slog.Warn("subscribe: stream error, will retry", "dpu", p.dpuID, "error", err, "backoff", backoff)` does not include the number of consecutive failures or the last successful connect time. Alerting cannot distinguish a single transient blip from a 50-retry storm.
+- **Primary use cases:**
+  - Alert when a DPU's pump has retried more than N times without success.
+  - Distinguish steady-state network flap from a real outage.
+  - Trend analysis on per-DPU connection stability.
+- **Proposed capability:** Track `consecutive_failures` and `last_success` on each pump; include them in retry logs and expose as Prometheus gauges.
+- **Functional requirements:**
+  - Fields included on every retry log.
+  - Reset on successful subscribe.
+  - Companion metrics `dashd_subscribe_consecutive_failures{dpu_id=...}` and `dashd_subscribe_last_success_seconds`.
+- **Non-functional requirements:**
+  - No additional allocations on the steady-state path.
+- **Business value:** Higher-quality alerts and easier triage of subscribe-pump issues.
+- **Success metrics:** Reduction in false-positive alerts; faster identification of degraded DPUs.
+- **Dependencies:** None.
+- **Spec references:** [`specs/LLD/dashd-lld.md`](../../specs/LLD/dashd-lld.md).
+
+---
+
+### Quick-win order (zero-risk, high-leverage)
+
+| Priority | Item | Effort |
+|---|---|---|
+| 1 | L1 request/trace id propagation | medium |
+| 2 | L2 sample hot-path debug logs | trivial |
+| 3 | L5 JSON-log production default | trivial |
+| 4 | L6 per-component `slog.With` context | small |
+| 5 | L3 + L4 standardize keys + component tag | small (lint-driven) |
+| 6 | L7 leader-loss forensic fields | trivial |
+| 7 | L8 redaction wrapper | small |
+| 8 | L10 subscribe reconnect context | trivial |
+| 9 | L9 audit vs operational policy | medium |
+
+---
+
 ## Appendix — Priority view
 
 The priority order below is reproduced from
