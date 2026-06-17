@@ -130,10 +130,10 @@ spec:
   priority: 100
   eni_names: [full-eni-app-01]
   rules:
-    - { priority: 100,  action: allow, protocol: tcp,  dst_port: "443" }
-    - { priority: 110,  action: allow, protocol: tcp,  dst_port: "80" }
-    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "22", src_prefix: "10.0.0.0/8" }
-    - { priority: 300,  action: allow, protocol: icmp }
+    - { priority: 100,  action: allow, protocols: [tcp],  dst_ports: ["443"] }
+    - { priority: 110,  action: allow, protocols: [tcp],  dst_ports: ["80"] }
+    - { priority: 200,  action: allow, protocols: [tcp],  dst_ports: ["22"], src_prefixes: ["10.0.0.0/8"] }
+    - { priority: 300,  action: allow, protocols: [icmp] }
     - { priority: 1000, action: deny }
 ---
 # ─── Policy: AclPolicy — outbound (DB privatelink + corp + deny rest) ────
@@ -147,7 +147,7 @@ spec:
   priority: 100
   eni_names: [full-eni-app-01]
   rules:
-    - { priority: 100,  action: allow, protocol: tcp, dst_prefix: "10.60.255.30/32", dst_port: "1433" }
-    - { priority: 200,  action: allow, protocol: tcp, dst_prefix: "192.168.60.0/24" }
-    - { priority: 300,  action: allow, protocol: udp, dst_port: "53" }
+    - { priority: 100,  action: allow, protocols: [tcp], dst_prefixes: ["10.60.255.30/32"], dst_ports: ["1433"] }
+    - { priority: 200,  action: allow, protocols: [tcp], dst_prefixes: ["192.168.60.0/24"] }
+    - { priority: 300,  action: allow, protocols: [udp], dst_ports: ["53"] }
     - { priority: 1000, action: deny }

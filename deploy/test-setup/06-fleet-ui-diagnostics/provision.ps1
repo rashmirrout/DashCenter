@@ -11,16 +11,39 @@
 #   pwsh ./provision.ps1 -UseBootstrap   # force bootstrap.py (skip dashctl)
 #   pwsh ./provision.ps1 -DryRun         # dashctl --dry-run (no fallback)
 #   pwsh ./provision.ps1 -Endpoint http://10.0.0.5:38443
+#   pwsh ./provision.ps1 -MaxRetries 10 -MaxWaitSeconds 180   # retry transient errors
 
 [CmdletBinding()]
 param(
     [string]$Endpoint = 'http://127.0.0.1:38443',
+    [int]$MaxRetries = 6,
+    [int]$MaxWaitSeconds = 90,
     [switch]$UseBootstrap,
     [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
+
+if ($MaxRetries -lt 1) { throw 'MaxRetries must be >= 1' }
+if ($MaxWaitSeconds -lt 1) { throw 'MaxWaitSeconds must be >= 1' }
+
+function Wait-ControlPlaneReady {
+    param([string]$Url, [int]$MaxSeconds)
+    $deadline = (Get-Date).AddSeconds($MaxSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $null = Invoke-WebRequest -Uri "$Url/admin/health" -Method Get -TimeoutSec 2 -UseBasicParsing
+            return
+        } catch { Start-Sleep -Seconds 2 }
+    }
+    throw "Control plane not healthy at $Url after ${MaxSeconds}s"
+}
+
+function Test-TransientApplyError {
+    param([string]$Text)
+    return $Text -match '(?i)network error|connection reset by peer|\bEOF\b|context deadline exceeded|i/o timeout|connection refused|server closed idle connection'
+}
 
 $manifestDir = Join-Path $PSScriptRoot 'manifest'
 if (-not (Test-Path $manifestDir)) {
@@ -61,9 +84,20 @@ if ($dashctl) {
     )
     foreach ($y in $yamls) { $args += '-f'; $args += $y.FullName }
     if ($DryRun) { $args += '--dry-run'; $args += 'server' }
-    & $dashctl @args
-    $exit = $LASTEXITCODE
-    if ($exit -ne 0) {
+    $adminEp = $Endpoint -replace ':38443', ':37443'
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        Wait-ControlPlaneReady -Url $adminEp -MaxSeconds $MaxWaitSeconds
+        Write-Host "==> dashctl apply (attempt $attempt/$MaxRetries)" -ForegroundColor Cyan
+        $out = (& $dashctl @args 2>&1 | Out-String)
+        $exit = $LASTEXITCODE
+        if ($exit -eq 0) { Write-Host $out.TrimEnd(); break }
+        Write-Warning $out.TrimEnd()
+        if ((Test-TransientApplyError -Text $out) -and ($attempt -lt $MaxRetries)) {
+            $backoff = [Math]::Min(20, $attempt * 2)
+            Write-Warning "transient failure; retrying in ${backoff}s..."
+            Start-Sleep -Seconds $backoff
+            continue
+        }
         Write-Host "!! dashctl apply failed (exit $exit). Try: pwsh ./provision.ps1 -UseBootstrap" -ForegroundColor Red
         exit $exit
     }

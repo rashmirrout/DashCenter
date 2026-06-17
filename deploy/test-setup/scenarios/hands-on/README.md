@@ -49,6 +49,18 @@ hands-on/
     ├── acl-bundle-experiments.yaml
     ├── route-bundle-experiments.yaml
     └── ha-bundle-experiments.yaml
+└── full-specs/                ← production-style dependency-rich scenarios
+    ├── eni-full.yaml
+    ├── vnet-full.yaml
+    ├── route-full.yaml
+    ├── mapping-full.yaml
+    ├── acl-full.yaml
+    ├── service-tunnel-full.yaml
+    ├── private-link-full.yaml
+    ├── ha-full.yaml
+    ├── test-roundtrip.ps1
+    ├── test-roundtrip.sh
+    └── README.md
 ```
 
 ---
@@ -105,6 +117,38 @@ the top of each file for instructions.
 | `acl-bundle-experiments.yaml` | ACL + deps in 1 file (3 objects) | Auto-wired eni_names |
 | `route-bundle-experiments.yaml` | Route + tunnel + deps (4 objects) | ServiceTunnel in a bundle |
 | `ha-bundle-experiments.yaml` | HA set in 1 file | Simplest bundle |
+
+---
+
+## Full-spec experiments
+
+Use `full-specs/` when you want larger, realistic manifests with dependencies
+inlined (VNet + tunnel + ENI + mapping + route + ACL + HA where applicable).
+
+Quick run:
+
+```powershell
+# PowerShell roundtrip (apply → verify → delete)
+pwsh deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.ps1 -Action test
+```
+
+```bash
+# Bash roundtrip (apply → verify → delete)
+./deploy/test-setup/scenarios/hands-on/full-specs/test-roundtrip.sh test
+```
+
+Key files:
+
+| File | Focus |
+|---|---|
+| `eni-full.yaml` | ENI + all core dependencies |
+| `vnet-full.yaml` | VNet-centric 3-tier scenario |
+| `route-full.yaml` | all route next-hop variants (incl. ECMP) |
+| `mapping-full.yaml` | all mapping actions (`vnet_encap`, `service_tunnel`, `drop`) |
+| `acl-full.yaml` | inbound/outbound ACL coverage |
+| `service-tunnel-full.yaml` | all tunnel actions (`nat`, `inspect`, `privatelink`, `ipsec`, `scrub`, `vxlan_peer`) |
+| `private-link-full.yaml` | PrivateLink pattern via ServiceTunnel |
+| `ha-full.yaml` | HA pair with dependencies |
 
 ---
 

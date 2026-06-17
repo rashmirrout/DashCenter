@@ -8,9 +8,12 @@
 #
 # AclRule fields exercised:
 #   priority, action (allow|deny)
-#   src_prefix / dst_prefix      (CIDR)
-#   src_port   / dst_port        (single port, port-list "80,8080", range "1024-65535")
-#   protocol                     (tcp|udp|icmp|6|17 — both name and number)
+#   src_prefixes / dst_prefixes  (CIDR arrays)
+#   src_ports   / dst_ports      (string arrays: single port, port-list, range "1024-65535")
+#   protocols                    (array: tcp|udp|icmp|6|17 — both name and number)
+#
+# NOTE: AclRule match fields are REPEATED (plural arrays) in dashcenter.v1.
+# The singular scalar forms are silently dropped by dashd's JSON decoder.
 #
 # USAGE
 #   apply : dashctl apply -f deploy/test-setup/scenarios/hands-on/full-specs/acl-full.yaml --force
@@ -65,21 +68,21 @@ spec:
   eni_names: [full-acl-eni]
   rules:
     # — HTTPS from anywhere
-    - { priority: 100,  action: allow, protocol: tcp,  dst_port: "443" }
+    - { priority: 100,  action: allow, protocols: [tcp],  dst_ports: ["443"] }
     # — HTTP from anywhere
-    - { priority: 110,  action: allow, protocol: tcp,  dst_port: "80" }
+    - { priority: 110,  action: allow, protocols: [tcp],  dst_ports: ["80"] }
     # — SSH only from mgmt CIDR
-    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "22",  src_prefix: "10.0.0.0/8" }
+    - { priority: 200,  action: allow, protocols: [tcp],  dst_ports: ["22"],  src_prefixes: ["10.0.0.0/8"] }
     # — ICMP echo from corp range only
-    - { priority: 300,  action: allow, protocol: icmp,                  src_prefix: "192.168.0.0/16" }
+    - { priority: 300,  action: allow, protocols: [icmp],                  src_prefixes: ["192.168.0.0/16"] }
     # — DNS replies (UDP src=53)
-    - { priority: 400,  action: allow, protocol: udp,  src_port: "53" }
+    - { priority: 400,  action: allow, protocols: [udp],  src_ports: ["53"] }
     # — High-port ephemerals for response traffic (port range)
-    - { priority: 500,  action: allow, protocol: tcp,  dst_port: "1024-65535", src_prefix: "10.0.0.0/8" }
+    - { priority: 500,  action: allow, protocols: [tcp],  dst_ports: ["1024-65535"], src_prefixes: ["10.0.0.0/8"] }
     # — Protocol-number form (6 = TCP) plus dst CIDR
-    - { priority: 600,  action: allow, protocol: "6",  dst_port: "9090", dst_prefix: "192.168.65.0/24" }
+    - { priority: 600,  action: allow, protocols: ["6"],  dst_ports: ["9090"], dst_prefixes: ["192.168.65.0/24"] }
     # — Explicit deny of legacy telnet (defense-in-depth)
-    - { priority: 700,  action: deny,  protocol: tcp,  dst_port: "23" }
+    - { priority: 700,  action: deny,  protocols: [tcp],  dst_ports: ["23"] }
     # — Default deny
     - { priority: 1000, action: deny }
 ---
@@ -93,12 +96,12 @@ spec:
   eni_names: [full-acl-eni]
   rules:
     # — DNS lookups (UDP/53) anywhere
-    - { priority: 100,  action: allow, protocol: udp,  dst_port: "53" }
+    - { priority: 100,  action: allow, protocols: [udp],  dst_ports: ["53"] }
     # — NTP
-    - { priority: 110,  action: allow, protocol: udp,  dst_port: "123" }
+    - { priority: 110,  action: allow, protocols: [udp],  dst_ports: ["123"] }
     # — DB connection to fixed /32
-    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "1433", dst_prefix: "10.60.255.40/32" }
+    - { priority: 200,  action: allow, protocols: [tcp],  dst_ports: ["1433"], dst_prefixes: ["10.60.255.40/32"] }
     # — Intra-VNet anything
-    - { priority: 300,  action: allow, dst_prefix: "192.168.65.0/24" }
+    - { priority: 300,  action: allow, dst_prefixes: ["192.168.65.0/24"] }
     # — Block direct internet egress
     - { priority: 1000, action: deny }

@@ -53,16 +53,16 @@ spec:
   rules:
     - priority: 100                        # allow HTTPS
       action: allow
-      dst_port: "443"
-      protocol: tcp
+      dst_ports: ["443"]
+      protocols: [tcp]
     - priority: 200                        # allow SSH from mgmt
       action: allow
-      src_prefix: "10.0.0.0/8"
-      dst_port: "22"
-      protocol: tcp
+      src_prefixes: ["10.0.0.0/8"]
+      dst_ports: ["22"]
+      protocols: [tcp]
     - priority: 300                        # allow ICMP ping
       action: allow
-      protocol: icmp
+      protocols: [icmp]
     - priority: 1000                       # deny everything else
       action: deny
 ---

@@ -141,8 +141,8 @@ spec:
   priority: 100
   eni_names: [full-vnet-web-01, full-vnet-web-02, full-vnet-app-01]
   rules:
-    - { priority: 100,  action: allow, protocol: tcp,  dst_port: "443" }
-    - { priority: 110,  action: allow, protocol: tcp,  dst_port: "80" }
-    - { priority: 200,  action: allow, protocol: tcp,  dst_port: "8080", src_prefix: "192.168.61.0/24" }
-    - { priority: 300,  action: allow, protocol: icmp, src_prefix: "10.0.0.0/8" }
+    - { priority: 100,  action: allow, protocols: [tcp],  dst_ports: ["443"] }
+    - { priority: 110,  action: allow, protocols: [tcp],  dst_ports: ["80"] }
+    - { priority: 200,  action: allow, protocols: [tcp],  dst_ports: ["8080"], src_prefixes: ["192.168.61.0/24"] }
+    - { priority: 300,  action: allow, protocols: [icmp], src_prefixes: ["10.0.0.0/8"] }
     - { priority: 1000, action: deny }

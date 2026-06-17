@@ -117,5 +117,5 @@ spec:
   priority: 100
   eni_names: [full-map-eni]
   rules:
-    - { priority: 100,  action: allow, protocol: tcp, dst_port: "443" }
+    - { priority: 100,  action: allow, protocols: [tcp], dst_ports: ["443"] }
     - { priority: 1000, action: deny }

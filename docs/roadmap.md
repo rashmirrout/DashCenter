@@ -293,7 +293,149 @@ work:
 
 ---
 
-## 6. How to use this document
+## 6. Production-grade feature backlog (2026-06-17)
+
+> Derived from a full read of all HLDs, LLDs, and impl-plan trackers across
+> dashd / dashctl / dashw / dash-sim. Each item is grounded in a specific
+> open section of those documents. Priority order is at the bottom of this section.
+
+### 6.1 dashd (9 features)
+
+| # | Feature | Spec ref | Status |
+|---|---|---|---|
+| F1 | **Saga coordinator + `ApplyBatch`** — atomic cross-DPU batch apply with rollback on partial failure | `impl-plan-advanced.md` P2-M12 | ⏳ |
+| F2 | **gNMI Subscribe bridge** — bridge `WatchEvents` → `gnmi.Subscribe`; drop-in for OpenConfig telemetry stacks | `impl-plan-advanced.md` P2-M12; `dashd-hld.md` §15 | ⏳ |
+| F3 | **Controllerless mode (gossip + Raft embedded)** — DPU-embedded operation without external controller | `dashd-hld.md` §10; `impl-phases.md` PF | ⏳ |
+| F4 | **OIDC / AAD identity provider** — plug real OIDC into the auth stub interface; PKCE flow, token introspection, role claim mapping | `impl-plan-advanced.md` P2-M9; out-of-scope stub exists | ⏳ |
+| F5 | **TraceFlow + ExplainMatch on real DPU agents** — PE-4 parity pass via `dash-redis-adapter`; closes sim-vs-hardware gap | `impl-phases.md` PE-4 | ⏳ |
+| F6 | **Counter streaming with server-side aggregation** — per-VNet / per-tenant / per-ENI roll-ups with configurable sampling windows; reduce cardinality on downstream metrics | `impl-phases.md` PE-3c; `features.md` §10A | ⏳ |
+| F7 | **Admission webhook interface** — pluggable webhook at admission gate for IPAM integration, IP-conflict detection, custom capacity rules | `dashd-hld.md` §6; capacity gate already exists | ⏳ |
+| F8 | **Multi-region federation layer** — cross-region read-only aggregation endpoint for global fleet visibility; per-namespace isolation enforced | `dashd-hld.md` §15 | ⏳ |
+| F9 | **Drift auto-remediation mode** — configurable continuous reconcile with interval + back-off knob in `dashd.yaml`; reconciler is already idempotent | `dashd-hld.md` §9; `impl-plan-advanced.md` §12 | ⏳ |
+
+### 6.2 dashctl (7 features)
+
+| # | Feature | Spec ref | Status |
+|---|---|---|---|
+| F10 | **gRPC transport (Phase 2)** — 31 gates open; unlocks `events --watch`, `migration stream`, `dpu drain --watch` with live progress; `Client` interface already abstracted | `dashctl-impl-phases.md` Phase 2 | ⏳ |
+| F11 | **`debug` sub-commands** — `debug put-raw`, `debug get-raw`, `debug curl`, `debug admin`; Phase 1 extension spec'd in LLD but not implemented | `specs/LLD/dashctl-debug.md` gates C1-G29..G32 | ⏳ |
+| F12 | **`dashctl diff --live` three-way merge** — base manifest vs target manifest vs server; useful for GitOps change review and PR gates | `dashctl-hld.md` §11 | ⏳ |
+| F13 | **`dashctl rollout`** — staged fleet changes with progress tracking, pause/resume, automatic rollback threshold; builds on F1 + F10 | `dashctl-hld.md` §7; `impl-plan-advanced.md` P2-M8 | ⏳ |
+| F14 | **Plugin framework (krew-style)** — `dashctl-<name>` binary discovery on PATH; unlocks third-party IPAM adapters, Terraform state sync, custom audit exporters | `dashctl-hld.md` §17 explicit future goal | ⏳ |
+| F15 | **`dashctl simulate --file` batch dry-run** — run entire manifest through throwaway namespace; returns FK validation, capacity projection, capability matrix check | `dashctl-hld.md` §7; `SimulateApply` RPC already exists | ⏳ |
+| F16 | **NDJSON streaming output (`-o ndjson`)** — newline-delimited JSON per resource; enables `dashctl get eni | jq ...` without buffering | `dashctl-hld.md` §10 | ⏳ |
+
+### 6.3 dashw (8 features)
+
+| # | Feature | Spec ref | Status |
+|---|---|---|---|
+| F17 | **WebSocket ↔ gRPC bridge (Phase B)** — real-time DPU status, events, counters, audit replace REST polling; BFF bridge design fully specified | `dashw-web-impl-plan.md` Phase B; `dashw-web-hld.md` §8 | ⏳ |
+| F18 | **HA Orchestration Theater (Phase D)** — animated role-flip timeline, flow-sync progress ring, split-brain alert, one-click planned switchover | `dashw-web-vision.md` §3.3; all APIs landed in dashd | ⏳ |
+| F19 | **Migration Control Center (Phase D)** — 10-phase Gantt progress rail, flow-drain waterfall, pause/rollback controls | `dashw-web-vision.md` §3.4; migration SM complete in dashd | ⏳ |
+| F20 | **Capacity Planner + What-If Simulator (Phase D)** — "add N ENIs" → per-DPU impact projection before committing; uses existing capacity admission data | `dashw-web-vision.md` §3.6; `dashw-web-impl-plan.md` D3 | ⏳ |
+| F21 | **ACL Impact Analyzer (Phase E)** — per-rule hit-counter heatmap, dead-rule detection, match-explanation waterfall using `ExplainMatch`; turns diagnostic output into policy audit | `dashw-web-vision.md` §3.8; PE-G9 counter data landed | ⏳ |
+| F22 | **Policy Dependency Graph (Phase E)** — interactive force-directed graph of ENI → VNet → RoutePolicy → ServiceTunnel + ACLPolicy; highlights cascading-delete risks | `dashw-web-vision.md` §3.15; data available via list APIs | ⏳ |
+| F23 | **A-PH Production Hardening (Phase A sub-phase)** — 26 gates: CSP headers, CSRF, SameSite cookies, input sanitisation, rate-limit UI, BFF health-degraded, connection pooling, Lighthouse budget, WCAG 2.1 AA, frontend error reporting, BFF tracing | `dashw-web-impl-plan.md` A-PH (0/26 gates done) | ⏳ |
+| F24 | **Multi-cluster switcher** — cluster picker reading dashctl-style contexts; switch fleets without re-deploying dashw; BFF is stateless | `dashw-web-hld.md` §16 explicit non-goal flagged as post-v1 | ⏳ |
+
+### 6.4 dash-sim / dash-redis-adapter (3 features)
+
+| # | Feature | Spec ref | Status |
+|---|---|---|---|
+| F25 | **Full flow table + fast/slow path simulation** — flow-table create/age/delete/sync-state and fast/slow path distinction; closes PE-4 sim-vs-hardware parity gap | `impl-phases.md` PE-4; `specs/LLD/dash-sim.md` §9 | ⏳ |
+| F26 | **HA flow-owner attribute in simulator** — per-ENI `flow_owner` attribute in sim HA state machine; needed so flow-drain progress metrics are testable without real hardware | `impl-phases.md` PE-4 sim parity; `dashd-hld.md` §11 | ⏳ |
+| F27 | **Counter anomaly injection endpoint** — admin endpoint to inject spike/drop-to-zero/stale counters into simulator; enables dashw Counter Correlation Matrix (F21) test coverage | `dashw-web-vision.md` §3.7; no spec yet | ⏳ 🆘 |
+
+### 6.5 Cross-cutting (3 features)
+
+| # | Feature | Spec ref | Status |
+|---|---|---|---|
+| F28 | **GitOps reconciliation controller** — lightweight operator polling a Git repo for manifest changes and driving `dashctl apply -f`; manifest format and idempotent apply are production-grade | `dashctl-hld.md` §2 non-goals (downstream concern); `dashd-hld.md` §7 | ⏳ 🆘 |
+| F29 | **Terraform provider** — each resource kind maps to a Terraform resource; generation-based optimistic concurrency provides the lock Terraform expects; REST API fully documented | `dashd-hld.md` §7; `features.md` §5 | ⏳ 🆘 |
+| F30 | **Prometheus alerting rules + Grafana dashboard bundle** — curated alerting ruleset (leader-loss, capacity headroom, drift-outstanding, reconcile-lag, ENI count per DPU) + Grafana JSON; `/admin/metrics` already exports Prometheus format | `dashd-hld.md` §13; `features.md` §11 | ⏳ 🆘 |
+
+### 6.6 Priority order
+
+| Priority | Feature | Why |
+|---|---|---|
+| 1 | F11 `debug` sub-commands | Phase 1 extension — zero new deps; high immediate support value |
+| 2 | F10 dashctl gRPC Phase 2 | Unlocks streaming commands; prerequisite for F17 WebSocket bridge |
+| 3 | F17 WebSocket bridge | Single biggest dashw UX unlock; all dashd APIs are ready |
+| 4 | F23 A-PH production hardening | 26 security/resilience/a11y gates with zero new APIs needed |
+| 5 | F1 Saga / ApplyBatch | Enables atomic fleet changes; prerequisite for F13 rollout |
+| 6 | F13 `dashctl rollout` | Builds on F1 + F10; directly usable for fleet operations |
+| 7 | F18 + F19 HA Theater + Migration UI | All server-side done; pure UI work |
+| 8 | F6 + F21 Counter streaming + ACL analyzer | Counter infra landed; UI + aggregation layer needed |
+| 9 | F22 Policy dependency graph | Pure frontend; no new APIs; high operator safety value |
+| 10 | F4 OIDC integration | Required before any production deployment outside a trusted LAN |
+
+### 6.7 Industry-hardening backlog (Phase 2 — F31–F60)
+
+A second 30-feature wave focused on **quality and reliability, scalability and
+performance, UI/UX, and high-demand industry features**, captured in detail in
+[`docs/dashd-features/FEATURE_ASK.md`](./dashd-features/FEATURE_ASK.md) sections 6–9. Summary:
+
+| ID | Feature (one line) | Theme |
+|---|---|---|
+| F31 | Chaos engineering harness with programmable failure injection | Reliability |
+| F32 | Disaster recovery — backup, restore, point-in-time recovery | Reliability |
+| F33 | Zero-downtime dashd rolling + canary upgrades | Reliability |
+| F34 | Versioned API schema + formal deprecation policy | Reliability |
+| F35 | Cluster-wide state consistency audit (Merkle tree) | Reliability |
+| F36 | Dead-letter queue + poison-message handling | Reliability |
+| F37 | Per-tenant quotas + fair-share scheduling | Reliability |
+| F38 | Deep health checks (write/dep/leader probes) | Reliability |
+| F39 | Sharded reconciliation workers | Scale |
+| F40 | Watch bookmarks + cursor-based pagination | Scale |
+| F41 | ETag / If-None-Match read optimization | Scale |
+| F42 | Compressed gRPC + HTTP streaming | Scale |
+| F43 | Read-replica routing in HA | Scale |
+| F44 | Coalesced server-side write windows | Scale |
+| F45 | Command palette (Cmd+K) + keyboard shortcuts | UI/UX |
+| F46 | Customizable dashboards (drag-and-drop widgets) | UI/UX |
+| F47 | Saved views, bookmarks, per-user workspace | UI/UX |
+| F48 | Time-machine point-in-time state replay | UI/UX |
+| F49 | Bulk actions (multi-select + batch ops) | UI/UX |
+| F50 | Inline diff visualization for apply preview | UI/UX |
+| F51 | Policy-as-Code (OPA / Rego) | Industry |
+| F52 | Compliance reporting pack (SOC2 / FedRAMP / PCI / ISO27001) | Industry |
+| F53 | KMS / HashiCorp Vault for secrets | Industry |
+| F54 | SBOM + signed images (sigstore / cosign) | Industry |
+| F55 | Air-gapped deployment + offline update bundles | Industry |
+| F56 | ARM64 first-class support | Industry |
+| F57 | Webhook subscription framework | Industry |
+| F58 | SIEM integration for audit log shipping | Industry |
+| F59 | Approval workflows + change windows | Industry |
+| F60 | Cost allocation + chargeback per tenant | Industry |
+
+### 6.8 Phase-2 priority order
+
+| Priority | Feature | Why now |
+|---|---|---|
+| 11 | F38 deep health checks | Smallest investment, immediate ops value |
+| 12 | F40 watch bookmarks + pagination | Unblocks scale + reduces UI memory |
+| 13 | F32 backup / restore / PITR | Top customer ask; compliance prerequisite |
+| 14 | F33 zero-downtime upgrades | Direct effect on deploy frequency |
+| 15 | F35 consistency audit | Trust and compliance signal |
+| 16 | F39 sharded reconciliation | Validates 10k-DPU scale story |
+| 17 | F54 SBOM + signed images | Common procurement blocker; low effort |
+| 18 | F58 SIEM integration | High-leverage security checkbox |
+| 19 | F51 OPA policy-as-code | Industry-standard governance |
+| 20 | F37 tenant quotas + fair share | Multi-tenancy readiness |
+| 21 | F45 + F47 command palette + saved views | Visible UX win for power operators |
+| 22 | F48 time-machine | Differentiating compliance / forensics capability |
+| 23 | F53 KMS / Vault | Common enterprise security requirement |
+| 24 | F59 approval workflows | Enables regulated production use |
+| 25 | F60 cost allocation | FinOps maturity; internal chargeback |
+| 26 | F31 chaos harness | Proves resilience claims continuously |
+| 27 | F52 compliance pack | Sales accelerator for regulated industries |
+| 28 | F55 air-gapped bundles | Unlocks government markets |
+| 29 | F56 ARM64 support | DPU-native + cloud-cost alignment |
+| 30 | F36 dead-letter queue | Operational polish for fleet ops |
+
+---
+
+## 7. How to use this document
 
 If you are a **contributor**:
 1. Pick a 🆘 item near the top of § 4 or any 🆘 row in § 2 / § 3.
