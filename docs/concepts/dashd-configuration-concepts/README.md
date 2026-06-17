@@ -1,8 +1,9 @@
-# concepts-demo — runnable evidence for `docs/concepts/dashd-configuration-concepts.md`
+# dashd-configuration-concepts — runnable evidence
 
-This folder contains the **runnable experiment scripts** that produced
-every command + every dashd response in
-[`docs/concepts/dashd-configuration-concepts.md`](../../docs/concepts/dashd-configuration-concepts.md).
+This folder is the **reproduction harness** for the narrative document
+[`../dashd-configuration-concepts.md`](../dashd-configuration-concepts.md). Every
+command and every dashd response embedded in that document was captured
+by the scripts in this folder against a live 3-node dashd fleet.
 
 ## Files
 
@@ -12,18 +13,18 @@ every command + every dashd response in
 | `run_experiments_part2.py`  | Part 2: trace-flow against the `concepts-demo` namespace, delete-order experiment (§8), cleanup. |
 | `run_experiments_part3.py`  | Part 3: trace-flow + explain-match against the pre-programmed `default` namespace ENIs (the captures used in §7). |
 | `payloads/*.json`           | Example JSON payloads used while iterating. |
-| `run*.log`                  | Captured transcripts (regenerated each run). **Not committed** — see `.gitignore`. |
+| `run*.log`                  | Captured transcripts (regenerated each run). **Not committed** — see [`.gitignore`](../../../.gitignore). |
 
 ## Reproduce
 
 You need a running dashd fleet. The defaults assume the lab fleet from
-`deploy/test-setup/05-full-console/` (leader on REST `:28463`).
+[`deploy/test-setup/05-full-console/`](../../../deploy/test-setup/05-full-console/) (leader on REST `:28463`).
 
 ```powershell
 cd c:\WorkSpace\PS\PublicRepo\DashCenter
-python scratch/concepts-demo/run_experiments.py        > scratch/concepts-demo/run.log       2>&1
-python scratch/concepts-demo/run_experiments_part2.py  > scratch/concepts-demo/run-part2.log 2>&1
-python scratch/concepts-demo/run_experiments_part3.py  > scratch/concepts-demo/run-part3.log 2>&1
+python docs/concepts/dashd-configuration-concepts/run_experiments.py        > docs/concepts/dashd-configuration-concepts/run.log       2>&1
+python docs/concepts/dashd-configuration-concepts/run_experiments_part2.py  > docs/concepts/dashd-configuration-concepts/run-part2.log 2>&1
+python docs/concepts/dashd-configuration-concepts/run_experiments_part3.py  > docs/concepts/dashd-configuration-concepts/run-part3.log 2>&1
 ```
 
 > If the leader has moved, update `LEADER_REST` in each script. Find the

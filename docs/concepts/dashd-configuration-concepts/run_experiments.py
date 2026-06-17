@@ -10,7 +10,7 @@ Runs:
 Every command + response is printed in a clear, copy-pasteable block.
 
 Usage:
-  python scratch/concepts-demo/run_experiments.py
+  python docs/concepts/dashd-configuration-concepts/run_experiments.py
 """
 
 from __future__ import annotations
@@ -509,7 +509,7 @@ def main() -> int:
 
     print()
     print(SEP)
-    print("  DONE — see scratch/concepts-demo/run.log for the full transcript")
+    print("  DONE — see docs/concepts/dashd-configuration-concepts/run.log for the full transcript")
     print(SEP)
     return 0
 
