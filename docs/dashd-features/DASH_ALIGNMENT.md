@@ -31,6 +31,38 @@
 
 ---
 
+## 📚 Reading along with the upstream DASH project
+
+Open this document side-by-side with the upstream DASH repository — every
+proposal cites the exact spec section it is grounded in. Use the links
+below as your reading companion:
+
+**Project root:**
+- [`sonic-net/DASH`](https://github.com/sonic-net/DASH/tree/main) — main repository
+- [`DASH/documentation/`](https://github.com/sonic-net/DASH/tree/main/documentation) — all HLDs (top-level table of contents)
+- [`DASH/dash-pipeline/`](https://github.com/sonic-net/DASH/tree/main/dash-pipeline) — P4 + BMv2 reference dataplane
+- [`DASH/test/`](https://github.com/sonic-net/DASH/tree/main/test) — PTF and SAI-Thrift conformance tests
+- [`sonic-net/sonic-dash-api`](https://github.com/sonic-net/sonic-dash-api) — vendored protobuf schema (29 kinds)
+
+**Per-section reading list:**
+
+| This document | Upstream DASH companion |
+|---|---|
+| §3 alignment matrix | [`sonic-dash-api/proto/`](https://github.com/sonic-net/sonic-dash-api/tree/master/proto) (the 29 kinds) |
+| §A object northbound | [`dash-acl.md`](https://github.com/sonic-net/DASH/blob/main/documentation/acl/dash-acl.md), [`dash-routing-actions.md`](https://github.com/sonic-net/DASH/blob/main/documentation/dataplane/dash-routing-actions.md), [`dash-metering.md`](https://github.com/sonic-net/DASH/blob/main/documentation/general/dash-metering.md), [`dash-private-link.md`](https://github.com/sonic-net/DASH/blob/main/documentation/general/dash-private-link.md) |
+| §B HA orchestration | [`ha-api-hld.md`](https://github.com/sonic-net/DASH/blob/main/documentation/high-avail/ha-api-hld.md), [`high-availability-and-scale.md`](https://github.com/sonic-net/DASH/blob/main/documentation/high-avail/high-availability-and-scale.md) |
+| §C pipeline observability | [`sdn-features-packet-transforms.md`](https://github.com/sonic-net/DASH/blob/main/documentation/general/sdn-features-packet-transforms.md), [`dash-routing-actions.md`](https://github.com/sonic-net/DASH/blob/main/documentation/dataplane/dash-routing-actions.md) |
+| §D cross-fleet diagnostics | [`dash-flow-api.md`](https://github.com/sonic-net/DASH/blob/main/documentation/dataplane/dash-flow-api.md), [`dash-flow-resimulation.md`](https://github.com/sonic-net/DASH/blob/main/documentation/dataplane/dash-flow-resimulation.md) |
+| §E conformance | [`dash-bmv2-data-plane-app.md`](https://github.com/sonic-net/DASH/blob/main/documentation/dataplane/dash-bmv2-data-plane-app.md), [`DASH/test/`](https://github.com/sonic-net/DASH/tree/main/test) |
+| §F modern diagnostics | (DashCenter-native; no upstream DASH spec) |
+
+> **Tip.** Each individual feature (D1–D32) ends with a `Spec refs:` line
+> linking directly to the relevant upstream document anchor — click those
+> while reading the feature, no need to scroll back here. The full
+> citation list is in [§8 Appendix — Spec references](#8-appendix--spec-references).
+
+---
+
 ## 1. Executive summary
 
 DashCenter today is a strong **control-plane skeleton** with seven northbound
