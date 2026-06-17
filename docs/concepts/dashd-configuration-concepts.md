@@ -28,9 +28,9 @@
 >
 > **Companion artefacts.**
 > All curl invocations + dashd responses in this doc were captured by:
-> `scratch/concepts-demo/run_experiments.py` (and `run_experiments_part2.py`,
+> `dashd-configuration-concepts/run_experiments.py` (and `run_experiments_part2.py`,
 > `run_experiments_part3.py`). Raw transcripts are in
-> `scratch/concepts-demo/run.log`, `run-part2.log`, `run-part3.log`.
+> `dashd-configuration-concepts/run.log`, `run-part2.log`, `run-part3.log`.
 
 ---
 
@@ -519,7 +519,7 @@ build actually enforces.)
 ## 4. What can fail — wrong-order catalogue (live captures)
 
 > **All transcripts in this section are real**, captured by
-> `scratch/concepts-demo/run_experiments.py` against a live 3-node dashd
+> `dashd-configuration-concepts/run_experiments.py` against a live 3-node dashd
 > cluster (leader = `dashd-3`, REST `:28463`) on 2026-06-13.
 
 ### A.1 — Create ENI before its VNET
@@ -1351,6 +1351,6 @@ python deploy/test-setup/05-full-console/manifest/bootstrap.py \
 **Captured against**: `dashcenter/dashd:dev` 3-node fleet
 (`dc-console-dashd-1/2/3`), leader = `dashd-3` at REST `:28463`,
 inventory = 10 DPUs UP.
-**Reproduce yourself**: `python scratch/concepts-demo/run_experiments.py`
+**Reproduce yourself**: `python docs/concepts/dashd-configuration-concepts/run_experiments.py`
 then `... part2.py` then `... part3.py`. Logs land in
-`scratch/concepts-demo/run*.log`.
+`docs/concepts/dashd-configuration-concepts/run*.log`.

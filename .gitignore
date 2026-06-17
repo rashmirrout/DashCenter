@@ -269,9 +269,14 @@ Cargo.lock                       # libraries: ignore; binaries: commit. Re-evalu
 .DS_Store
 Thumbs.db
 
-# ---- Scratch / experiments ----
-# scratch/ is for local experimentation (e.g., docs/concepts/* evidence
-# scripts). Scripts + READMEs are committed; large generated transcripts
-# (already matched by *.log above) and ephemeral payloads are not.
+# ---- Concept-doc reproduction artefacts ----
+# docs/concepts/<doc-name>/ folders hold runnable harnesses that produce
+# evidence for the matching narrative document. Scripts + payloads are
+# committed; large generated transcripts and ephemeral artefacts are not.
+docs/concepts/**/*.log
+docs/concepts/**/*.tmp
+
+# ---- Scratch / experiments (legacy) ----
+# Kept for any future ad-hoc experimentation that should not be committed.
 scratch/**/*.log
 scratch/**/*.tmp
